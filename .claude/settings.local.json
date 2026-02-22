@@ -1,7 +1,20 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:www.ti.com)",
+      "WebFetch(domain:www.digikey.com)",
+      "WebFetch(domain:studylib.net)",
+      "WebFetch(domain:e2e.ti.com)",
+      "WebFetch(domain:www.vishay.com)",
+      "WebFetch(domain:www.kingbrightusa.com)",
+      "WebFetch(domain:www.sunledusa.com)",
+      "WebFetch(domain:wiki.console5.com)",
+      "WebFetch(domain:kiutils.readthedocs.io)",
+      "Bash(cd \"C:/Users/alexl/Documents/Github/discrete-nes\" && venv/Scripts/python boards/ram-prototype/scripts/generate_ram.py 2>&1)",
+      "Bash(ls:*)",
+      "Bash(cd \"C:/Users/alexl/Documents/Github/discrete-nes\" && venv/Scripts/python boards/ram-prototype/scripts/generate_ram.py)",
+      "Bash(cd /c/Users/alexl/Documents/Github/discrete-nes && venv/Scripts/python boards/ram-prototype/scripts/generate_ram.py)"
     ],
     "deny": [],
     "ask": []
