@@ -1,17 +1,19 @@
 """
 Schematic generation utilities using kiutils.
 
-Provides high-level functions for creating KiCad schematics with discrete logic
-gates and LED indicators.
+Provides high-level functions for creating KiCad schematics with TI Little Logic
+(SN74LVC1G) single-gate ICs and 0402 SMD LED indicators.
 """
 
 from kiutils.schematic import Schematic
 from kiutils.symbol import SymbolInstance
 from typing import List, Tuple
 
+from .common import PART_LOOKUP, get_part_number, LED_RESISTOR_VALUES
+
 
 class SchematicGenerator:
-    """Helper class for generating KiCad schematics."""
+    """Helper class for generating KiCad schematics with TI Little Logic."""
 
     def __init__(self, title: str = "Discrete Logic Circuit"):
         """
@@ -26,43 +28,53 @@ class SchematicGenerator:
 
     def add_gate_with_led(
         self,
-        gate_type: str,
+        gate_function: str,
         position: Tuple[float, float],
         led_color: str = "red"
     ) -> Tuple[SymbolInstance, SymbolInstance, SymbolInstance]:
         """
-        Add a logic gate with LED indicator and current-limiting resistor.
+        Add a single-gate IC with 0402 LED indicator and current-limiting resistor.
+
+        Each TI Little Logic IC contains exactly one gate, so there is a 1:1
+        mapping between gate instances and IC packages.
 
         Args:
-            gate_type: Type of gate (e.g., "74HC00", "74HC02")
+            gate_function: Gate function name (e.g., "and", "nand", "not")
+                          Maps to SN74LVC1G part number via PART_LOOKUP
             position: (x, y) position in mm
             led_color: LED color for resistor value calculation
 
         Returns:
             Tuple of (gate_symbol, led_symbol, resistor_symbol)
         """
+        # Resolve part number from function name
+        part_number = get_part_number(gate_function)
+
+        # Each DSBGA package = 1 gate = 1 IC = 1 schematic symbol
+        # No multi-gate-per-package allocation needed
+
         # This is a placeholder - actual implementation will use kiutils
         # to create symbol instances and wire them together
-        raise NotImplementedError("Will be implemented with kiutils")
+        raise NotImplementedError(f"Will place {part_number} (DSBGA) at {position}")
 
     def add_flip_flop_with_led(
         self,
-        ff_type: str,
         position: Tuple[float, float],
-        led_per_output: bool = True
+        has_set_reset: bool = False
     ) -> List[SymbolInstance]:
         """
-        Add a flip-flop with LED indicators on outputs.
+        Add a D flip-flop with LED indicator on Q output.
 
         Args:
-            ff_type: Type of flip-flop (e.g., "74HC74")
             position: (x, y) position in mm
-            led_per_output: If True, add LED to each Q output
+            has_set_reset: If True, use SN74LVC1G74 (X2SON, has preset/clear)
+                          If False, use SN74LVC1G79 (DSBGA, Q only)
 
         Returns:
-            List of symbol instances created
+            List of symbol instances created (flip-flop, LED, resistor)
         """
-        raise NotImplementedError("Will be implemented with kiutils")
+        part_number = get_part_number("dff_sr" if has_set_reset else "dff")
+        raise NotImplementedError(f"Will place {part_number} at {position}")
 
     def add_bus_with_leds(
         self,
@@ -72,7 +84,7 @@ class SchematicGenerator:
         vertical: bool = True
     ) -> List[SymbolInstance]:
         """
-        Add a bus with LED indicator for each bit.
+        Add a bus with 0402 LED indicator for each bit.
 
         Args:
             bus_name: Name of the bus (e.g., "ADDR", "DATA")

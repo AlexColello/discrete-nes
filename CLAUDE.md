@@ -4,23 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Discrete NES** - A discrete logic NES implementation where EVERY gate output and EVERY memory bit has a visible LED indicator. This is one of the largest discrete logic projects ever attempted.
+**Discrete NES** - A discrete logic NES implementation where EVERY gate output and EVERY memory bit has a visible LED indicator. Built with TI Little Logic (SN74LVC1G) in DSBGA packages — the bare silicon die is visible on top of each IC, creating a sea of visible silicon interspersed with glowing LEDs.
 
 **Scale:**
 - Estimated 10,000+ LEDs across all boards
-- Thousands of logic ICs (74HC series)
-- 100+ watts of LED power consumption
-- Multiple large PCBs with heavy power distribution requirements
+- Thousands of single-gate ICs (TI Little Logic SN74LVC1G series, DSBGA)
+- Multiple PCBs with SMD assembly (solder paste + hot air reflow)
 - Complete cycle-accurate NES implementation in visible discrete logic
 
 ## Core Principles
 
 1. **EVERY gate output needs an LED** - This is non-negotiable. Never design circuits without LED indicators on every single gate output and memory bit
 2. **Use kiutils for generation** - Schematics and PCB placement are scripted using Python + kiutils library
-3. **74HC CMOS logic family** - Essential for power efficiency. 74LS would consume too much power with thousands of gates
-4. **No git submodules** - External references (MiSTer NES) are documented but not included as submodules
-5. **MiSTer NES core is the logic reference** - Not Brian Bennett's fpga_nes. See reference/README.md
-6. **NO LED multiplexing** - Defeats the purpose of seeing all states simultaneously
+3. **TI Little Logic (SN74LVC1G) in DSBGA** - Single-gate packages with bare silicon die visible on top. The aesthetic of exposed silicon is a core design goal
+4. **0402 SMD LEDs** - Smaller than the DSBGA ICs so bare silicon dies are the visual focus
+5. **No git submodules** - External references (MiSTer NES) are documented but not included as submodules
+6. **MiSTer NES core is the logic reference** - Not Brian Bennett's fpga_nes. See reference/README.md
+7. **NO LED multiplexing** - Defeats the purpose of seeing all states simultaneously
 
 ## Repository Structure
 
@@ -34,13 +34,13 @@ discrete-nes/
 │   │   └── fp-lib-table    # Footprint library table (copy to projects)
 │   └── python/
 │       ├── kicad_gen/      # Schematic and PCB generation utilities
-│       │   ├── common.py   # LED resistor calc, utilities
+│       │   ├── common.py   # Part lookup, LED resistor calc, DSBGA constants
 │       │   ├── schematic.py # Schematic generation with kiutils
 │       │   └── pcb.py      # PCB layout generation with kiutils
 │       └── hdl_parser/     # Verilog to discrete gates conversion
 │           └── verilog_to_gates.py
 ├── boards/
-│   ├── ram-prototype/      # First board - 64 byte RAM prototype
+│   ├── ram-prototype/      # First board - 8 byte RAM prototype
 │   │   ├── scripts/        # Generation scripts for this board
 │   │   └── docs/           # Board-specific documentation
 │   ├── cpu-2a03/           # CPU board (future)
@@ -86,7 +86,7 @@ python scripts/generate_ram_array.py
 - Expected to change in KiCad 9, but not available yet
 
 **Why kiutils over alternatives:**
-1. **kiutils** ⭐ CHOSEN
+1. **kiutils** - CHOSEN
    - Directly parses/generates KiCad S-expression files
    - Works for both schematics (.kicad_sch) and PCBs (.kicad_pcb)
    - Python dataclass-based API
@@ -108,28 +108,27 @@ python scripts/generate_ram_array.py
 - Manual routing initially (better control for prototype)
 - Can revisit automation after validating approach
 
-### Logic Family - Why 74HC?
+### Logic Family - Why TI Little Logic (SN74LVC1G) in DSBGA?
 
-**74HC (CMOS) vs 74LS (TTL) Comparison:**
+**Design Choice: Bare silicon die visibility**
 
-| Feature | 74HC (CMOS) ✅ CHOSEN | 74LS (TTL) ❌ |
-|---------|---------------------|--------------|
-| **Power** | <1µA quiescent per gate | Few mW per gate |
-| **Speed** | ~14-18ns propagation | ~15ns propagation |
-| **Supply** | 2-6V flexible | 5V only |
-| **Availability (2025)** | Widely available | Many parts obsolete |
-| **Cost** | Cheaper | Similar |
-| **LED Drive** | Need buffers (~8mA max) | Can drive directly (~16mA) |
+The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the bare silicon die on top. Each IC is a tiny (1.75 x 1.25mm) chip with the actual silicon wafer pattern visible. Combined with 0402 SMD LEDs, this creates a striking visual — thousands of bare silicon dies with LEDs glowing between them.
 
-**Critical for this project:**
-- With 10,000+ gates + LEDs, 74LS would consume excessive power
-- 74HC logic itself is negligible (~1mA per chip)
-- Power budget is LED-dominated (2mA × 10,000 = 20A!)
+**SN74LVC1G Key Specs:**
+- Supply: 1.65V - 5.5V (using 3.3V for this project)
+- Output drive: up to 24mA (IOH/IOL) — can drive LEDs directly
+- Propagation delay: ~3.5ns typical
+- Quiescent current: ~10uA per IC
+- Package: DSBGA (YZP) 1.75 x 1.25mm, 5 solder balls underneath
+- 1 gate per package — simplifies schematic (no gate sharing)
 
-**LED Driver Options:**
-1. Direct drive from 74HC (8mA max, dim LEDs) - OK for prototype
-2. Transistor buffers per LED (2mA comfortable) - Recommended for production
-3. 74HC07 open-drain buffers in arrays - Good compromise
+**Assembly:** Solder paste stencil + hot air reflow (user has hot air station).
+
+**Why not 74HC DIP?**
+- 74HC DIP packages are ~20mm wide — too large, boring plastic rectangles
+- DSBGA packages show the actual silicon — much more visually interesting
+- Single-gate-per-package eliminates complex gate allocation logic
+- LVC is faster than HC (~3.5ns vs ~14ns)
 
 ### FPGA Reference - MiSTer NES Core
 
@@ -151,54 +150,68 @@ python scripts/generate_ram_array.py
 
 ## RAM Prototype Specifications
 
-**First board to implement - validates entire approach**
+**First board to implement - validates DSBGA assembly, LED approach, and aesthetic**
+
+**Reduced scope: 8 bytes (3 address bits) — validate before scaling to 64 bytes**
 
 **Configuration:**
-- **64 bytes total capacity**
-- **6 address bits** (A0-A5) = 64 addressable locations
+- **8 bytes total capacity**
+- **3 address bits** (A0-A2) = 8 addressable locations
 - **8-bit data bus** (D0-D7)
 - **Control signals:** Read/Write enable, Chip Select
 
-**LED Requirements (EVERY bit visible):**
-- **512 LEDs** for RAM cell outputs (one per stored bit) ⚠️ CRITICAL
-- **6 LEDs** for address bus
-- **8 LEDs** for data bus
-- **LEDs for all control signals**
-- **LEDs for EVERY intermediate gate output** in address decoder and control logic
-- **Total estimate:** 600-800 LEDs for complete visibility
+**Per byte (8 bits):**
+- 8x SN74LVC1G79 (D flip-flop, DSBGA) — stores 8 bits
+- 8x SN74LVC1G125 (tri-state buffer, DSBGA) — read gating
+- 1x SN74LVC1G08 (AND, DSBGA) — write clock = decoded_address AND write_enable
+- 1x SN74LVC1G08 (AND, DSBGA) — read OE = decoded_address AND read_enable
+- 10x 0402 LED + 10x 0402 resistor (every gate output visible)
 
-**Circuit Architecture Options:**
-1. **Option A:** 512 individual D flip-flops (74HC74 dual = 256 ICs!)
-2. **Option B:** 64× 74HC574 8-bit registers (more efficient IC count)
-   - BUT each bit output still needs its own LED
-3. **Address Decoder:** 6-to-64 decoder (74HC138 + 74HC139 + gates)
-4. **Data Bus:** Tri-state buffers for read, latches for write
+**Address decoder (3-to-8):**
+- 3x SN74LVC1G04 (inverter) — complemented address bits
+- 8x 3-input AND via 2-gate chains (16x SN74LVC1G08) or 8x SN74LVC1G11
+- ~19 decoder ICs + ~19 LEDs + ~19 resistors
+
+**LED Requirements (EVERY bit visible):**
+- **64 LEDs** for RAM cell outputs (one per stored bit)
+- **3 LEDs** for address bus
+- **8 LEDs** for data bus
+- **LEDs for all control signals and intermediate gate outputs**
+- **Total estimate:** ~115 LEDs
+
+**Totals for 8-byte prototype:**
+- ~180 ICs (DSBGA)
+- ~115 LEDs (0402 SMD)
+- ~115 resistors (0402 SMD)
+- **~410 total components**
+
+**PCB size estimate:** ~60x80mm with 3-4mm pitch
 
 **Power Budget (RAM Prototype):**
-- 600 LEDs × 2mA = 1.2A at 5V = 6W just for LEDs
-- Logic power negligible (74HC <1mA per chip)
-- Need robust 5V power distribution (thick traces, multiple supply points)
+- 115 LEDs x 2mA = 0.23A at 3.3V = 0.76W for LEDs
+- Logic power negligible (SN74LVC1G ~10uA per IC)
+- Very manageable power budget at this scale
 
-## Full System Power Requirements ⚠️
+## Full System Power Requirements
 
-**This is CRITICAL - plan power distribution from the start:**
+**Plan power distribution from the start:**
 
-- **RAM board:** ~1.2-1.6A at 5V
-- **CPU board:** ~10A at 5V (5000+ LEDs)
-- **PPU board:** ~6A at 5V (3000+ LEDs)
-- **Total system estimate:** 20A+ at 5V = 100W+ just for LEDs
+- **RAM board (8-byte):** ~0.25A at 3.3V
+- **RAM board (64-byte, future):** ~1.5A at 3.3V
+- **CPU board:** ~6A at 3.3V (5000+ LEDs)
+- **PPU board:** ~4A at 3.3V (3000+ LEDs)
+- **Total system estimate:** 12A+ at 3.3V = ~40W for LEDs
 
 **Design implications:**
-- High-current 5V power supplies (multiple rails)
+- 3.3V supply (lower than 5V, but LVC works great at 3.3V)
 - Distributed regulation across boards
-- Thick power traces (consider 2-4oz copper)
+- Adequate power traces for SMD board
 - Multiple connector pins dedicated to power
-- Consider active cooling for LED heat dissipation
 - DO NOT use LED multiplexing (defeats visibility purpose)
 
 ## Implementation Plan - Phase by Phase
 
-### ✅ Phase 1: Project Setup (COMPLETED)
+### Phase 1: Project Setup (COMPLETED)
 
 - [x] Directory structure created
 - [x] Python utilities framework (common.py, schematic.py, pcb.py, verilog_to_gates.py)
@@ -206,93 +219,97 @@ python scripts/generate_ram_array.py
 - [x] Shared KiCad library structure (sym-lib-table, fp-lib-table)
 - [x] Main README.md with project overview
 - [x] requirements.txt with kiutils dependency
+- [x] Migration from 74HC DIP to TI Little Logic DSBGA
 
-### 🔜 Phase 2: RAM Prototype Board (NEXT)
+### Phase 2: RAM Prototype Board (NEXT)
 
 **Step 1: Manual Circuit Design**
 1. Open KiCad and create `boards/ram-prototype/ram.kicad_pro`
 2. Design ONE memory cell manually:
-   - 1 D flip-flop (or use 74HC574 for 8 bits)
-   - LED on the Q output
-   - LED driver circuit (transistor or 74HC07)
-   - Current-limiting resistor (330Ω for red LED at 5V)
+   - 1x SN74LVC1G79 D flip-flop (DSBGA)
+   - 0402 LED on the Q output
+   - 0402 current-limiting resistor (680R for red LED at 3.3V)
 3. Validate the circuit works
 4. Document the pattern in `boards/ram-prototype/docs/`
 
 **Step 2: Script Development**
 1. Create `boards/ram-prototype/scripts/generate_ram_array.py`
 2. Use kiutils to:
-   - Replicate memory cell 64 times (or 512 times for individual bits)
-   - Generate 6-to-64 address decoder with LEDs on every gate
-   - Add data bus buffers with LEDs
+   - Replicate memory cell 8x8 = 64 times (8 bytes x 8 bits)
+   - Generate 3-to-8 address decoder with LEDs on every gate
+   - Add tri-state buffers for data bus with LEDs
    - Add control logic with LEDs
    - Create hierarchical schematic sheets for organization
 3. Test script generates valid .kicad_sch file
 
 **Step 3: PCB Layout**
-1. Use kiutils to place components in logical grid pattern
-2. Place all 600-800 LEDs in organized arrays
+1. Use kiutils to place DSBGA components in grid pattern (3-4mm pitch)
+2. Place all ~115 LEDs in organized arrays alongside ICs
 3. Manual routing (start with power/ground)
-4. Design for through-hole assembly (easier for prototype)
+4. SMD assembly: solder paste stencil + hot air reflow
 
 **Step 4: Validation**
 1. Run DRC/ERC in KiCad
-2. Review power distribution (adequate trace widths)
-3. Cost estimation (prepare for $hundreds in parts)
+2. Review power distribution
+3. Cost estimation
 4. Iterate design if needed
 
 **Step 5: Fabrication**
 1. Generate gerbers
 2. Generate BOM
-3. Order PCBs
-4. Order components
-5. Assemble and test!
+3. Order PCBs + solder paste stencil
+4. Order components (DSBGA ICs, 0402 LEDs, 0402 resistors)
+5. Reflow assembly and test
 
 ### Phase 3: Shared Library Development (Parallel to Phase 2)
 
 Build out shared KiCad libraries:
 - **Symbols needed:**
-  - 74HC00, 74HC02, 74HC04, 74HC08, 74HC32, 74HC86 (logic gates)
-  - 74HC74, 74HC574, 74HC273 (flip-flops/registers)
-  - 74HC138, 74HC139 (decoders)
-  - 74HC07, 74HC125, 74HC244 (buffers/drivers)
-  - LED symbols with integrated resistors
+  - SN74LVC1G00, 1G02, 1G04, 1G08, 1G32, 1G86 (logic gates)
+  - SN74LVC1G79 (D flip-flop, DSBGA)
+  - SN74LVC1G74 (D flip-flop with set/reset, X2SON — not DSBGA)
+  - SN74LVC1G07, 1G125 (buffers/drivers)
+  - 0402 LED symbols
   - Power connectors
 
 - **Footprints needed:**
-  - DIP-14, DIP-16, DIP-20 (common IC packages)
-  - LED 3mm/5mm through-hole
-  - Power connectors (high current)
+  - DSBGA (YZP) 5-ball, 6-ball variants
+  - X2SON (DQE) 8-pin (for SN74LVC1G74)
+  - 0402 SMD LED
+  - 0402 SMD resistor
+  - Power connectors
   - Board interconnect connectors
 
 - **Python utilities:**
   - LED array generation helpers
   - Bus routing helpers
   - Hierarchical sheet management
-  - Component placement in grids
+  - DSBGA grid placement
 
 ### Phase 4: FPGA Logic Extraction (Research Phase)
 
-**Goal:** Convert MiSTer Verilog to discrete 74HC netlists
+**Goal:** Convert MiSTer Verilog to discrete SN74LVC1G netlists
 
 **Challenges:**
 1. Verilog is behavioral, need gate-level synthesis
 2. Must identify ALL internal signals for LED placement
-3. Map Verilog primitives to 74HC parts
-4. Generate component lists with LED drivers
+3. Map Verilog primitives to SN74LVC1G parts
+4. Generate component lists with LED indicators
 
 **Approach:**
 1. Study MiSTer NES Verilog structure
 2. Use synthesis tools to generate gate-level netlist
 3. Parse netlist and map gates:
-   - `and` → 74HC08 (Quad 2-input AND)
-   - `or` → 74HC32 (Quad 2-input OR)
-   - `not` → 74HC04 (Hex inverter)
-   - `nand` → 74HC00 (Quad 2-input NAND)
-   - `nor` → 74HC02 (Quad 2-input NOR)
-   - `xor` → 74HC86 (Quad 2-input XOR)
+   - `and` -> SN74LVC1G08 (single 2-input AND)
+   - `or` -> SN74LVC1G32 (single 2-input OR)
+   - `not` -> SN74LVC1G04 (single inverter)
+   - `nand` -> SN74LVC1G00 (single 2-input NAND)
+   - `nor` -> SN74LVC1G02 (single 2-input NOR)
+   - `xor` -> SN74LVC1G86 (single 2-input XOR)
 4. Auto-generate KiCad schematics with kiutils
 5. Add LED to EVERY gate output
+
+**Key difference from 74HC:** 1 gate per IC, no gate packing/sharing needed.
 
 **Tool Development:**
 - Enhance `shared/python/hdl_parser/verilog_to_gates.py`
@@ -302,9 +319,9 @@ Build out shared KiCad libraries:
 ### Phase 5: CPU and PPU Boards (Future)
 
 After RAM prototype success:
-1. Apply lessons learned (LED drivers, power, assembly)
-2. Scale up to CPU board (~5000 LEDs, 1500+ ICs)
-3. Develop PPU board (~3000 LEDs, 1000+ ICs)
+1. Apply lessons learned (DSBGA reflow, LED density, power)
+2. Scale up to CPU board (~5000 LEDs, ~5000 ICs)
+3. Develop PPU board (~3000 LEDs, ~3000 ICs)
 4. Design backplane or cable interconnect system
 5. Integration testing
 
@@ -312,51 +329,50 @@ After RAM prototype success:
 
 **For any new circuit:**
 1. Design first instance manually in KiCad
-2. Validate it works (schematic review, maybe breadboard test)
+2. Validate it works (schematic review)
 3. Document the pattern
 4. Write Python script using kiutils to replicate
 5. Generate full schematic with hierarchical organization
-6. Use kiutils to place components in grid
+6. Use kiutils to place DSBGA + 0402 components in grid
 7. Route manually (or assisted)
 8. Run DRC/ERC
 9. Review power distribution
-10. Generate gerbers and order
+10. Generate gerbers and order (with solder paste stencil)
 
 ## Critical Design Rules
 
-1. **Every gate output → LED** - No exceptions
-2. **Power distribution from day one** - Don't underestimate LED current
+1. **Every gate output -> LED** - No exceptions
+2. **Power distribution from day one** - Plan for aggregate LED current
 3. **Hierarchical schematics** - Essential for managing complexity
-4. **Through-hole for prototype** - Easier assembly, more visible
+4. **DSBGA reflow assembly** - Solder paste stencil + hot air station
 5. **Test one cell first** - Validate before replicating
-6. **Grid layouts** - Makes assembly and debugging easier
+6. **Grid layouts** - 3-4mm pitch for DSBGA + 0402 LED/resistor cells
 7. **Label everything** - With thousands of components, organization is critical
-8. **Conservative trace widths** - Power traces should be thick (50+ mils)
+8. **0402 LEDs smaller than ICs** - Bare silicon is the visual focus
 9. **Multiple ground/power connections** - Distribute supply across board
 
-## Common 74HC Parts Reference
+## TI Little Logic Parts Reference
 
-**Logic Gates (Quad = 4 gates per package):**
-- 74HC00 - Quad 2-input NAND
-- 74HC02 - Quad 2-input NOR
-- 74HC04 - Hex Inverter (6 gates)
-- 74HC08 - Quad 2-input AND
-- 74HC32 - Quad 2-input OR
-- 74HC86 - Quad 2-input XOR
+**Logic Gates (1 gate per DSBGA package):**
+- SN74LVC1G00 - Single 2-input NAND (YZP, 5-ball)
+- SN74LVC1G02 - Single 2-input NOR (YZP, 5-ball)
+- SN74LVC1G04 - Single Inverter (YZP, 5-ball)
+- SN74LVC1G08 - Single 2-input AND (YZP, 5-ball)
+- SN74LVC1G11 - Single 3-input AND (YZP, 6-ball)
+- SN74LVC1G32 - Single 2-input OR (YZP, 5-ball)
+- SN74LVC1G86 - Single 2-input XOR (YZP, 5-ball)
 
-**Flip-Flops and Registers:**
-- 74HC74 - Dual D flip-flop
-- 74HC574 - Octal D flip-flop (8-bit, 3-state)
-- 74HC273 - Octal D flip-flop (8-bit)
-
-**Decoders:**
-- 74HC138 - 3-to-8 line decoder
-- 74HC139 - Dual 2-to-4 line decoder
+**Flip-Flops:**
+- SN74LVC1G79 - Single D flip-flop, Q only (YZP, 5-ball DSBGA) — for RAM cells
+- SN74LVC1G74 - Single D flip-flop, Q/Q-bar/preset/clear (DQE, 8-pin X2SON — NOT DSBGA)
 
 **Buffers/Drivers:**
-- 74HC07 - Hex buffer (open drain) - Good for LED drivers
-- 74HC125 - Quad bus buffer (3-state)
-- 74HC244 - Octal buffer (3-state)
+- SN74LVC1G07 - Single buffer, open drain (YZP, 5-ball) — good for LED drive
+- SN74LVC1G125 - Single tri-state buffer (YZP, 5-ball)
+
+**Package Key:**
+- YZP = DSBGA (NanoFree), bare silicon die visible, 1.75 x 1.25mm
+- DQE = X2SON, 1.4 x 1.4mm, 8-pin (NOT bare die — plastic)
 
 ## Resources & References
 
@@ -370,14 +386,14 @@ After RAM prototype success:
 **Research Sources:**
 - kiutils docs: https://kiutils.readthedocs.io/
 - KiCad developer docs: https://dev-docs.kicad.org/
-- 74HC datasheets: Texas Instruments, NXP, etc.
+- TI Little Logic selection guide: https://www.ti.com/logic-circuit/little-logic/overview.html
 
 ## Current Status
 
-**Phase 1 COMPLETE** ✅
-**Next: Phase 2 - RAM Prototype Circuit Design**
+**Phase 1 COMPLETE** (including migration to TI Little Logic DSBGA)
+**Next: Phase 2 - RAM Prototype Circuit Design (8 bytes)**
 
-Ready to start designing the first memory cell in KiCad!
+Ready to start designing the first memory cell in KiCad with DSBGA + 0402 LEDs!
 
 ## Important Notes for Future Sessions
 
@@ -386,5 +402,10 @@ Ready to start designing the first memory cell in KiCad!
 - User confirmed kiutils is the right tool
 - User wants every single bit in RAM to have an LED
 - User wants every gate output to have an LED
-- 64 bytes = 6 address bits, 8 data bits (confirmed with user)
-- Power budget is critical - don't underestimate LED current draw
+- RAM prototype: 8 bytes = 3 address bits, 8 data bits (reduced from 64 bytes to validate DSBGA first)
+- TI Little Logic SN74LVC1G in DSBGA (YZP) — bare silicon die visible on top
+- 0402 SMD LEDs — smaller than ICs so bare silicon is visual focus
+- Assembly method: solder paste stencil + hot air reflow
+- Power budget is manageable at 8-byte scale (~0.76W)
+- SN74LVC1G74 (D flip-flop with set/reset) is NOT available in DSBGA — only X2SON (DQE)
+- SN74LVC1G79 (D flip-flop, Q only) IS in DSBGA — works for RAM cells

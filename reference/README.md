@@ -40,7 +40,7 @@ The MiSTer core is written in Verilog/SystemVerilog. To convert to discrete logi
 
 1. **Identify the module** you want to implement (e.g., a register, ALU, decoder)
 2. **Analyze the gate-level logic** - may need to synthesize to gate-level netlist
-3. **Map gates to 74HC series** using the tools in `shared/python/hdl_parser/`
+3. **Map gates to TI Little Logic (SN74LVC1G)** using the tools in `shared/python/hdl_parser/`
 4. **Add LED indicators** to every gate output
 5. **Generate KiCad schematics** using the tools in `shared/python/kicad_gen/`
 

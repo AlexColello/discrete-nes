@@ -5,13 +5,13 @@ This directory contains shared symbol and footprint libraries for the discrete N
 ## Structure
 
 - **symbols/** - Schematic symbols
-  - `74HC_Logic.kicad_sym` - 74HC series logic gates and flip-flops
-  - `LED_Indicators.kicad_sym` - LED symbols with integrated resistors
+  - `LittleLogic_LVC.kicad_sym` - TI Little Logic SN74LVC1G single-gate ICs
+  - `LED_Indicators.kicad_sym` - 0402 SMD LED symbols
   - `Power_Discrete.kicad_sym` - Power connectors and regulators
 
 - **footprints/** - PCB footprints
-  - `DIP_Packages.pretty/` - Through-hole DIP packages for ICs
-  - `LED_THT.pretty/` - Through-hole LED footprints
+  - `DSBGA_Packages.pretty/` - DSBGA (NanoFree/YZP) packages for TI Little Logic
+  - `LED_SMD.pretty/` - 0402 SMD LED footprints
   - `Connectors_Discrete.pretty/` - Board interconnect connectors
 
 - **3d-models/** - 3D models for PCB visualization
@@ -32,29 +32,23 @@ New symbols and footprints can be added using KiCad's library editors or program
 
 ### Common Components Needed:
 
-**Logic Gates:**
-- 74HC00 - Quad 2-input NAND
-- 74HC02 - Quad 2-input NOR
-- 74HC04 - Hex Inverter
-- 74HC08 - Quad 2-input AND
-- 74HC32 - Quad 2-input OR
-- 74HC86 - Quad 2-input XOR
+**Logic Gates (1 gate per DSBGA package):**
+- SN74LVC1G00 - Single 2-input NAND (YZP, 5-ball)
+- SN74LVC1G02 - Single 2-input NOR (YZP, 5-ball)
+- SN74LVC1G04 - Single Inverter (YZP, 5-ball)
+- SN74LVC1G08 - Single 2-input AND (YZP, 5-ball)
+- SN74LVC1G11 - Single 3-input AND (YZP, 6-ball)
+- SN74LVC1G32 - Single 2-input OR (YZP, 5-ball)
+- SN74LVC1G86 - Single 2-input XOR (YZP, 5-ball)
 
-**Flip-Flops and Registers:**
-- 74HC74 - Dual D-type flip-flop
-- 74HC574 - Octal D-type flip-flop (3-state)
-- 74HC273 - Octal D-type flip-flop
-
-**Decoders and Multiplexers:**
-- 74HC138 - 3-to-8 line decoder
-- 74HC139 - Dual 2-to-4 line decoder
-- 74HC151 - 8-to-1 multiplexer
+**Flip-Flops:**
+- SN74LVC1G79 - Single D flip-flop, Q only (YZP, 5-ball DSBGA)
+- SN74LVC1G74 - Single D flip-flop, Q/Q-bar/preset/clear (DQE, 8-pin X2SON)
 
 **Buffers and Drivers:**
-- 74HC07 - Hex buffer/driver (open drain)
-- 74HC125 - Quad bus buffer (3-state)
-- 74HC244 - Octal buffer/driver (3-state)
+- SN74LVC1G07 - Single buffer, open drain (YZP, 5-ball)
+- SN74LVC1G125 - Single tri-state buffer (YZP, 5-ball)
 
 **LEDs:**
-- 3mm and 5mm through-hole LEDs (various colors)
-- With integrated current-limiting resistor symbols
+- 0402 SMD LEDs (various colors)
+- 0402 SMD resistors for current limiting
