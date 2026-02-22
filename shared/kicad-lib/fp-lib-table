@@ -1,0 +1,6 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "DIP_Packages")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/footprints/DIP_Packages.pretty")(options "")(descr "Through-hole DIP packages for 74HC series"))
+  (lib (name "LED_THT")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/footprints/LED_THT.pretty")(options "")(descr "Through-hole LED footprints"))
+  (lib (name "Connectors_Discrete")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/footprints/Connectors_Discrete.pretty")(options "")(descr "Connectors for board-to-board connections"))
+)

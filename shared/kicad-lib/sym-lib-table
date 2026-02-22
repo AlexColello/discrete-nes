@@ -1,0 +1,6 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "74HC_Logic")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/symbols/74HC_Logic.kicad_sym")(options "")(descr "74HC series logic gates and flip-flops"))
+  (lib (name "LED_Indicators")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/symbols/LED_Indicators.kicad_sym")(options "")(descr "LED indicators with integrated resistors"))
+  (lib (name "Power_Discrete")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/symbols/Power_Discrete.kicad_sym")(options "")(descr "Power connectors and regulators for discrete logic"))
+)
