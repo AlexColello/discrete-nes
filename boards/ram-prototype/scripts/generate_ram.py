@@ -1128,88 +1128,108 @@ def count_components(builders):
 
 
 def fix_instance_paths(builders):
-    """Fix sub-sheet symbol instance paths to use the correct hierarchical paths.
+    """Fix sub-sheet symbol instance paths and assign globally unique references.
 
-    KiCad requires symbol instances in child sheets to use the full hierarchical
-    path from the root: /{root_uuid}/{sheet_block_uuid}/ — NOT the child sheet's
-    own UUID. Without this, hierarchical ERC reports wire_dangling for all sub-sheet
-    wires because KiCad can't resolve symbol-pin connectivity.
+    KiCad requires:
+    1. Symbol instances in child sheets use the full hierarchical path from root:
+       /{root_uuid}/{sheet_block_uuid} — NOT the child sheet's own UUID.
+    2. ALL reference designators are globally unique across the entire design.
+
+    This function processes sheets in hierarchy order, maintaining a global counter
+    per reference prefix (U, R, D, #PWR, #FLG) so every symbol gets a unique ref.
     """
     root_sch = builders["ram"].sch
     root_uuid = root_sch.uuid
 
-    # Build map: filename -> list of (sheet_block_uuid, sheet_name)
-    file_to_sheets = {}
+    # Global reference counters — start after root sheet's refs
+    global_counters = {}
+    for sym in root_sch.schematicSymbols:
+        for p in sym.properties:
+            if p.key == "Reference":
+                prefix = p.value.rstrip("0123456789")
+                num_str = p.value[len(prefix):]
+                num = int(num_str) if num_str else 0
+                global_counters[prefix] = max(global_counters.get(prefix, 0), num)
+                break
+
+    # Process each hierarchy sheet in order (determines reference assignment order)
     for sheet in root_sch.sheets:
         fname = sheet.fileName.value
-        sname = sheet.sheetName.value if sheet.sheetName else ""
-        if fname not in file_to_sheets:
-            file_to_sheets[fname] = []
-        file_to_sheets[fname].append((sheet.uuid, sname))
+        sheet_block_uuid = sheet.uuid
+        hier_path = f"/{root_uuid}/{sheet_block_uuid}"
 
-    for name, builder in builders.items():
-        if name == "ram":
-            continue  # Root sheet is fine
-
-        filename = f"{name}.kicad_sch"
-        if filename not in file_to_sheets:
+        # Find the builder for this filename
+        builder_name = fname.replace(".kicad_sch", "")
+        if builder_name not in builders:
             continue
+        builder = builders[builder_name]
 
-        sheet_entries = file_to_sheets[filename]
+        # Count how many of each prefix this sheet has (for multi-instance offset)
+        sheet_ref_counts = {}
+        for sym in builder.sch.schematicSymbols:
+            for p in sym.properties:
+                if p.key == "Reference":
+                    prefix = p.value.rstrip("0123456789")
+                    sheet_ref_counts[prefix] = sheet_ref_counts.get(prefix, 0) + 1
+                    break
 
-        if len(sheet_entries) == 1:
-            # Single-instance sub-sheet: just fix the path
-            sheet_block_uuid = sheet_entries[0][0]
-            hier_path = f"/{root_uuid}/{sheet_block_uuid}"
-            for sym in builder.sch.schematicSymbols:
-                for inst in sym.instances:
-                    for p in inst.paths:
-                        p.sheetInstancePath = hier_path
-        else:
-            # Multi-instance sub-sheet (byte.kicad_sch used 8 times)
-            # Each symbol needs one path per instance, with unique refs
-            # Count refs per prefix to calculate offsets
-            ref_counts = {}
-            for sym in builder.sch.schematicSymbols:
-                for p_obj in sym.properties:
-                    if p_obj.key == "Reference":
-                        prefix = p_obj.value.rstrip("0123456789")
-                        num = int(p_obj.value[len(prefix):])
-                        if prefix not in ref_counts:
-                            ref_counts[prefix] = 0
-                        ref_counts[prefix] = max(ref_counts[prefix], num)
-                        break
+        # Check if this is a multi-instance sheet (multiple hierarchy blocks
+        # reference the same filename). If so, only process on the FIRST one
+        # and build all instance paths at once.
+        all_sheet_blocks = [s for s in root_sch.sheets if s.fileName.value == fname]
+        is_first_instance = (sheet is all_sheet_blocks[0])
+        is_multi_instance = len(all_sheet_blocks) > 1
 
+        if is_multi_instance and not is_first_instance:
+            continue  # Already handled on first encounter
+
+        if is_multi_instance:
+            # Multi-instance sheet (byte.kicad_sch used 8 times)
+            # Assign a block of refs for ALL instances at once
             for sym in builder.sch.schematicSymbols:
-                # Get this symbol's base reference
-                base_ref = None
                 prefix = ""
                 base_num = 0
-                for p_obj in sym.properties:
-                    if p_obj.key == "Reference":
-                        base_ref = p_obj.value
-                        prefix = base_ref.rstrip("0123456789")
-                        base_num = int(base_ref[len(prefix):])
+                for p in sym.properties:
+                    if p.key == "Reference":
+                        prefix = p.value.rstrip("0123456789")
+                        base_num = int(p.value[len(prefix):])
                         break
 
-                max_num = ref_counts.get(prefix, 0)
-
-                # Build instance paths for all sheet instances
                 new_paths = []
-                for inst_idx, (sheet_block_uuid, sname) in enumerate(sheet_entries):
-                    hier_path = f"/{root_uuid}/{sheet_block_uuid}"
-                    offset = inst_idx * max_num
-                    inst_ref = f"{prefix}{base_num + offset}"
+                for inst_block in all_sheet_blocks:
+                    inst_path = f"/{root_uuid}/{inst_block.uuid}"
+                    # Allocate next global ref for this prefix
+                    global_counters[prefix] = global_counters.get(prefix, 0) + 1
+                    inst_ref = f"{prefix}{global_counters[prefix]}"
                     new_paths.append(SymbolProjectPath(
-                        sheetInstancePath=hier_path,
+                        sheetInstancePath=inst_path,
                         reference=inst_ref,
                         unit=1,
                     ))
 
-                # Replace instances
                 sym.instances = [SymbolProjectInstance(
                     name=PROJECT_NAME,
                     paths=new_paths,
+                )]
+        else:
+            # Single-instance sub-sheet: fix path and assign unique refs
+            for sym in builder.sch.schematicSymbols:
+                prefix = ""
+                for p in sym.properties:
+                    if p.key == "Reference":
+                        prefix = p.value.rstrip("0123456789")
+                        break
+
+                global_counters[prefix] = global_counters.get(prefix, 0) + 1
+                new_ref = f"{prefix}{global_counters[prefix]}"
+
+                sym.instances = [SymbolProjectInstance(
+                    name=PROJECT_NAME,
+                    paths=[SymbolProjectPath(
+                        sheetInstancePath=hier_path,
+                        reference=new_ref,
+                        unit=1,
+                    )]
                 )]
 
 
