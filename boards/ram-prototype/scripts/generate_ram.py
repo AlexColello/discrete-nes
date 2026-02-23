@@ -400,12 +400,14 @@ class SchematicBuilder:
             elif p.key == "Datasheet":
                 ds_val = p.value
 
-        # Hide reference for power symbols (#PWR, #FLG) to reduce clutter
-        hide_ref = ref_prefix.startswith("#")
+        # Hide reference for power symbols (#PWR, #FLG) and passive LED chain
+        # components (R, D) to reduce clutter — their sequential numbers aren't
+        # helpful.  IC refs (U##) and connector (J##) remain visible.
+        hide_ref = ref_prefix.startswith("#") or ref_prefix in ("R", "D")
 
         sym.properties = [
             Property(key="Reference", value=ref, id=0,
-                     position=Position(X=x, Y=y - 2 * GRID, angle=0),
+                     position=Position(X=x, Y=y - 5 * GRID, angle=0),
                      effects=Effects(font=Font(width=1.27, height=1.27), hide=hide_ref)),
             Property(key="Value", value=value, id=1,
                      position=Position(X=x, Y=y + 2 * GRID, angle=0),
@@ -491,11 +493,12 @@ class SchematicBuilder:
 
         Components are spaced apart so wires don't pass through symbol bodies.
         """
-        _, r_pins = self.place_symbol("R_Small", x, y, ref_prefix="R",
+        r_x = x + GRID  # shift R center right so pin 1 (at dx=-2.54) lands at x
+        _, r_pins = self.place_symbol("R_Small", r_x, y, ref_prefix="R",
                                       value="680R", angle=90)
 
         # LED placed 3 grid units right of R center — enough gap to avoid overlap
-        led_x = x + 3 * GRID
+        led_x = r_x + 3 * GRID
         _, led_pins = self.place_symbol("LED_Small", led_x, y, ref_prefix="D",
                                         value="Red", angle=180)
         # Wire from R Pin 2 (right) to LED Pin 2 / Anode (left)
@@ -656,8 +659,10 @@ def generate_address_decoder():
     # X positions for 6 vertical trunks (A0, A1, A2, A0_INV, A1_INV, A2_INV)
     # True address trunks: placed RIGHT of inverter inputs (X=55.88) so that
     # inverter branch wires going left don't cross other address trunks.
-    addr_trunk_x = [base_x + (13 + i) * GRID for i in range(3)]   # 58.42, 60.96, 63.5
-    inv_trunk_x = [base_x + 30 * GRID + i * 2 * GRID for i in range(3)]  # A0_INV, A1_INV, A2_INV
+    # Use half-grid offset (12.5+i) to avoid X=63.5 which is the NC pin X of
+    # the 74LVC1G04 inverters (inv_x - 7.62 = 71.12 - 7.62 = 63.5).
+    addr_trunk_x = [snap(base_x + (12.5 + i) * GRID) for i in range(3)]   # 57.15, 59.69, 62.23
+    inv_trunk_x = [base_x + 31 * GRID + i * 2 * GRID for i in range(3)]  # A0_INV, A1_INV, A2_INV (shifted +GRID to avoid LED cathode GND overlap)
 
     # The AND gates span 8 rows (SEL0-SEL7)
     and_top_y = base_y
@@ -670,13 +675,17 @@ def generate_address_decoder():
         b.add_wire(base_x, trunk_top_y, addr_trunk_x[i], trunk_top_y)
 
     # -- Three inverters for complemented address bits --
-    # Offset inverter Y by +GRID so inverter pin Y values don't coincide with
-    # AND gate pin Y values (both derive from base_y + i*SYM_SPACING_Y).
-    # This prevents trunk segment endpoints from landing on cross-trunk branch wires.
+    # Offset inverter Y by +2*GRID so:
+    #   1. Inverter pin Y values don't coincide with AND gate pin Y values
+    #      (prevents trunk segment endpoints from landing on cross-trunk branches)
+    #   2. NC pin Y (= inv_y - 2.54) doesn't coincide with any AND gate pin Y
+    #      (prevents horizontal branch wires from passing through NC pins)
+    # With +1*GRID offset, NC pin Y = base_y + i*SYM_SPACING which matches
+    # AND pin "1" (dy=0). With +2*GRID, NC Y shifts to non-matching values.
     inv_in_pins = []   # inverter input pin positions
     inv_out_pins = []  # inverter output pin positions
     for i in range(3):
-        y = base_y + i * SYM_SPACING_Y + GRID
+        y = base_y + i * SYM_SPACING_Y + 2 * GRID
         _, pins = b.place_symbol("74LVC1G04", inv_x, y)
         b.connect_power(pins)
         inv_in_pins.append(pins["2"])
@@ -867,8 +876,12 @@ def generate_control_logic():
     and3_out = and3_pins["4"]
 
     # -- Wire CE output to AND1.A and AND2.A (fanout=2 via vertical trunk) --
+    # CE trunk must be to the RIGHT of LED cathode GND wires (at led_x + 5*GRID
+    # from ce_out) to avoid horizontal overlap between R-to-LED wires and CE
+    # branch wires.  After Change 3, LED cathode is at ce_out[0] + 7*GRID,
+    # GND wire extends 2*GRID below.  Trunk at +9*GRID clears everything.
     ce_led_x = snap(ce_out[0] + 2 * GRID)
-    ce_trunk_x = snap(ce_out[0] + 4 * GRID)
+    ce_trunk_x = snap(ce_out[0] + 9 * GRID)
     # Split wire at LED junction point
     b.add_wire(ce_out[0], ce_out[1], ce_led_x, ce_out[1])
     b.add_wire(ce_led_x, ce_out[1], ce_trunk_x, ce_out[1])
@@ -880,18 +893,26 @@ def generate_control_logic():
     # Branch to AND2.A
     b.add_wire(ce_trunk_x, and2_a[1], and2_a[0], and2_a[1])
 
-    # -- Wire OE output to AND2.B (L-shaped: horizontal then vertical) --
+    # -- Wire OE output to AND2.B --
+    # Route OE vertical between LED cathode GND wires and CE trunk to avoid
+    # crossing either.  oe_vert_x = ce_trunk_x - GRID sits in the gap.
     oe_led_x = snap(oe_out[0] + 2 * GRID)
+    oe_vert_x = snap(ce_trunk_x - GRID)
     b.add_wire(oe_out[0], oe_out[1], oe_led_x, oe_out[1])
-    b.add_wire(oe_led_x, oe_out[1], and2_b[0], oe_out[1])
-    b.add_wire(and2_b[0], oe_out[1], and2_b[0], and2_b[1])
+    b.add_wire(oe_led_x, oe_out[1], oe_vert_x, oe_out[1])
+    b.add_wire(oe_vert_x, oe_out[1], oe_vert_x, and2_b[1])
+    b.add_wire(oe_vert_x, and2_b[1], and2_b[0], and2_b[1])
     b.place_led_below(oe_led_x, oe_out[1])
 
-    # -- Wire WE output to AND1.B (L-shaped: horizontal then vertical) --
+    # -- Wire WE output to AND1.B --
+    # Route WE vertical to the RIGHT of AND input pins (X > and1_b[0]) so it
+    # doesn't pass through AND2 pins which share the same X column.
     we_led_x = snap(we_out[0] + 2 * GRID)
+    we_vert_x = snap(and1_b[0] + 2 * GRID)
     b.add_wire(we_out[0], we_out[1], we_led_x, we_out[1])
-    b.add_wire(we_led_x, we_out[1], and1_b[0], we_out[1])
-    b.add_wire(and1_b[0], we_out[1], and1_b[0], and1_b[1])
+    b.add_wire(we_led_x, we_out[1], we_vert_x, we_out[1])
+    b.add_wire(we_vert_x, we_out[1], we_vert_x, and1_b[1])
+    b.add_wire(we_vert_x, and1_b[1], and1_b[0], and1_b[1])
     b.place_led_below(we_led_x, we_out[1])
 
     # -- Wire CE_AND_OE (AND2 output) to AND3.A with LED (L-shaped) --
@@ -901,12 +922,15 @@ def generate_control_logic():
     b.add_wire(and3_a[0], and2_out[1], and3_a[0], and3_a[1])
     b.place_led_below(and2_led_x, and2_out[1])
 
-    # -- Wire /WE to AND3.B (vertical drop from nWE hier label wire) --
-    # Split nWE wire at junction, then L-shaped to AND3.B
+    # -- Wire /WE to AND3.B --
+    # Route nWE BELOW all vertical wires (LED GND endpoints max at we_y+5*GRID,
+    # WE vert max at we_y) to avoid crossing any signal or GND wires.
+    nwe_route_y = snap(we_y + 7 * GRID)
     b.add_wire(base_x, we_y, nwe_jct_x, we_y)
     b.add_wire(nwe_jct_x, we_y, we_inv_in[0], we_inv_in[1])
-    b.add_wire(nwe_jct_x, we_y, nwe_jct_x, and3_b[1])
-    b.add_wire(nwe_jct_x, and3_b[1], and3_b[0], and3_b[1])
+    b.add_wire(nwe_jct_x, we_y, nwe_jct_x, nwe_route_y)
+    b.add_wire(nwe_jct_x, nwe_route_y, and3_b[0], nwe_route_y)
+    b.add_wire(and3_b[0], nwe_route_y, and3_b[0], and3_b[1])
     b.add_junction(nwe_jct_x, we_y)
 
     # -- AND1 output → LED T-junction → hier label WRITE_ACTIVE --
@@ -1358,6 +1382,10 @@ def fix_instance_paths(builders):
 
     This function processes sheets in hierarchy order, maintaining a global counter
     per reference prefix (U, R, D, #PWR, #FLG) so every symbol gets a unique ref.
+
+    IMPORTANT: The original local instance path (/{sheet_uuid}/) is preserved so
+    that sub-sheets pass ERC when opened standalone.  The hierarchy path is appended
+    alongside it.  KiCad uses whichever path matches the current context.
     """
     root_sch = builders["ram"].sch
     root_uuid = root_sch.uuid
@@ -1385,15 +1413,6 @@ def fix_instance_paths(builders):
             continue
         builder = builders[builder_name]
 
-        # Count how many of each prefix this sheet has (for multi-instance offset)
-        sheet_ref_counts = {}
-        for sym in builder.sch.schematicSymbols:
-            for p in sym.properties:
-                if p.key == "Reference":
-                    prefix = p.value.rstrip("0123456789")
-                    sheet_ref_counts[prefix] = sheet_ref_counts.get(prefix, 0) + 1
-                    break
-
         # Check if this is a multi-instance sheet (multiple hierarchy blocks
         # reference the same filename). If so, only process on the FIRST one
         # and build all instance paths at once.
@@ -1406,34 +1425,31 @@ def fix_instance_paths(builders):
 
         if is_multi_instance:
             # Multi-instance sheet (byte.kicad_sch used 8 times)
-            # Assign a block of refs for ALL instances at once
+            # Keep local path, append one hierarchy path per instance
             for sym in builder.sch.schematicSymbols:
                 prefix = ""
-                base_num = 0
                 for p in sym.properties:
                     if p.key == "Reference":
                         prefix = p.value.rstrip("0123456789")
-                        base_num = int(p.value[len(prefix):])
                         break
 
-                new_paths = []
+                # Append hierarchy paths to the existing instance's path list
+                existing = sym.instances[0] if sym.instances else None
+                if existing is None:
+                    existing = SymbolProjectInstance(name=PROJECT_NAME, paths=[])
+                    sym.instances = [existing]
+
                 for inst_block in all_sheet_blocks:
                     inst_path = f"/{root_uuid}/{inst_block.uuid}"
-                    # Allocate next global ref for this prefix
                     global_counters[prefix] = global_counters.get(prefix, 0) + 1
                     inst_ref = f"{prefix}{global_counters[prefix]}"
-                    new_paths.append(SymbolProjectPath(
+                    existing.paths.append(SymbolProjectPath(
                         sheetInstancePath=inst_path,
                         reference=inst_ref,
                         unit=1,
                     ))
-
-                sym.instances = [SymbolProjectInstance(
-                    name=PROJECT_NAME,
-                    paths=new_paths,
-                )]
         else:
-            # Single-instance sub-sheet: fix path and assign unique refs
+            # Single-instance sub-sheet: keep local path, append hierarchy path
             for sym in builder.sch.schematicSymbols:
                 prefix = ""
                 for p in sym.properties:
@@ -1444,14 +1460,16 @@ def fix_instance_paths(builders):
                 global_counters[prefix] = global_counters.get(prefix, 0) + 1
                 new_ref = f"{prefix}{global_counters[prefix]}"
 
-                sym.instances = [SymbolProjectInstance(
-                    name=PROJECT_NAME,
-                    paths=[SymbolProjectPath(
-                        sheetInstancePath=hier_path,
-                        reference=new_ref,
-                        unit=1,
-                    )]
-                )]
+                existing = sym.instances[0] if sym.instances else None
+                if existing is None:
+                    existing = SymbolProjectInstance(name=PROJECT_NAME, paths=[])
+                    sym.instances = [existing]
+
+                existing.paths.append(SymbolProjectPath(
+                    sheetInstancePath=hier_path,
+                    reference=new_ref,
+                    unit=1,
+                ))
 
 
 def main():

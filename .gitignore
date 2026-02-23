@@ -63,6 +63,9 @@ build/
 *.swo
 *~
 
+# Verification output
+**/verify_output/
+
 # OS
 .DS_Store
 Thumbs.db

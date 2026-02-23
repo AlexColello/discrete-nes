@@ -74,9 +74,16 @@ pip install -r requirements.txt
 ```bash
 cd boards/ram-prototype
 python scripts/generate_ram.py
-# Then verify:
-kicad-cli sch erc ram.kicad_sch
+# Then ALWAYS run verification:
+python scripts/verify_schematics.py
 ```
+
+**IMPORTANT:** After ANY change to `generate_ram.py`, you MUST:
+1. Regenerate: `python scripts/generate_ram.py`
+2. Verify: `python scripts/verify_schematics.py`
+3. Fix any errors before considering the change complete
+
+The verification script checks for: wire overlaps (net merges), diagonal wires, dangling endpoints, wires passing through component pins, T-junctions without dots, and runs kicad-cli ERC. Output goes to `verify_output/` (gitignored).
 
 ## Technology Stack & Research Findings
 
@@ -143,6 +150,14 @@ Hard-won requirements for generating schematics with kiutils that pass KiCad 9 E
 - **Wire overlap = net merge** — Two wires sharing any segment (same Y, overlapping X range) silently merge their nets. Always verify horizontal wires at the same Y don't overlap
 - **T-connections from wire endpoints** — A wire endpoint landing on the middle of another wire creates a connection (even without a junction dot). When routing horizontal branch wires that cross vertical trunks, verify the crossing Y doesn't match any trunk segment endpoint Y
 - **Avoid trunk/branch Y coincidence** — If components at the same Y positions feed different vertical trunks, offset one group (e.g., shift inverters by +GRID) so trunk segment endpoints don't share Y values with cross-trunk horizontal wires
+- **Wire through pin = unintended connection** — A wire passing through a component pin position (even NC pins) creates a connection in KiCad. Vertical trunks and horizontal branches must avoid ALL pin positions of components they pass near. Use `verify_schematics.py` to detect these
+- **NC pin positions matter** — The 74LVC1G04 NC pin (pin 1) has a real connection point at (center_x - 7.62, center_y - 2.54) in schematic space. Vertical trunks at this X will connect to the NC pin. Use half-grid trunk X offsets or different inverter Y offsets to avoid coincidence
+
+**kiutils API notes:**
+- Wire objects use `item.points[0]` and `item.points[1]` (Position objects) — NOT `startPoint`/`endPoint`
+- Check `item.type == 'wire'` to distinguish wires from other graphical items
+- Library sub-symbols have pins: iterate `lib_sym.symbols` then `sub_sym.pins`
+- Pin library coordinates use Y-up; apply Y negation + rotation for schematic space
 
 **Known limitations:**
 - `lib_symbol_mismatch` warnings are a kiutils serialization artifact — harmless, fix with "Update symbols from library" in KiCad
