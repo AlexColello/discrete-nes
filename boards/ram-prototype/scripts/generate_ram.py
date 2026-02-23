@@ -21,6 +21,7 @@ Produces:
 
 import copy
 import json
+import math
 import os
 import re
 import subprocess
@@ -276,6 +277,26 @@ class _MinimalBuilder:
         self.sch.to_file(path)
 
 
+def _fallback_pin_offsets(sym_name, angle):
+    """Get pin offsets from library symbol when ERC probe fails.
+
+    Library coordinates use Y-up; schematic uses Y-down.
+    KiCad rotation convention is CW in schematic space.
+    """
+    lib_sym = get_lib_symbols()[sym_name]
+    pins = {}
+    for unit in lib_sym.units:
+        for pin in unit.pins:
+            lx, ly = pin.position.X, pin.position.Y
+            rad = math.radians(angle)
+            # Library Y-up -> Schematic Y-down, then CW rotation
+            bx, by = lx, -ly
+            dx = round(math.cos(rad) * bx + math.sin(rad) * by, 2)
+            dy = round(-math.sin(rad) * bx + math.cos(rad) * by, 2)
+            pins[pin.number] = (dx, dy)
+    return pins
+
+
 def get_pin_offsets():
     """Return cached pin offsets, discovering them on first call."""
     global PIN_OFFSETS
@@ -283,6 +304,20 @@ def get_pin_offsets():
         print("Discovering pin offsets via kicad-cli ERC...")
         PIN_OFFSETS = discover_pin_offsets()
         print(f"  Discovered offsets for {len(PIN_OFFSETS)} component/angle combos")
+
+        # Fallback for any symbols where ERC didn't find pins
+        specs = [
+            ("74LVC1G04", 0), ("74LVC1G08", 0), ("74LVC1G00", 0),
+            ("74LVC1G11", 0), ("74LVC1G79", 0), ("74LVC1G125", 0),
+            ("R_Small", 90), ("LED_Small", 180), ("Conn_01x14", 0),
+        ]
+        for sym_name, angle in specs:
+            key = (sym_name, angle)
+            if key not in PIN_OFFSETS:
+                fallback = _fallback_pin_offsets(sym_name, angle)
+                if fallback:
+                    print(f"  Using library fallback for {sym_name} angle={angle}: {fallback}")
+                    PIN_OFFSETS[key] = fallback
     return PIN_OFFSETS
 
 
@@ -364,10 +399,13 @@ class SchematicBuilder:
             elif p.key == "Datasheet":
                 ds_val = p.value
 
+        # Hide reference for power symbols (#PWR, #FLG) to reduce clutter
+        hide_ref = ref_prefix.startswith("#")
+
         sym.properties = [
             Property(key="Reference", value=ref, id=0,
                      position=Position(X=x, Y=y - 2 * GRID, angle=0),
-                     effects=Effects(font=Font(width=1.27, height=1.27))),
+                     effects=Effects(font=Font(width=1.27, height=1.27), hide=hide_ref)),
             Property(key="Value", value=value, id=1,
                      position=Position(X=x, Y=y + 2 * GRID, angle=0),
                      effects=Effects(font=Font(width=1.27, height=1.27), hide=True)),
@@ -908,17 +946,22 @@ def generate_byte_sheet():
 def generate_root_sheet():
     """
     Root sheet: connector, bus indicator LEDs, and hierarchical sheet references.
+
+    Layout (left to right):
+      1. Connector J1 + bus indicator LEDs
+      2. Control hierarchy sheets (address decoder, control logic, write clk, read OE)
+      3. Byte hierarchy sheets (2 columns of 4)
     """
     b = SchematicBuilder(title="8-Byte Discrete RAM", page_size="A2")
     base_x, base_y = 25.4, 25.4
 
     # -- External connector --
     conn_x = base_x
-    conn_y = base_y + 20 * GRID
+    conn_y = base_y + 5 * GRID
     _, conn_pins = b.place_symbol("Conn_01x14", conn_x, conn_y,
                                   ref_prefix="J", value="SRAM_Bus")
 
-    # Wire connector pins to global labels
+    # Wire connector pins to local labels
     signal_names = [
         "A0", "A1", "A2",
         "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",
@@ -933,69 +976,73 @@ def generate_root_sheet():
         b.add_wire(px, py, label_x, py)
         b.add_label(sig, label_x, py, angle=180)
 
-    # Note: PWR_FLAG symbols are placed in address_decoder sub-sheet
-    # where they connect to IC power pins on VCC and GND nets
+    # -- Bus indicator LEDs (to the right of connector, grouped) --
+    led_base_x = base_x + 25 * GRID
+    led_y = base_y
 
-    # -- Bus indicator LEDs --
-    led_base_x = base_x + 20 * GRID
-    led_base_y = base_y
-
-    # Address LEDs
+    # Group label
+    # Address LEDs (A0-A2)
     for i in range(3):
-        y = led_base_y + i * 4 * GRID
+        y = led_y + i * 3 * GRID
         led_in = b.place_led_indicator(led_base_x, y)
         b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
         b.add_label(f"A{i}", led_in[0] - LABEL_STUB, led_in[1], angle=180)
 
-    # Data bus LEDs
+    # Data bus LEDs (D0-D7) -- gap after address
+    data_led_start = led_y + 3 * 3 * GRID + 2 * GRID
     for i in range(8):
-        y = led_base_y + (i + 3) * 4 * GRID
+        y = data_led_start + i * 3 * GRID
         led_in = b.place_led_indicator(led_base_x, y)
         b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
         b.add_label(f"D{i}", led_in[0] - LABEL_STUB, led_in[1], angle=180)
 
-    # Control signal LEDs
+    # Control signal LEDs (nCE, nOE, nWE) -- gap after data
+    ctrl_led_start = data_led_start + 8 * 3 * GRID + 2 * GRID
     ctrl_names = ["nCE", "nOE", "nWE"]
     for i, name in enumerate(ctrl_names):
-        y = led_base_y + (i + 11) * 4 * GRID
+        y = ctrl_led_start + i * 3 * GRID
         led_in = b.place_led_indicator(led_base_x, y)
         b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
         b.add_label(name, led_in[0] - LABEL_STUB, led_in[1], angle=180)
 
     # -- Hierarchical sheet references --
-    sheet_x = base_x + 55 * GRID
-    sheet_w = 30 * GRID
-    sheet_h = 20 * GRID
-    sheet_gap = 4 * GRID
+    # Column 1: control sheets (variable height based on pin count)
+    ctrl_sheet_x = base_x + 60 * GRID
+    ctrl_sheet_w = 28 * GRID
+    sheet_gap = 5 * GRID
+    wire_stub = 5.08
 
-    def add_sheet_ref(name, filename, pins, y_pos):
+    def _sheet_height(num_pins):
+        """Calculate sheet height to fit pins with 2.54mm spacing + margin."""
+        return snap(num_pins * 2.54 + 5.08)
+
+    def add_sheet_ref(name, filename, pins, sx, sy, sw, sh, fill_color):
         """Add a hierarchical sheet rectangle with pins."""
         sheet = HierarchicalSheet()
-        sheet.position = Position(X=sheet_x, Y=y_pos)
-        sheet.width = sheet_w
-        sheet.height = sheet_h
+        sheet.position = Position(X=sx, Y=sy)
+        sheet.width = sw
+        sheet.height = sh
         sheet.stroke = Stroke(width=0.1)
-        sheet.fill = ColorRGBA(R=255, G=255, B=225, A=255, precision=4)
+        sheet.fill = fill_color
         sheet.uuid = uid()
         sheet.sheetName = Property(
             key="Sheet name", value=name, id=0,
-            position=Position(X=sheet_x, Y=y_pos - 1.27, angle=0),
+            position=Position(X=sx, Y=sy - 1.27, angle=0),
             effects=Effects(font=Font(width=1.27, height=1.27)),
         )
         sheet.fileName = Property(
             key="Sheet file", value=filename, id=1,
-            position=Position(X=sheet_x, Y=y_pos + sheet_h + 1.27, angle=0),
+            position=Position(X=sx + sw, Y=sy + sh + 1.27, angle=0),
             effects=Effects(font=Font(width=1.27, height=1.27)),
         )
 
-        # Add hierarchical pins
+        # Add hierarchical pins along left edge
         for pin_idx, (pin_name, pin_type) in enumerate(pins):
             pin = HierarchicalPin()
             pin.name = pin_name
             pin.connectionType = pin_type
-            # Place pins along the left edge
-            pin.position = Position(X=sheet_x,
-                                    Y=y_pos + 2.54 + pin_idx * 2.54, angle=180)
+            pin.position = Position(X=sx,
+                                    Y=sy + 2.54 + pin_idx * 2.54, angle=180)
             pin.effects = Effects(font=Font(width=1.27, height=1.27))
             pin.uuid = uid()
             sheet.pins.append(pin)
@@ -1011,63 +1058,78 @@ def generate_root_sheet():
 
         b.sch.sheets.append(sheet)
 
-        # Add local labels + wires to connect to the sheet pins
+        # Wire + label for each pin
         for pin_idx, (pin_name, pin_type) in enumerate(pins):
-            pin_y = y_pos + 2.54 + pin_idx * 2.54
-            # Wire from sheet pin to label
-            b.add_wire(sheet_x, pin_y, sheet_x - 5.08, pin_y)
-            b.add_label(pin_name, sheet_x - 5.08, pin_y, angle=0)
+            pin_y = sy + 2.54 + pin_idx * 2.54
+            b.add_wire(sx, pin_y, sx - wire_stub, pin_y)
+            b.add_label(pin_name, sx - wire_stub, pin_y, angle=0)
 
-    # Address decoder sheet
+    yellow_fill = ColorRGBA(R=255, G=255, B=225, A=255, precision=4)
+    green_fill = ColorRGBA(R=225, G=255, B=225, A=255, precision=4)
+
+    # Address decoder (11 pins)
     addr_pins = [("A0", "input"), ("A1", "input"), ("A2", "input")]
     addr_pins += [(f"SEL{i}", "output") for i in range(8)]
-    y = base_y
-    add_sheet_ref("Address Decoder", "address_decoder.kicad_sch", addr_pins, y)
+    addr_h = _sheet_height(len(addr_pins))
+    y_cursor = base_y
+    add_sheet_ref("Address Decoder", "address_decoder.kicad_sch",
+                  addr_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, addr_h, yellow_fill)
 
-    # Control logic sheet
-    y += sheet_h + sheet_gap
+    # Control logic (5 pins)
+    y_cursor += addr_h + sheet_gap
     ctrl_pins = [("nCE", "input"), ("nOE", "input"), ("nWE", "input"),
                  ("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
-    add_sheet_ref("Control Logic", "control_logic.kicad_sch", ctrl_pins, y)
+    ctrl_h = _sheet_height(len(ctrl_pins))
+    add_sheet_ref("Control Logic", "control_logic.kicad_sch",
+                  ctrl_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, ctrl_h, yellow_fill)
 
-    # Write clock gen sheet
-    y += sheet_h + sheet_gap
+    # Write clock gen (17 pins)
+    y_cursor += ctrl_h + sheet_gap
     wclk_pins = [("WRITE_ACTIVE", "input")]
     wclk_pins += [(f"SEL{i}", "input") for i in range(8)]
     wclk_pins += [(f"WRITE_CLK_{i}", "output") for i in range(8)]
-    add_sheet_ref("Write Clk Gen", "write_clk_gen.kicad_sch", wclk_pins, y)
+    wclk_h = _sheet_height(len(wclk_pins))
+    add_sheet_ref("Write Clk Gen", "write_clk_gen.kicad_sch",
+                  wclk_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, wclk_h, yellow_fill)
 
-    # Read OE gen sheet
-    y += sheet_h + sheet_gap
+    # Read OE gen (17 pins)
+    y_cursor += wclk_h + sheet_gap
     roe_pins = [("READ_EN", "input")]
     roe_pins += [(f"SEL{i}", "input") for i in range(8)]
     roe_pins += [(f"BUF_OE_{i}", "output") for i in range(8)]
-    add_sheet_ref("Read OE Gen", "read_oe_gen.kicad_sch", roe_pins, y)
+    roe_h = _sheet_height(len(roe_pins))
+    add_sheet_ref("Read OE Gen", "read_oe_gen.kicad_sch",
+                  roe_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, roe_h, yellow_fill)
 
-    # 8 byte sheets (in a second column) -- all reference the same byte.kicad_sch
-    sheet_x_col2 = sheet_x + sheet_w + 15 * GRID
-    # Pin names inside byte.kicad_sch are generic; parent connects instance-specific nets
+    # -- Byte sheets: 2 columns of 4 --
     byte_pin_defs = [("WRITE_CLK", "input"), ("BUF_OE", "input")]
     byte_pin_defs += [(f"D{bit}", "bidirectional") for bit in range(8)]
+    byte_h = _sheet_height(len(byte_pin_defs))
+    byte_w = 22 * GRID
+    byte_col1_x = ctrl_sheet_x + ctrl_sheet_w + 18 * GRID
+    byte_col2_x = byte_col1_x + byte_w + 18 * GRID
 
     for byte_idx in range(8):
-        y = base_y + byte_idx * (sheet_h + sheet_gap)
+        col = byte_idx // 4
+        row = byte_idx % 4
+        sx = byte_col1_x if col == 0 else byte_col2_x
+        sy = base_y + row * (byte_h + sheet_gap)
 
         sheet = HierarchicalSheet()
-        sheet.position = Position(X=sheet_x_col2, Y=y)
-        sheet.width = sheet_w
-        sheet.height = sheet_h
+        sheet.position = Position(X=sx, Y=sy)
+        sheet.width = byte_w
+        sheet.height = byte_h
         sheet.stroke = Stroke(width=0.1)
-        sheet.fill = ColorRGBA(R=225, G=255, B=225, A=255, precision=4)
+        sheet.fill = green_fill
         sheet.uuid = uid()
         sheet.sheetName = Property(
             key="Sheet name", value=f"Byte {byte_idx}", id=0,
-            position=Position(X=sheet_x_col2, Y=y - 1.27, angle=0),
+            position=Position(X=sx, Y=sy - 1.27, angle=0),
             effects=Effects(font=Font(width=1.27, height=1.27)),
         )
         sheet.fileName = Property(
             key="Sheet file", value="byte.kicad_sch", id=1,
-            position=Position(X=sheet_x_col2, Y=y + sheet_h + 1.27, angle=0),
+            position=Position(X=sx + byte_w, Y=sy + byte_h + 1.27, angle=0),
             effects=Effects(font=Font(width=1.27, height=1.27)),
         )
 
@@ -1075,8 +1137,8 @@ def generate_root_sheet():
             pin = HierarchicalPin()
             pin.name = pin_name
             pin.connectionType = pin_type
-            pin.position = Position(X=sheet_x_col2,
-                                    Y=y + 2.54 + pin_idx * 2.54, angle=180)
+            pin.position = Position(X=sx,
+                                    Y=sy + 2.54 + pin_idx * 2.54, angle=180)
             pin.effects = Effects(font=Font(width=1.27, height=1.27))
             pin.uuid = uid()
             sheet.pins.append(pin)
@@ -1091,19 +1153,17 @@ def generate_root_sheet():
 
         b.sch.sheets.append(sheet)
 
-        # Local labels + wires connecting to byte sheet pins
-        # Map generic pin names to instance-specific net names
+        # Wire + labels (map generic pin names to instance-specific nets)
         for pin_idx, (pin_name, pin_type) in enumerate(byte_pin_defs):
-            pin_y = y + 2.54 + pin_idx * 2.54
+            pin_y = sy + 2.54 + pin_idx * 2.54
             if pin_name == "WRITE_CLK":
                 net_name = f"WRITE_CLK_{byte_idx}"
             elif pin_name == "BUF_OE":
                 net_name = f"BUF_OE_{byte_idx}"
             else:
                 net_name = pin_name
-            # Wire from sheet pin to label
-            b.add_wire(sheet_x_col2, pin_y, sheet_x_col2 - 5.08, pin_y)
-            b.add_label(net_name, sheet_x_col2 - 5.08, pin_y, angle=0)
+            b.add_wire(sx, pin_y, sx - wire_stub, pin_y)
+            b.add_label(net_name, sx - wire_stub, pin_y, angle=0)
 
     return b
 

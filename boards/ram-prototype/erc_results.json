@@ -1,0 +1,165 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-02-22T20:05:48-0800",
+    "kicad_version": "9.0.7",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494",
+            "violations": [
+                {
+                    "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
+                    "items": [
+                        {
+                            "description": "Symbol U1 [74LVC1G04]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.254
+                            },
+                            "uuid": "88db2bcb-a041-43d4-a600-85d7f622acff"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                },
+                {
+                    "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
+                    "items": [
+                        {
+                            "description": "Symbol U2 [74LVC1G04]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.508
+                            },
+                            "uuid": "61d6019f-3e5c-4792-a418-adb910a72df5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                },
+                {
+                    "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
+                    "items": [
+                        {
+                            "description": "Symbol U3 [74LVC1G04]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.762
+                            },
+                            "uuid": "ac4b64c5-d50a-4258-9f45-d39700c150fc"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                },
+                {
+                    "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
+                    "items": [
+                        {
+                            "description": "Symbol U12 [74LVC1G04]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.254
+                            },
+                            "uuid": "2c0cc350-a39d-4091-8ee1-a07c73856a3f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                },
+                {
+                    "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
+                    "items": [
+                        {
+                            "description": "Symbol U13 [74LVC1G04]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.508
+                            },
+                            "uuid": "234d0a44-bc23-4dd1-99d7-2dbb00276ef2"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                },
+                {
+                    "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
+                    "items": [
+                        {
+                            "description": "Symbol U14 [74LVC1G04]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.762
+                            },
+                            "uuid": "33c06d9e-5d49-438c-9a16-4e486a42ff2a"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                }
+            ]
+        },
+        {
+            "path": "/Address Decoder/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/e2f60003-8d28-409a-8866-d15df6bb3952",
+            "violations": []
+        },
+        {
+            "path": "/Control Logic/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/686f3986-6905-4a56-a97d-aac8424fa37d",
+            "violations": []
+        },
+        {
+            "path": "/Write Clk Gen/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/621026f6-abd2-4958-8010-dfea045b21ae",
+            "violations": []
+        },
+        {
+            "path": "/Read OE Gen/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/6faa958f-f311-4a61-a503-c48d9744ca04",
+            "violations": []
+        },
+        {
+            "path": "/Byte 0/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/ffcb7969-7d00-406c-b388-f6838f28eb56",
+            "violations": []
+        },
+        {
+            "path": "/Byte 1/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/0c6473a7-6d04-48e2-8a45-de94567e1200",
+            "violations": []
+        },
+        {
+            "path": "/Byte 2/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/90328c95-c196-473a-bc06-a212cded37dc",
+            "violations": []
+        },
+        {
+            "path": "/Byte 3/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/f28a878e-1fdf-4823-b61a-2866f51f0455",
+            "violations": []
+        },
+        {
+            "path": "/Byte 4/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/5ae3f935-1284-464f-9bcc-58b67bdeb481",
+            "violations": []
+        },
+        {
+            "path": "/Byte 5/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/abad3cc5-ef8f-4066-bae2-d46ecdc28ab5",
+            "violations": []
+        },
+        {
+            "path": "/Byte 6/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/c234f6fc-c390-4077-88d7-763262481120",
+            "violations": []
+        },
+        {
+            "path": "/Byte 7/",
+            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/a5ee4ec6-6e33-4545-bc63-c00cf07578d6",
+            "violations": []
+        }
+    ],
+    "source": "ram.kicad_sch"
+}
