@@ -1,12 +1,12 @@
 {
     "$schema": "https://schemas.kicad.org/erc.v1.json",
     "coordinate_units": "mm",
-    "date": "2026-02-22T20:05:48-0800",
+    "date": "2026-02-23T01:26:37-0800",
     "kicad_version": "9.0.7",
     "sheets": [
         {
             "path": "/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b",
             "violations": [
                 {
                     "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
@@ -14,10 +14,10 @@
                         {
                             "description": "Symbol U1 [74LVC1G04]",
                             "pos": {
-                                "x": 0.5588,
-                                "y": 0.254
+                                "x": 0.7112,
+                                "y": 0.3048
                             },
-                            "uuid": "88db2bcb-a041-43d4-a600-85d7f622acff"
+                            "uuid": "f9db17f3-eb84-4b78-a77f-8ad7813df48e"
                         }
                     ],
                     "severity": "warning",
@@ -29,10 +29,10 @@
                         {
                             "description": "Symbol U2 [74LVC1G04]",
                             "pos": {
-                                "x": 0.5588,
-                                "y": 0.508
+                                "x": 0.7112,
+                                "y": 0.5588
                             },
-                            "uuid": "61d6019f-3e5c-4792-a418-adb910a72df5"
+                            "uuid": "4eeb8ebd-1d76-49b4-b5e3-22e1d1cc8c4d"
                         }
                     ],
                     "severity": "warning",
@@ -44,10 +44,10 @@
                         {
                             "description": "Symbol U3 [74LVC1G04]",
                             "pos": {
-                                "x": 0.5588,
-                                "y": 0.762
+                                "x": 0.7112,
+                                "y": 0.8128
                             },
-                            "uuid": "ac4b64c5-d50a-4258-9f45-d39700c150fc"
+                            "uuid": "f9f78db4-8a39-4e7a-8b06-0ca153333672"
                         }
                     ],
                     "severity": "warning",
@@ -59,10 +59,10 @@
                         {
                             "description": "Symbol U12 [74LVC1G04]",
                             "pos": {
-                                "x": 0.5588,
-                                "y": 0.254
+                                "x": 0.635,
+                                "y": 0.3048
                             },
-                            "uuid": "2c0cc350-a39d-4091-8ee1-a07c73856a3f"
+                            "uuid": "7809cd7d-6dc7-4b99-8f2c-7c093661a16b"
                         }
                     ],
                     "severity": "warning",
@@ -74,10 +74,10 @@
                         {
                             "description": "Symbol U13 [74LVC1G04]",
                             "pos": {
-                                "x": 0.5588,
-                                "y": 0.508
+                                "x": 0.635,
+                                "y": 0.5588
                             },
-                            "uuid": "234d0a44-bc23-4dd1-99d7-2dbb00276ef2"
+                            "uuid": "250dc401-793e-4be0-8aba-34c8850ca1f3"
                         }
                     ],
                     "severity": "warning",
@@ -89,10 +89,10 @@
                         {
                             "description": "Symbol U14 [74LVC1G04]",
                             "pos": {
-                                "x": 0.5588,
-                                "y": 0.762
+                                "x": 0.635,
+                                "y": 0.8128
                             },
-                            "uuid": "33c06d9e-5d49-438c-9a16-4e486a42ff2a"
+                            "uuid": "f1520f1d-f83d-4c62-91c2-8ee67ac9ab72"
                         }
                     ],
                     "severity": "warning",
@@ -102,62 +102,116 @@
         },
         {
             "path": "/Address Decoder/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/e2f60003-8d28-409a-8866-d15df6bb3952",
-            "violations": []
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/5c7a5302-9b20-4d1c-8b8e-f5c7722d6f36",
+            "violations": [
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U6 Pin 1 [Input, Line]",
+                            "pos": {
+                                "x": 1.1684,
+                                "y": 0.8128
+                            },
+                            "uuid": "63dd85a1-7dd2-46cb-89b5-0b32933f4eaa"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Input pin not driven by any Output pins",
+                    "items": [
+                        {
+                            "description": "Symbol U6 Pin 1 [Input, Line]",
+                            "pos": {
+                                "x": 1.1684,
+                                "y": 0.8128
+                            },
+                            "uuid": "63dd85a1-7dd2-46cb-89b5-0b32933f4eaa"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_driven"
+                },
+                {
+                    "description": "Both A1 and A2 are attached to the same items; A1 will be used in the netlist",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'A1'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 0.2286
+                            },
+                            "uuid": "fd5136cd-d186-4213-9656-87c62f685222"
+                        },
+                        {
+                            "description": "Hierarchical Label 'A2'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 0.254
+                            },
+                            "uuid": "a8d87d78-8c24-4ec9-b748-e6f86d97e5d8"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "multiple_net_names"
+                }
+            ]
         },
         {
             "path": "/Control Logic/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/686f3986-6905-4a56-a97d-aac8424fa37d",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/b931b66a-09e5-4b2b-8e9b-b70681d8f4ed",
             "violations": []
         },
         {
             "path": "/Write Clk Gen/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/621026f6-abd2-4958-8010-dfea045b21ae",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/23053ae3-bd53-4196-8a3c-073c40fbb847",
             "violations": []
         },
         {
             "path": "/Read OE Gen/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/6faa958f-f311-4a61-a503-c48d9744ca04",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/222c3ec7-8bae-4480-b306-95670f2931aa",
             "violations": []
         },
         {
             "path": "/Byte 0/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/ffcb7969-7d00-406c-b388-f6838f28eb56",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/d66b373b-222b-4395-92fd-b60d36219a7c",
             "violations": []
         },
         {
             "path": "/Byte 1/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/0c6473a7-6d04-48e2-8a45-de94567e1200",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/e106f71f-8a23-4344-94c7-213bb594fe21",
             "violations": []
         },
         {
             "path": "/Byte 2/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/90328c95-c196-473a-bc06-a212cded37dc",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/d59bbe42-3f74-494c-ba65-de57c74fdda1",
             "violations": []
         },
         {
             "path": "/Byte 3/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/f28a878e-1fdf-4823-b61a-2866f51f0455",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/691dfd4e-6fe8-4f08-807b-4485f75200fc",
             "violations": []
         },
         {
             "path": "/Byte 4/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/5ae3f935-1284-464f-9bcc-58b67bdeb481",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/6b3ed3c1-51c4-4462-82fa-b051ab24b468",
             "violations": []
         },
         {
             "path": "/Byte 5/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/abad3cc5-ef8f-4066-bae2-d46ecdc28ab5",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/16248a35-fb5f-45c7-86d5-0857a625639d",
             "violations": []
         },
         {
             "path": "/Byte 6/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/c234f6fc-c390-4077-88d7-763262481120",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/76c24ea9-392a-4c0f-aee5-a158d7c5c4ef",
             "violations": []
         },
         {
             "path": "/Byte 7/",
-            "uuid_path": "/14b2f2f1-ef5a-4fce-b794-7542c9d2b494/a5ee4ec6-6e33-4545-bc63-c00cf07578d6",
+            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/c97acf37-fb4c-4495-b93e-7187cd5a50e9",
             "violations": []
         }
     ],

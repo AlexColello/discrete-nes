@@ -36,6 +36,7 @@ from kiutils.items.schitems import (
     HierarchicalSheetInstance, HierarchicalSheetProjectInstance,
     HierarchicalSheetProjectPath, SymbolInstance,
     SymbolProjectInstance, SymbolProjectPath,
+    Junction,
 )
 from kiutils.items.common import (
     Position, Property, Effects, Font, Stroke, Fill, ColorRGBA, PageSettings,
@@ -555,6 +556,55 @@ class SchematicBuilder:
         self.sch.graphicalItems.append(conn)
         return conn
 
+    def add_junction(self, x, y):
+        """Add a junction dot at (x, y) for T-connections."""
+        x, y = snap(x), snap(y)
+        j = Junction()
+        j.position = Position(X=x, Y=y)
+        j.diameter = 0  # use default
+        j.color = ColorRGBA()
+        j.uuid = uid()
+        self.sch.junctions.append(j)
+
+    def add_segmented_trunk(self, x, ys):
+        """Create a segmented vertical trunk wire at x with connections at each y.
+
+        Instead of one long wire from min to max Y, creates separate wire
+        segments between consecutive Y values.  This ensures that every
+        branch point is a wire endpoint, which KiCad 9 requires for
+        reliable T-connection recognition.
+
+        Junctions are placed at all intermediate Y values (not first/last).
+        """
+        sorted_ys = sorted(set(snap(y) for y in ys))
+        if len(sorted_ys) < 2:
+            return
+        for i in range(len(sorted_ys) - 1):
+            self.add_wire(x, sorted_ys[i], x, sorted_ys[i + 1])
+        for y in sorted_ys[1:-1]:
+            self.add_junction(x, y)
+
+    def place_led_below(self, x, y, drop=None):
+        """Branch an LED indicator below a main horizontal wire.
+
+        Places the LED chain at (x, y + drop), wires down from (x, y),
+        and adds a junction at (x, y) so the main wire can continue through.
+
+        Returns the junction point (x, y) — caller wires through this point.
+        """
+        if drop is None:
+            drop = 3 * GRID
+        x, y = snap(x), snap(y)
+        led_y = snap(y + drop)
+        led_in = self.place_led_indicator(x, led_y)
+        # L-wire: vertical from junction down, then horizontal to LED entry
+        self.add_wire(x, y, x, led_in[1])
+        if snap(led_in[0]) != x:
+            self.add_wire(x, led_in[1], led_in[0], led_in[1])
+        # Junction at the branch point on the main wire
+        self.add_junction(x, y)
+        return (x, y)
+
     # -- power symbols --
 
     def place_power(self, symbol_name, x, y, angle=0):
@@ -590,88 +640,133 @@ def generate_address_decoder():
     SEL1 = /A2 & /A1 &  A0
     ...
     SEL7 =  A2 &  A1 &  A0
+
+    Wiring approach:
+      - A0/A1/A2: hier label → wire → vertical trunk, branches to inverter + AND inputs
+      - A0_INV/A1_INV/A2_INV: inverter output → LED T-junction → vertical trunk → AND inputs
+      - SEL0-SEL7: AND output → LED T-junction → wire → hier label
     """
     b = SchematicBuilder(title="Address Decoder", page_size="A3")
-    base_x, base_y = 25.4, 25.4
+    base_x, base_y = 25.4, 30.48
 
-    # Hierarchical labels for inputs -- with wire stubs connecting to local labels
+    inv_x = base_x + 18 * GRID
+    and_x = base_x + 42 * GRID
+    hl_out_x = and_x + 22 * GRID
+
+    # X positions for 6 vertical trunks (A0, A1, A2, A0_INV, A1_INV, A2_INV)
+    # Spaced between inverters and AND gates
+    addr_trunk_x = [base_x + 8 * GRID + i * 2 * GRID for i in range(3)]   # A0, A1, A2
+    inv_trunk_x = [base_x + 30 * GRID + i * 2 * GRID for i in range(3)]  # A0_INV, A1_INV, A2_INV
+
+    # The AND gates span 8 rows (SEL0-SEL7)
+    and_top_y = base_y
+    and_bot_y = base_y + 7 * SYM_SPACING_Y
+
+    # -- Hierarchical labels for A0-A2, wired to trunk tops --
     for i in range(3):
-        hl_y = base_y + i * SYM_SPACING_Y
-        b.add_hier_label(f"A{i}", base_x, hl_y, shape="input", angle=180)
-        b.add_wire(base_x, hl_y, base_x + LABEL_STUB, hl_y)
-        b.add_label(f"A{i}", base_x + LABEL_STUB, hl_y)
+        trunk_top_y = snap(base_y - (4 - i) * GRID)  # stagger slightly
+        b.add_hier_label(f"A{i}", base_x, trunk_top_y, shape="input", angle=180)
+        b.add_wire(base_x, trunk_top_y, addr_trunk_x[i], trunk_top_y)
 
-    # Three inverters for complemented address bits
-    inv_x = base_x + 12 * GRID
+    # -- Three inverters for complemented address bits --
+    inv_in_pins = []   # inverter input pin positions
+    inv_out_pins = []  # inverter output pin positions
     for i in range(3):
         y = base_y + i * SYM_SPACING_Y
         _, pins = b.place_symbol("74LVC1G04", inv_x, y)
         b.connect_power(pins)
+        inv_in_pins.append(pins["2"])
+        inv_out_pins.append(pins["4"])
 
-        # Input: wire stub + label
-        in_pin = pins["2"]
-        b.add_wire(*in_pin, in_pin[0] - LABEL_STUB, in_pin[1])
-        b.add_label(f"A{i}", in_pin[0] - LABEL_STUB, in_pin[1])
-
-        # Output: wire to LED chain + label
-        out_pin = pins["4"]
-        led_in = b.place_led_indicator(out_pin[0] + LED_GAP_X, out_pin[1])
-        b.add_wire(*out_pin, *led_in)
-        b.add_label(f"A{i}_INV", *out_pin)
-
-    # 8 three-input AND gates for decode
-    and_x = base_x + 35 * GRID
+    # Wire address trunks: each A{i} trunk connects to inverter input + AND gate inputs
     decode_table = [
         (0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1),
         (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1),
     ]
+    # Pin mapping for 74LVC1G11: pin 6=A2, pin 1=A1, pin 3=A0
+    addr_pin_map = {0: "3", 1: "1", 2: "6"}  # address bit index → AND gate pin number
 
-    for sel_idx, (a2, a1, a0) in enumerate(decode_table):
+    # Place 8 AND gates first to get pin positions
+    and_gate_pins = []
+    for sel_idx in range(8):
         y = base_y + sel_idx * SYM_SPACING_Y
         _, pins = b.place_symbol("74LVC1G11", and_x, y)
         b.connect_power(pins, gnd_pin="2")
+        and_gate_pins.append(pins)
 
-        # Input wire stubs + labels
-        # Pin 6 = top input (A2), Pin 1 = middle input (A1), Pin 3 = bottom input (A0)
-        a2_net = "A2" if a2 else "A2_INV"
-        a2_pin = pins["6"]
-        b.add_wire(*a2_pin, a2_pin[0] - LABEL_STUB, a2_pin[1])
-        b.add_label(a2_net, a2_pin[0] - LABEL_STUB, a2_pin[1])
+    # -- Wire each address bit trunk (A0, A1, A2) --
+    for addr_i in range(3):
+        trunk_x = addr_trunk_x[addr_i]
+        trunk_top_y = snap(base_y - (4 - addr_i) * GRID)
+        inv_in = inv_in_pins[addr_i]
+        pin_num = addr_pin_map[addr_i]
 
-        a1_net = "A1" if a1 else "A1_INV"
-        a1_pin = pins["1"]
-        b.add_wire(*a1_pin, a1_pin[0] - LABEL_STUB, a1_pin[1])
-        b.add_label(a1_net, a1_pin[0] - LABEL_STUB, a1_pin[1])
+        # Collect Y positions where this trunk branches: inverter input + AND gates using A{i}
+        trunk_ys = [trunk_top_y, inv_in[1]]
+        branch_targets = [(inv_in[0], inv_in[1])]
+        for sel_idx, bits in enumerate(decode_table):
+            if bits[2 - addr_i] == 1:  # this AND uses the true (non-inverted) signal
+                target = and_gate_pins[sel_idx][pin_num]
+                trunk_ys.append(target[1])
+                branch_targets.append((target[0], target[1]))
 
-        a0_net = "A0" if a0 else "A0_INV"
-        a0_pin = pins["3"]
-        b.add_wire(*a0_pin, a0_pin[0] - LABEL_STUB, a0_pin[1])
-        b.add_label(a0_net, a0_pin[0] - LABEL_STUB, a0_pin[1])
+        # Segmented vertical trunk (splits at every branch point)
+        b.add_segmented_trunk(trunk_x, trunk_ys)
 
-        # Output: wire to LED + label
+        # Horizontal branches
+        for tx, ty in branch_targets:
+            b.add_wire(trunk_x, ty, tx, ty)
+
+    # -- Wire each inverted bit trunk (A0_INV, A1_INV, A2_INV) --
+    for addr_i in range(3):
+        trunk_x = inv_trunk_x[addr_i]
+        out_pin = inv_out_pins[addr_i]
+        pin_num = addr_pin_map[addr_i]
+
+        # Inverter output → LED T-junction → horizontal wire to trunk
+        led_jct_x = out_pin[0] + 2 * GRID
+        # Wire from inverter output to trunk (split at LED junction point)
+        b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
+        b.add_wire(led_jct_x, out_pin[1], trunk_x, out_pin[1])
+        # LED branches down from a point on this wire
+        b.place_led_below(led_jct_x, out_pin[1])
+
+        # Collect AND gate inputs using inverted signal
+        branch_targets = []
+        trunk_ys = [out_pin[1]]
+        for sel_idx, bits in enumerate(decode_table):
+            if bits[2 - addr_i] == 0:  # this AND uses the inverted signal
+                target = and_gate_pins[sel_idx][pin_num]
+                branch_targets.append((target[0], target[1]))
+                trunk_ys.append(target[1])
+
+        if branch_targets:
+            # Segmented vertical trunk
+            b.add_segmented_trunk(trunk_x, trunk_ys)
+            # Horizontal branches to AND inputs
+            for tx, ty in branch_targets:
+                b.add_wire(trunk_x, ty, tx, ty)
+
+    # -- SEL outputs: AND output → LED T-junction → wire → hier label --
+    for sel_idx in range(8):
+        pins = and_gate_pins[sel_idx]
         out_pin = pins["4"]
-        sel_net = f"SEL{sel_idx}"
-        led_in = b.place_led_indicator(out_pin[0] + LED_GAP_X, out_pin[1])
-        b.add_wire(*out_pin, *led_in)
-        b.add_label(sel_net, *out_pin)
 
-    # Hierarchical labels for outputs -- with wire stubs connecting to local labels
-    hl_out_x = and_x + 25 * GRID
-    for i in range(8):
-        hl_y = base_y + i * SYM_SPACING_Y
-        b.add_hier_label(f"SEL{i}", hl_out_x, hl_y, shape="output")
-        b.add_wire(hl_out_x, hl_y, hl_out_x - LABEL_STUB, hl_y)
-        b.add_label(f"SEL{i}", hl_out_x - LABEL_STUB, hl_y)
+        # Wire from AND output to hier label, split at LED junction
+        led_jct_x = out_pin[0] + 2 * GRID
+        b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
+        b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
+        # LED branches below from junction on this wire
+        b.place_led_below(led_jct_x, out_pin[1])
+        # Hier label at end of wire
+        b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output")
 
-    # PWR_FLAG symbols on VCC and GND nets to satisfy ERC "power pin not driven"
-    # Place at an open area, connected to power net via short wire
+    # PWR_FLAG symbols on VCC and GND nets
     pwr_flag_x = hl_out_x + 10 * GRID
     pwr_flag_y = base_y
-    # VCC PWR_FLAG: VCC symbol + PWR_FLAG at same point
-    _, vcc_pins = b.place_power("VCC", pwr_flag_x, pwr_flag_y)
+    b.place_power("VCC", pwr_flag_x, pwr_flag_y)
     b.place_power("PWR_FLAG", pwr_flag_x, pwr_flag_y)
-    # GND PWR_FLAG: GND symbol + PWR_FLAG at same point
-    _, gnd_pins = b.place_power("GND", pwr_flag_x + 10 * GRID, pwr_flag_y)
+    b.place_power("GND", pwr_flag_x + 10 * GRID, pwr_flag_y)
     b.place_power("PWR_FLAG", pwr_flag_x + 10 * GRID, pwr_flag_y)
 
     return b
@@ -690,102 +785,140 @@ def generate_control_logic():
       1x 74LVC1G08 AND(CE, WE) -> WRITE_ACTIVE
       1x 74LVC1G08 AND(CE, OE) -> CE_AND_OE
       1x 74LVC1G08 AND(CE_AND_OE, /WE) -> READ_EN
+
+    All connections are direct wires — no local labels.
     """
     b = SchematicBuilder(title="Control Logic", page_size="A3")
-    base_x, base_y = 25.4, 25.4
+    base_x, base_y = 25.4, 30.48
 
-    # Hierarchical labels for inputs -- with wire stubs
-    ctrl_signals = ["nCE", "nOE", "nWE"]
-    for i, sig in enumerate(ctrl_signals):
-        hl_y = base_y + i * SYM_SPACING_Y
-        b.add_hier_label(sig, base_x, hl_y, shape="input", angle=180)
-        b.add_wire(base_x, hl_y, base_x + LABEL_STUB, hl_y)
-        b.add_label(sig, base_x + LABEL_STUB, hl_y)
+    inv_x = base_x + 15 * GRID
+    and1_x = base_x + 42 * GRID    # AND(CE, WE) → WRITE_ACTIVE
+    and2_x = base_x + 42 * GRID    # AND(CE, OE) → CE_AND_OE
+    and3_x = base_x + 62 * GRID    # AND(CE_AND_OE, /WE) → READ_EN
 
-    # Three inverters
-    inv_x = base_x + 12 * GRID
-    active_names = ["CE", "OE", "WE"]
-    for i, (ctrl, active) in enumerate(zip(ctrl_signals, active_names)):
-        y = base_y + i * SYM_SPACING_Y
-        _, pins = b.place_symbol("74LVC1G04", inv_x, y)
-        b.connect_power(pins)
+    # Inverter row Y positions
+    ce_y = base_y
+    oe_y = base_y + SYM_SPACING_Y
+    we_y = base_y + 2 * SYM_SPACING_Y
 
-        # Input: wire stub + label
-        in_pin = pins["2"]
-        b.add_wire(*in_pin, in_pin[0] - LABEL_STUB, in_pin[1])
-        b.add_label(ctrl, in_pin[0] - LABEL_STUB, in_pin[1])
+    # AND gate Y positions (between inverter rows for clean routing)
+    and1_y = base_y + 4 * GRID      # CE & WE
+    and2_y = base_y + 14 * GRID     # CE & OE
+    and3_y = and2_y                  # CE_AND_OE & /WE (same row, further right)
 
-        # Output: wire to LED + label
-        out_pin = pins["4"]
-        led_in = b.place_led_indicator(out_pin[0] + LED_GAP_X, out_pin[1])
-        b.add_wire(*out_pin, *led_in)
-        b.add_label(active, *out_pin)
+    # -- Hier labels for inputs → wire to inverter inputs --
+    # nCE
+    b.add_hier_label("nCE", base_x, ce_y, shape="input", angle=180)
+    _, ce_inv_pins = b.place_symbol("74LVC1G04", inv_x, ce_y)
+    b.connect_power(ce_inv_pins)
+    ce_inv_in = ce_inv_pins["2"]
+    # nCE also fans out to nowhere else, just wire hier label to inverter input
+    b.add_wire(base_x, ce_y, ce_inv_in[0], ce_inv_in[1])
 
-    # AND1: CE & WE -> WRITE_ACTIVE
-    and1_x = base_x + 35 * GRID
-    and1_y = base_y + 5 * GRID
-    _, pins = b.place_symbol("74LVC1G08", and1_x, and1_y)
-    b.connect_power(pins)
+    # nOE
+    b.add_hier_label("nOE", base_x, oe_y, shape="input", angle=180)
+    _, oe_inv_pins = b.place_symbol("74LVC1G04", inv_x, oe_y)
+    b.connect_power(oe_inv_pins)
+    oe_inv_in = oe_inv_pins["2"]
+    b.add_wire(base_x, oe_y, oe_inv_in[0], oe_inv_in[1])
 
-    in_a = pins["1"]
-    b.add_wire(*in_a, in_a[0] - LABEL_STUB, in_a[1])
-    b.add_label("CE", in_a[0] - LABEL_STUB, in_a[1])
-    in_b = pins["2"]
-    b.add_wire(*in_b, in_b[0] - LABEL_STUB, in_b[1])
-    b.add_label("WE", in_b[0] - LABEL_STUB, in_b[1])
+    # nWE — fans out to inverter input AND AND3 input B (via junction)
+    nwe_jct_x = base_x + 8 * GRID
+    b.add_hier_label("nWE", base_x, we_y, shape="input", angle=180)
+    _, we_inv_pins = b.place_symbol("74LVC1G04", inv_x, we_y)
+    b.connect_power(we_inv_pins)
+    we_inv_in = we_inv_pins["2"]
+    # nWE wire to inverter is created below (split at junction for AND3.B tap)
 
-    out_pin = pins["4"]
-    led_in = b.place_led_indicator(out_pin[0] + LED_GAP_X, out_pin[1])
-    b.add_wire(*out_pin, *led_in)
-    b.add_label("WRITE_ACTIVE", *out_pin)
+    # -- Inverter outputs with LED T-junctions --
 
-    # AND2: CE & OE -> CE_AND_OE
-    and2_x = base_x + 35 * GRID
-    and2_y = base_y + 15 * GRID
-    _, pins = b.place_symbol("74LVC1G08", and2_x, and2_y)
-    b.connect_power(pins)
+    # CE inverter output → fans out to AND1 pin A and AND2 pin A
+    ce_out = ce_inv_pins["4"]
 
-    in_a = pins["1"]
-    b.add_wire(*in_a, in_a[0] - LABEL_STUB, in_a[1])
-    b.add_label("CE", in_a[0] - LABEL_STUB, in_a[1])
-    in_b = pins["2"]
-    b.add_wire(*in_b, in_b[0] - LABEL_STUB, in_b[1])
-    b.add_label("OE", in_b[0] - LABEL_STUB, in_b[1])
+    # OE inverter output → fans out to AND2 pin B only
+    oe_out = oe_inv_pins["4"]
 
-    out_pin = pins["4"]
-    led_in = b.place_led_indicator(out_pin[0] + LED_GAP_X, out_pin[1])
-    b.add_wire(*out_pin, *led_in)
-    b.add_label("CE_AND_OE", *out_pin)
+    # WE inverter output → fans out to AND1 pin B only
+    we_out = we_inv_pins["4"]
 
-    # AND3: CE_AND_OE & /WE -> READ_EN
-    and3_x = base_x + 55 * GRID
-    and3_y = base_y + 15 * GRID
-    _, pins = b.place_symbol("74LVC1G08", and3_x, and3_y)
-    b.connect_power(pins)
+    # -- AND1: CE & WE → WRITE_ACTIVE --
+    _, and1_pins = b.place_symbol("74LVC1G08", and1_x, and1_y)
+    b.connect_power(and1_pins)
+    and1_a = and1_pins["1"]   # CE
+    and1_b = and1_pins["2"]   # WE
+    and1_out = and1_pins["4"]
 
-    in_a = pins["1"]
-    b.add_wire(*in_a, in_a[0] - LABEL_STUB, in_a[1])
-    b.add_label("CE_AND_OE", in_a[0] - LABEL_STUB, in_a[1])
-    in_b = pins["2"]
-    b.add_wire(*in_b, in_b[0] - LABEL_STUB, in_b[1])
-    b.add_label("nWE", in_b[0] - LABEL_STUB, in_b[1])
+    # -- AND2: CE & OE → CE_AND_OE --
+    _, and2_pins = b.place_symbol("74LVC1G08", and2_x, and2_y)
+    b.connect_power(and2_pins)
+    and2_a = and2_pins["1"]   # CE
+    and2_b = and2_pins["2"]   # OE
+    and2_out = and2_pins["4"]
 
-    out_pin = pins["4"]
-    led_in = b.place_led_indicator(out_pin[0] + LED_GAP_X, out_pin[1])
-    b.add_wire(*out_pin, *led_in)
-    b.add_label("READ_EN", *out_pin)
+    # -- AND3: CE_AND_OE & /WE → READ_EN --
+    _, and3_pins = b.place_symbol("74LVC1G08", and3_x, and3_y)
+    b.connect_power(and3_pins)
+    and3_a = and3_pins["1"]   # CE_AND_OE
+    and3_b = and3_pins["2"]   # /WE
+    and3_out = and3_pins["4"]
 
-    # Hierarchical labels for outputs -- with wire stubs
-    out_label_x = and3_x + 25 * GRID
-    wa_y = base_y + 5 * GRID
-    b.add_hier_label("WRITE_ACTIVE", out_label_x, wa_y, shape="output")
-    b.add_wire(out_label_x, wa_y, out_label_x - LABEL_STUB, wa_y)
-    b.add_label("WRITE_ACTIVE", out_label_x - LABEL_STUB, wa_y)
+    # -- Wire CE output to AND1.A and AND2.A (fanout=2 via vertical trunk) --
+    ce_led_x = snap(ce_out[0] + 2 * GRID)
+    ce_trunk_x = snap(ce_out[0] + 4 * GRID)
+    # Split wire at LED junction point
+    b.add_wire(ce_out[0], ce_out[1], ce_led_x, ce_out[1])
+    b.add_wire(ce_led_x, ce_out[1], ce_trunk_x, ce_out[1])
+    b.place_led_below(ce_led_x, ce_out[1])
+    # Segmented vertical trunk from CE output Y through AND1.A Y to AND2.A Y
+    b.add_segmented_trunk(ce_trunk_x, [ce_out[1], and1_a[1], and2_a[1]])
+    # Branch to AND1.A
+    b.add_wire(ce_trunk_x, and1_a[1], and1_a[0], and1_a[1])
+    # Branch to AND2.A
+    b.add_wire(ce_trunk_x, and2_a[1], and2_a[0], and2_a[1])
 
-    re_y = base_y + 15 * GRID
-    b.add_hier_label("READ_EN", out_label_x, re_y, shape="output")
-    b.add_wire(out_label_x, re_y, out_label_x - LABEL_STUB, re_y)
-    b.add_label("READ_EN", out_label_x - LABEL_STUB, re_y)
+    # -- Wire OE output to AND2.B (L-shaped: horizontal then vertical) --
+    oe_led_x = snap(oe_out[0] + 2 * GRID)
+    b.add_wire(oe_out[0], oe_out[1], oe_led_x, oe_out[1])
+    b.add_wire(oe_led_x, oe_out[1], and2_b[0], oe_out[1])
+    b.add_wire(and2_b[0], oe_out[1], and2_b[0], and2_b[1])
+    b.place_led_below(oe_led_x, oe_out[1])
+
+    # -- Wire WE output to AND1.B (L-shaped: horizontal then vertical) --
+    we_led_x = snap(we_out[0] + 2 * GRID)
+    b.add_wire(we_out[0], we_out[1], we_led_x, we_out[1])
+    b.add_wire(we_led_x, we_out[1], and1_b[0], we_out[1])
+    b.add_wire(and1_b[0], we_out[1], and1_b[0], and1_b[1])
+    b.place_led_below(we_led_x, we_out[1])
+
+    # -- Wire CE_AND_OE (AND2 output) to AND3.A with LED (L-shaped) --
+    and2_led_x = snap(and2_out[0] + 2 * GRID)
+    b.add_wire(and2_out[0], and2_out[1], and2_led_x, and2_out[1])
+    b.add_wire(and2_led_x, and2_out[1], and3_a[0], and2_out[1])
+    b.add_wire(and3_a[0], and2_out[1], and3_a[0], and3_a[1])
+    b.place_led_below(and2_led_x, and2_out[1])
+
+    # -- Wire /WE to AND3.B (vertical drop from nWE hier label wire) --
+    # Split nWE wire at junction, then L-shaped to AND3.B
+    b.add_wire(base_x, we_y, nwe_jct_x, we_y)
+    b.add_wire(nwe_jct_x, we_y, we_inv_in[0], we_inv_in[1])
+    b.add_wire(nwe_jct_x, we_y, nwe_jct_x, and3_b[1])
+    b.add_wire(nwe_jct_x, and3_b[1], and3_b[0], and3_b[1])
+    b.add_junction(nwe_jct_x, we_y)
+
+    # -- AND1 output → LED T-junction → hier label WRITE_ACTIVE --
+    out_label_x = and3_x + 22 * GRID
+    and1_led_x = snap(and1_out[0] + 2 * GRID)
+    b.add_wire(and1_out[0], and1_out[1], and1_led_x, and1_out[1])
+    b.add_wire(and1_led_x, and1_out[1], out_label_x, and1_out[1])
+    b.place_led_below(and1_led_x, and1_out[1])
+    b.add_hier_label("WRITE_ACTIVE", out_label_x, and1_out[1], shape="output")
+
+    # -- AND3 output → LED T-junction → hier label READ_EN --
+    and3_led_x = snap(and3_out[0] + 2 * GRID)
+    b.add_wire(and3_out[0], and3_out[1], and3_led_x, and3_out[1])
+    b.add_wire(and3_led_x, and3_out[1], out_label_x, and3_out[1])
+    b.place_led_below(and3_led_x, and3_out[1])
+    b.add_hier_label("READ_EN", out_label_x, and3_out[1], shape="output")
 
     return b
 
@@ -794,52 +927,59 @@ def _generate_nand_bank(title, enable_signal, output_prefix):
     """Shared generator for write_clk_gen and read_oe_gen (8 NANDs each).
 
     74LVC1G00 has same pin layout as 74LVC1G08.
+
+    Wiring approach:
+      - Enable signal: hier label → vertical trunk → branches to each NAND A pin
+      - SEL0-SEL7: hier label → wire → NAND B pin (1:1)
+      - Outputs: NAND output → LED T-junction → wire → hier label (1:1)
     """
     b = SchematicBuilder(title=title, page_size="A3")
-    base_x, base_y = 25.4, 25.4
+    base_x, base_y = 25.4, 30.48
 
-    # Input hier labels -- with wire stubs
-    b.add_hier_label(enable_signal, base_x, base_y, shape="input", angle=180)
-    b.add_wire(base_x, base_y, base_x + LABEL_STUB, base_y)
-    b.add_label(enable_signal, base_x + LABEL_STUB, base_y)
-
-    for i in range(8):
-        hl_y = base_y + (i + 1) * SYM_SPACING_Y
-        b.add_hier_label(f"SEL{i}", base_x, hl_y, shape="input", angle=180)
-        b.add_wire(base_x, hl_y, base_x + LABEL_STUB, hl_y)
-        b.add_label(f"SEL{i}", base_x + LABEL_STUB, hl_y)
-
-    # 8 NAND gates
     nand_x = base_x + 18 * GRID
+    hl_out_x = nand_x + 22 * GRID
+    enable_trunk_x = base_x + 10 * GRID
+
+    # Enable signal hier label at top → horizontal wire → trunk
+    enable_hier_y = snap(base_y - 2 * GRID)
+    b.add_hier_label(enable_signal, base_x, enable_hier_y, shape="input", angle=180)
+    b.add_wire(base_x, enable_hier_y, enable_trunk_x, enable_hier_y)
+
+    # Place 8 NANDs and collect pin positions
+    nand_a_pins = []   # enable input pins (pin A)
+    nand_b_pins = []   # SEL input pins (pin B)
+    nand_out_pins = []
     for i in range(8):
-        y = base_y + (i + 1) * SYM_SPACING_Y
+        y = base_y + i * SYM_SPACING_Y
         _, pins = b.place_symbol("74LVC1G00", nand_x, y)
         b.connect_power(pins)
+        nand_a_pins.append(pins["1"])
+        nand_b_pins.append(pins["2"])
+        nand_out_pins.append(pins["4"])
 
-        # Input wire stubs + labels
-        in_a = pins["1"]
-        b.add_wire(*in_a, in_a[0] - LABEL_STUB, in_a[1])
-        b.add_label(enable_signal, in_a[0] - LABEL_STUB, in_a[1])
-
-        in_b = pins["2"]
-        b.add_wire(*in_b, in_b[0] - LABEL_STUB, in_b[1])
-        b.add_label(f"SEL{i}", in_b[0] - LABEL_STUB, in_b[1])
-
-        # Output: wire to LED + label
-        out_net = f"{output_prefix}{i}"
-        out_pin = pins["4"]
-        led_in = b.place_led_indicator(out_pin[0] + LED_GAP_X, out_pin[1])
-        b.add_wire(*out_pin, *led_in)
-        b.add_label(out_net, *out_pin)
-
-    # Output hier labels -- with wire stubs
-    hl_out_x = nand_x + 28 * GRID
+    # -- Enable vertical trunk: segmented from hier label Y through all NAND A pins --
+    trunk_ys = [enable_hier_y] + [nand_a_pins[i][1] for i in range(8)]
+    b.add_segmented_trunk(enable_trunk_x, trunk_ys)
     for i in range(8):
-        hl_y = base_y + (i + 1) * SYM_SPACING_Y
+        a_pin = nand_a_pins[i]
+        b.add_wire(enable_trunk_x, a_pin[1], a_pin[0], a_pin[1])
+
+    # -- SEL inputs: hier label → wire → NAND B pin (1:1) --
+    for i in range(8):
+        b_pin = nand_b_pins[i]
+        b.add_hier_label(f"SEL{i}", base_x, b_pin[1], shape="input", angle=180)
+        b.add_wire(base_x, b_pin[1], b_pin[0], b_pin[1])
+
+    # -- Outputs: NAND output → LED T-junction → wire → hier label --
+    for i in range(8):
+        out_pin = nand_out_pins[i]
         out_net = f"{output_prefix}{i}"
-        b.add_hier_label(out_net, hl_out_x, hl_y, shape="output")
-        b.add_wire(hl_out_x, hl_y, hl_out_x - LABEL_STUB, hl_y)
-        b.add_label(out_net, hl_out_x - LABEL_STUB, hl_y)
+        # Split wire at LED junction point
+        led_jct_x = snap(out_pin[0] + 2 * GRID)
+        b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
+        b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
+        b.place_led_below(led_jct_x, out_pin[1])
+        b.add_hier_label(out_net, hl_out_x, out_pin[1], shape="output")
 
     return b
 
@@ -861,80 +1001,97 @@ def generate_byte_sheet():
     Each bit:
       - 74LVC1G79 D flip-flop: D <- data bus, CLK <- WRITE_CLK, Q -> LED + buffer
       - 74LVC1G125 tri-state buffer: A <- DFF Q, /OE <- BUF_OE, Y -> data bus
-      - LED on DFF Q output
+      - LED on DFF Q output (branches below via T-junction)
       - LED on buffer Y output
 
-    Hierarchical labels use generic names (WRITE_CLK, BUF_OE, D0-D7).
-    The parent sheet connects instance-specific nets to these pins.
+    Wiring approach:
+      - D0-D7: labels (3-way fanout — hier label, DFF D, buffer Y)
+      - Q outputs: direct wire from DFF Q → buffer A, LED branches below
+      - WRITE_CLK: vertical trunk wire with horizontal branches to each DFF CLK
+      - BUF_OE: vertical trunk wire with horizontal branches to each buffer /OE
     """
     b = SchematicBuilder(title="Memory Byte", page_size="A3")
-    base_x, base_y = 25.4, 25.4
+    base_x, base_y = 25.4, 30.48  # extra top margin for trunk headers
 
-    # Hierarchical labels -- with wire stubs connecting to local labels
-    for bit in range(8):
-        hl_y = base_y + bit * DFF_SPACING_Y
-        b.add_hier_label(f"D{bit}", base_x, hl_y, shape="bidirectional", angle=180)
-        b.add_wire(base_x, hl_y, base_x + LABEL_STUB, hl_y)
-        b.add_label(f"D{bit}", base_x + LABEL_STUB, hl_y)
+    dff_x = base_x + 18 * GRID
+    buf_x = base_x + 52 * GRID
+    wclk_trunk_x = base_x + 10 * GRID   # WRITE_CLK vertical trunk
+    boe_trunk_x = buf_x - 8 * GRID      # BUF_OE vertical trunk (avoid buffer A pin X)
 
-    # Place WRITE_CLK and BUF_OE hier labels below all 8 bits
-    # (bit 7 is at base_y + 7*DFF_SPACING_Y = base_y + 98*GRID, so start at 8*DFF_SPACING_Y)
-    wclk_y = base_y + 8 * DFF_SPACING_Y + 4 * GRID
-    b.add_hier_label("WRITE_CLK", base_x, wclk_y, shape="input", angle=180)
-    b.add_wire(base_x, wclk_y, base_x + LABEL_STUB, wclk_y)
-    b.add_label("WRITE_CLK", base_x + LABEL_STUB, wclk_y)
+    # -- WRITE_CLK hier label at top → horizontal wire → trunk --
+    wclk_hier_y = snap(base_y - 4 * GRID)
+    b.add_hier_label("WRITE_CLK", base_x, wclk_hier_y, shape="input", angle=180)
+    b.add_wire(base_x, wclk_hier_y, wclk_trunk_x, wclk_hier_y)
 
-    boe_y = wclk_y + 2 * GRID
-    b.add_hier_label("BUF_OE", base_x, boe_y, shape="input", angle=180)
-    b.add_wire(base_x, boe_y, base_x + LABEL_STUB, boe_y)
-    b.add_label("BUF_OE", base_x + LABEL_STUB, boe_y)
+    # -- BUF_OE hier label at top → horizontal wire → trunk --
+    # Must avoid Y=25.4 (DFF D pin 1 Y for bit 0) to prevent net merging
+    boe_hier_y = snap(base_y - 6 * GRID)
+    b.add_hier_label("BUF_OE", base_x, boe_hier_y, shape="input", angle=180)
+    b.add_wire(base_x, boe_hier_y, boe_trunk_x, boe_hier_y)
 
-    dff_x = base_x + 15 * GRID
-    buf_x = base_x + 50 * GRID
+    # -- Place components and wire each bit --
+    clk_pin_positions = []
+    oe_pin_positions = []
 
     for bit in range(8):
         y = base_y + bit * DFF_SPACING_Y
-        q_net = f"Q_{bit}"
 
         # D flip-flop (74LVC1G79)
         _, dff_pins = b.place_symbol("74LVC1G79", dff_x, y)
         b.connect_power(dff_pins)
 
-        # D input: wire stub + label
+        # D input: hier label wires directly to DFF D pin
         d_pin = dff_pins["1"]
-        b.add_wire(*d_pin, d_pin[0] - LABEL_STUB, d_pin[1])
-        b.add_label(f"D{bit}", d_pin[0] - LABEL_STUB, d_pin[1])
+        hl_y = base_y + bit * DFF_SPACING_Y
+        b.add_hier_label(f"D{bit}", base_x, hl_y, shape="bidirectional", angle=180)
+        # L-wire from hier label to D pin (handle possible Y offset)
+        if snap(hl_y) != snap(d_pin[1]):
+            b.add_wire(base_x, hl_y, base_x, d_pin[1])
+        b.add_wire(base_x, d_pin[1], d_pin[0], d_pin[1])
 
-        # CLK input: wire stub + label
+        # CLK input: horizontal wire from WRITE_CLK trunk
         clk_pin = dff_pins["2"]
-        b.add_wire(*clk_pin, clk_pin[0] - LABEL_STUB, clk_pin[1])
-        b.add_label("WRITE_CLK", clk_pin[0] - LABEL_STUB, clk_pin[1])
+        clk_pin_positions.append(clk_pin)
+        b.add_wire(wclk_trunk_x, clk_pin[1], clk_pin[0], clk_pin[1])
 
-        # Q output: wire to LED chain + label
+        # Q output → direct wire to buffer A input, LED branches below
         q_pin = dff_pins["4"]
-        led_in = b.place_led_indicator(q_pin[0] + LED_GAP_X, q_pin[1])
-        b.add_wire(*q_pin, *led_in)
-        b.add_label(q_net, *q_pin)
 
         # Tri-state buffer (74LVC1G125)
         _, buf_pins = b.place_symbol("74LVC1G125", buf_x, y)
         b.connect_power(buf_pins)
 
-        # A input: wire stub + label
         a_pin = buf_pins["2"]
-        b.add_wire(*a_pin, a_pin[0] - LABEL_STUB, a_pin[1])
-        b.add_label(q_net, a_pin[0] - LABEL_STUB, a_pin[1])
+        # L-wire from DFF Q → buffer A (Q and A may have different Y offsets)
+        # Split horizontal wire at LED junction point
+        q_led_x = snap(q_pin[0] + 2 * GRID)
+        b.add_wire(q_pin[0], q_pin[1], q_led_x, q_pin[1])
+        b.add_wire(q_led_x, q_pin[1], a_pin[0], q_pin[1])
+        if snap(q_pin[1]) != snap(a_pin[1]):
+            b.add_wire(a_pin[0], q_pin[1], a_pin[0], a_pin[1])
+        # LED branches down from junction on the horizontal segment
+        b.place_led_below(q_led_x, q_pin[1])
 
-        # /OE input: wire stub going right + label (since /OE is above IC)
+        # /OE input: horizontal wire from BUF_OE trunk
         oe_pin = buf_pins["1"]
-        b.add_wire(*oe_pin, oe_pin[0] + LABEL_STUB, oe_pin[1])
-        b.add_label("BUF_OE", oe_pin[0] + LABEL_STUB, oe_pin[1])
+        oe_pin_positions.append(oe_pin)
+        b.add_wire(boe_trunk_x, oe_pin[1], oe_pin[0], oe_pin[1])
 
         # Y output: wire to LED + label back to data bus
         y_pin = buf_pins["4"]
         led_in = b.place_led_indicator(y_pin[0] + LED_GAP_X, y_pin[1])
         b.add_wire(*y_pin, *led_in)
         b.add_label(f"D{bit}", *y_pin)
+
+    # -- WRITE_CLK vertical trunk wire (segmented at each branch) --
+    clk_ys = [p[1] for p in clk_pin_positions]
+    wclk_all_ys = sorted([wclk_hier_y] + clk_ys)
+    b.add_segmented_trunk(wclk_trunk_x, wclk_all_ys)
+
+    # -- BUF_OE vertical trunk wire (segmented at each branch) --
+    oe_ys = [p[1] for p in oe_pin_positions]
+    boe_all_ys = sorted([boe_hier_y] + oe_ys)
+    b.add_segmented_trunk(boe_trunk_x, boe_all_ys)
 
     return b
 
