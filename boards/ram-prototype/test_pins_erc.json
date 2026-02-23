@@ -1,0 +1,105 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-02-22T16:10:54-0800",
+    "kicad_version": "9.0.7",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/c1d3e11c-dc84-4583-a29f-e6cce9a2d74f",
+            "violations": [
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U1 Pin 1 [Input, Line]",
+                            "pos": {
+                                "x": 0.8476,
+                                "y": 0.7746
+                            },
+                            "uuid": "4e5c7330-f0b8-46d3-840b-5f5daf88146e"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U1 Pin 2 [Input, Line]",
+                            "pos": {
+                                "x": 0.8476,
+                                "y": 0.8254
+                            },
+                            "uuid": "457ea65b-a037-4a09-894c-ec7b804fd137"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U1 Pin 5 [VCC, Power input, Line]",
+                            "pos": {
+                                "x": 1.0,
+                                "y": 0.6984
+                            },
+                            "uuid": "8ce95ca8-504b-494e-af06-f3894f38d90e"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U1 Pin 3 [GND, Power input, Line]",
+                            "pos": {
+                                "x": 1.0,
+                                "y": 0.9016
+                            },
+                            "uuid": "ea3e100e-a250-4116-8762-55ac33638405"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U1 Pin 4 [Output, Line]",
+                            "pos": {
+                                "x": 1.127,
+                                "y": 0.8
+                            },
+                            "uuid": "4a602ed3-9332-4a3e-b893-3370e7d850a8"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Symbol pin or wire end off connection grid",
+                    "items": [
+                        {
+                            "description": "Symbol U1 Pin 2 [Input, Line]",
+                            "pos": {
+                                "x": 0.8476,
+                                "y": 0.8254
+                            },
+                            "uuid": "457ea65b-a037-4a09-894c-ec7b804fd137"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "endpoint_off_grid"
+                }
+            ]
+        }
+    ],
+    "source": "test_pins.kicad_sch"
+}

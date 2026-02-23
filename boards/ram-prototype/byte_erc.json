@@ -1,0 +1,225 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-02-22T17:37:26-0800",
+    "kicad_version": "9.0.7",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/cb86629e-9063-4772-bfbb-9da4bfb1d5a8",
+            "violations": [
+                {
+                    "description": "Hierarchical label \"D0\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D0'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 0.254
+                            },
+                            "uuid": "e45799ec-13b6-4344-88fa-9246a8c8553a"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Input pin not driven by any Output pins",
+                    "items": [
+                        {
+                            "description": "Symbol U1 Pin 2 [C, Input, Clock]",
+                            "pos": {
+                                "x": 0.508,
+                                "y": 0.3048
+                            },
+                            "uuid": "3b862a64-a093-4d4d-868f-a7fe371c3e11"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR1 Pin 1 [Power input, Line]",
+                            "pos": {
+                                "x": 0.635,
+                                "y": 0.127
+                            },
+                            "uuid": "c34c6274-e9d3-4bad-b350-968a7bf562bc"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Hierarchical label \"D1\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D1'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 0.6096
+                            },
+                            "uuid": "bb26de2d-d4f6-4168-9dcf-3ba83893b5f3"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR2 Pin 1 [Power input, Line]",
+                            "pos": {
+                                "x": 0.635,
+                                "y": 0.381
+                            },
+                            "uuid": "ba54f492-74a2-4868-b0b9-38b37b25f3a1"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Hierarchical label \"D2\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D2'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 0.9652
+                            },
+                            "uuid": "c22ab3c1-0f48-4922-be24-459e2bf0de3f"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Hierarchical label \"D3\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D3'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 1.3208
+                            },
+                            "uuid": "15ab835f-1d69-499a-adca-a96edadba139"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Input pin not driven by any Output pins",
+                    "items": [
+                        {
+                            "description": "Symbol U2 Pin 1 [Input, Inverted]",
+                            "pos": {
+                                "x": 1.524,
+                                "y": 0.1524
+                            },
+                            "uuid": "29a97578-f729-44b6-a547-89730b195d87"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_driven"
+                },
+                {
+                    "description": "Hierarchical label \"D4\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D4'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 1.6764
+                            },
+                            "uuid": "9b694f79-ddf3-4f94-bf44-3c38eded87dc"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Hierarchical label \"D5\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D5'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 2.032
+                            },
+                            "uuid": "26f12e0f-42da-4593-8a3e-8dac6650c775"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Hierarchical label \"D6\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D6'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 2.3876
+                            },
+                            "uuid": "cc19677e-09d8-4104-82d7-421066a94a9b"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Hierarchical label \"D7\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'D7'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 2.7432
+                            },
+                            "uuid": "8d481526-9751-4624-a329-608ae05ac5fb"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Hierarchical label \"WRITE_CLK\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'WRITE_CLK'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 3.2004
+                            },
+                            "uuid": "a7c6509b-8b39-4f56-945d-d83ebeb4a4b5"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Hierarchical label \"BUF_OE\" in root sheet cannot be connected to non-existent parent sheet",
+                    "items": [
+                        {
+                            "description": "Hierarchical Label 'BUF_OE'",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 3.2512
+                            },
+                            "uuid": "3c327607-c8f7-4f73-803c-9392d3292376"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                }
+            ]
+        }
+    ],
+    "source": "byte.kicad_sch"
+}

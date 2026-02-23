@@ -1,0 +1,195 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-02-22T11:52:43-0800",
+    "kicad_version": "9.0.7",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/c1285565-c3b6-4d71-8e29-36854edd32c9",
+            "violations": [
+                {
+                    "description": "Wires not connected to anything",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.4873
+                            },
+                            "uuid": "f83e8bf7-fb96-41d7-8e90-188d45d341f3"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "wire_dangling"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol J1 Pin 1 [Pin_1, Passive, Line]",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.5
+                            },
+                            "uuid": "3db61967-ad85-4c5e-9868-d75ffc12e700"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Wires not connected to anything",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.5127
+                            },
+                            "uuid": "d8c3af02-8b14-459f-9de9-31e33daa09e4"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "wire_dangling"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol J1 Pin 2 [Pin_2, Passive, Line]",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.5254
+                            },
+                            "uuid": "06108761-2696-4e2f-b241-1077e3475b30"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Unconnected wire endpoint",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.4873
+                            },
+                            "uuid": "f83e8bf7-fb96-41d7-8e90-188d45d341f3"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "unconnected_wire_endpoint"
+                },
+                {
+                    "description": "Unconnected wire endpoint",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.5127
+                            },
+                            "uuid": "d8c3af02-8b14-459f-9de9-31e33daa09e4"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "unconnected_wire_endpoint"
+                },
+                {
+                    "description": "Symbol pin or wire end off connection grid",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.4873
+                            },
+                            "uuid": "f83e8bf7-fb96-41d7-8e90-188d45d341f3"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "endpoint_off_grid"
+                },
+                {
+                    "description": "Unconnected wire endpoint",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.4873
+                            },
+                            "uuid": "f83e8bf7-fb96-41d7-8e90-188d45d341f3"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "unconnected_wire_endpoint"
+                },
+                {
+                    "description": "Symbol pin or wire end off connection grid",
+                    "items": [
+                        {
+                            "description": "Symbol J1 Pin 1 [Pin_1, Passive, Line]",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.5
+                            },
+                            "uuid": "3db61967-ad85-4c5e-9868-d75ffc12e700"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "endpoint_off_grid"
+                },
+                {
+                    "description": "Symbol pin or wire end off connection grid",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.5127
+                            },
+                            "uuid": "d8c3af02-8b14-459f-9de9-31e33daa09e4"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "endpoint_off_grid"
+                },
+                {
+                    "description": "Unconnected wire endpoint",
+                    "items": [
+                        {
+                            "description": "Horizontal Wire, length 0.0492 mm",
+                            "pos": {
+                                "x": 0.4492,
+                                "y": 0.5127
+                            },
+                            "uuid": "d8c3af02-8b14-459f-9de9-31e33daa09e4"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "unconnected_wire_endpoint"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J1 [Conn_01x02]",
+                            "pos": {
+                                "x": 0.5,
+                                "y": 0.5
+                            },
+                            "uuid": "b210e3a1-1203-436c-a9f5-6c1849d0745c"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                }
+            ]
+        }
+    ],
+    "source": "test_conn.kicad_sch"
+}
