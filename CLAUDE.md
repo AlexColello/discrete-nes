@@ -69,11 +69,13 @@ venv\Scripts\activate         # Windows
 pip install -r requirements.txt
 ```
 
-### Generate RAM Prototype (Future)
+### Generate RAM Prototype
 
 ```bash
 cd boards/ram-prototype
-python scripts/generate_ram_array.py
+python scripts/generate_ram.py
+# Then verify:
+kicad-cli sch erc ram.kicad_sch
 ```
 
 ## Technology Stack & Research Findings
@@ -133,6 +135,14 @@ Hard-won requirements for generating schematics with kiutils that pass KiCad 9 E
 - PWR_FLAG should be placed in sub-sheets at IC power pin positions (same point as VCC/GND symbols)
 - Standalone VCC + PWR_FLAG connected only by wire in the root sheet doesn't reliably connect
 - Power symbols placed at IC pin positions connect via overlapping pins (no wire needed)
+
+**Wire routing rules (critical for ERC-clean schematics):**
+- **Orthogonal wires only** — KiCad doesn't connect diagonal wires. Route as L-shapes (horizontal then vertical)
+- **Segmented trunks required** — A single long vertical wire with junctions doesn't reliably connect T-branches in KiCad 9. Split vertical bus/trunk wires into separate segments between each branch point. Use `add_segmented_trunk()` helper in `generate_ram.py`
+- **Split wires at LED junction points** — When `place_led_below()` adds a junction on a main wire, the main wire MUST be split into two segments at that junction X coordinate
+- **Wire overlap = net merge** — Two wires sharing any segment (same Y, overlapping X range) silently merge their nets. Always verify horizontal wires at the same Y don't overlap
+- **T-connections from wire endpoints** — A wire endpoint landing on the middle of another wire creates a connection (even without a junction dot). When routing horizontal branch wires that cross vertical trunks, verify the crossing Y doesn't match any trunk segment endpoint Y
+- **Avoid trunk/branch Y coincidence** — If components at the same Y positions feed different vertical trunks, offset one group (e.g., shift inverters by +GRID) so trunk segment endpoints don't share Y values with cross-trunk horizontal wires
 
 **Known limitations:**
 - `lib_symbol_mismatch` warnings are a kiutils serialization artifact — harmless, fix with "Update symbols from library" in KiCad
@@ -209,11 +219,12 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 - **LEDs for all control signals and intermediate gate outputs**
 - **Total estimate:** ~115 LEDs
 
-**Totals for 8-byte prototype:**
-- ~180 ICs (DSBGA)
-- ~115 LEDs (0402 SMD)
-- ~115 resistors (0402 SMD)
-- **~410 total components**
+**Totals for 8-byte prototype (actual from generate_ram.py):**
+- 161 ICs (DSBGA)
+- 175 LEDs (0402 SMD)
+- 175 resistors (0402 SMD)
+- 1 connector
+- **512 total BOM parts**
 
 **PCB size estimate:** ~60x80mm with 3-4mm pitch
 
@@ -251,26 +262,23 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 - [x] requirements.txt with kiutils dependency
 - [x] Migration from 74HC DIP to TI Little Logic DSBGA
 
-### Phase 2: RAM Prototype Board (NEXT)
+### Phase 2: RAM Prototype Board (IN PROGRESS)
 
-**Step 1: Manual Circuit Design**
-1. Open KiCad and create `boards/ram-prototype/ram.kicad_pro`
-2. Design ONE memory cell manually:
-   - 1x SN74LVC1G79 D flip-flop (DSBGA)
-   - 0402 LED on the Q output
-   - 0402 current-limiting resistor (680R for red LED at 3.3V)
-3. Validate the circuit works
-4. Document the pattern in `boards/ram-prototype/docs/`
+**Step 1: Manual Circuit Design (COMPLETED)**
+1. ~~Open KiCad and create `boards/ram-prototype/ram.kicad_pro`~~
+2. ~~Design ONE memory cell manually~~
+3. ~~Validate the circuit works~~
 
-**Step 2: Script Development**
-1. Create `boards/ram-prototype/scripts/generate_ram_array.py`
-2. Use kiutils to:
-   - Replicate memory cell 8x8 = 64 times (8 bytes x 8 bits)
-   - Generate 3-to-8 address decoder with LEDs on every gate
-   - Add tri-state buffers for data bus with LEDs
-   - Add control logic with LEDs
-   - Create hierarchical schematic sheets for organization
-3. Test script generates valid .kicad_sch file
+**Step 2: Script Development (COMPLETED)**
+1. Created `boards/ram-prototype/scripts/generate_ram.py`
+2. Generates ERC-clean hierarchical schematics with direct wire routing:
+   - ram.kicad_sch (root) — connector, bus LEDs, hierarchy refs
+   - address_decoder.kicad_sch — 3 inverters + 8 three-input ANDs
+   - control_logic.kicad_sch — active-low inversion + WRITE_ACTIVE, READ_EN
+   - write_clk_gen.kicad_sch — 8 NANDs for per-byte write clocks
+   - read_oe_gen.kicad_sch — 8 NANDs for per-byte buffer OE
+   - byte.kicad_sch — 8 DFFs + 8 tri-state buffers (shared by all 8 instances)
+3. Passes KiCad 9 ERC with 0 real errors (only harmless `lib_symbol_mismatch` warnings)
 
 **Step 3: PCB Layout**
 1. Use kiutils to place DSBGA components in grid pattern (3-4mm pitch)
@@ -421,9 +429,8 @@ After RAM prototype success:
 ## Current Status
 
 **Phase 1 COMPLETE** (including migration to TI Little Logic DSBGA)
-**Next: Phase 2 - RAM Prototype Circuit Design (8 bytes)**
-
-Ready to start designing the first memory cell in KiCad with DSBGA + 0402 LEDs!
+**Phase 2 Steps 1-2 COMPLETE** (schematic generation with ERC-clean output)
+**Next: Phase 2 Step 3 - PCB Layout**
 
 ## Important Notes for Future Sessions
 

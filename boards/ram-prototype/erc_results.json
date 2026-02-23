@@ -1,12 +1,12 @@
 {
     "$schema": "https://schemas.kicad.org/erc.v1.json",
     "coordinate_units": "mm",
-    "date": "2026-02-23T01:26:37-0800",
+    "date": "2026-02-23T01:32:42-0800",
     "kicad_version": "9.0.7",
     "sheets": [
         {
             "path": "/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06",
             "violations": [
                 {
                     "description": "Symbol '74LVC1G04' doesn't match copy in library '74xGxx'",
@@ -15,9 +15,9 @@
                             "description": "Symbol U1 [74LVC1G04]",
                             "pos": {
                                 "x": 0.7112,
-                                "y": 0.3048
+                                "y": 0.3302
                             },
-                            "uuid": "f9db17f3-eb84-4b78-a77f-8ad7813df48e"
+                            "uuid": "eddb78c2-b262-431f-91da-8fc034ecb5b2"
                         }
                     ],
                     "severity": "warning",
@@ -30,9 +30,9 @@
                             "description": "Symbol U2 [74LVC1G04]",
                             "pos": {
                                 "x": 0.7112,
-                                "y": 0.5588
+                                "y": 0.5842
                             },
-                            "uuid": "4eeb8ebd-1d76-49b4-b5e3-22e1d1cc8c4d"
+                            "uuid": "b80a77f8-0a54-4b66-8ccb-eff9bb08f1fc"
                         }
                     ],
                     "severity": "warning",
@@ -45,9 +45,9 @@
                             "description": "Symbol U3 [74LVC1G04]",
                             "pos": {
                                 "x": 0.7112,
-                                "y": 0.8128
+                                "y": 0.8382
                             },
-                            "uuid": "f9f78db4-8a39-4e7a-8b06-0ca153333672"
+                            "uuid": "5a01d23f-6eb0-41cc-8d1c-4d6dade1dfcf"
                         }
                     ],
                     "severity": "warning",
@@ -62,7 +62,7 @@
                                 "x": 0.635,
                                 "y": 0.3048
                             },
-                            "uuid": "7809cd7d-6dc7-4b99-8f2c-7c093661a16b"
+                            "uuid": "65396227-f313-400e-a1ac-5c99de309900"
                         }
                     ],
                     "severity": "warning",
@@ -77,7 +77,7 @@
                                 "x": 0.635,
                                 "y": 0.5588
                             },
-                            "uuid": "250dc401-793e-4be0-8aba-34c8850ca1f3"
+                            "uuid": "98562024-7676-4dca-a689-bf390979176c"
                         }
                     ],
                     "severity": "warning",
@@ -92,7 +92,7 @@
                                 "x": 0.635,
                                 "y": 0.8128
                             },
-                            "uuid": "f1520f1d-f83d-4c62-91c2-8ee67ac9ab72"
+                            "uuid": "9c399dca-8496-4f8c-83d4-6450a38f2ad8"
                         }
                     ],
                     "severity": "warning",
@@ -102,116 +102,62 @@
         },
         {
             "path": "/Address Decoder/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/5c7a5302-9b20-4d1c-8b8e-f5c7722d6f36",
-            "violations": [
-                {
-                    "description": "Pin not connected",
-                    "items": [
-                        {
-                            "description": "Symbol U6 Pin 1 [Input, Line]",
-                            "pos": {
-                                "x": 1.1684,
-                                "y": 0.8128
-                            },
-                            "uuid": "63dd85a1-7dd2-46cb-89b5-0b32933f4eaa"
-                        }
-                    ],
-                    "severity": "error",
-                    "type": "pin_not_connected"
-                },
-                {
-                    "description": "Input pin not driven by any Output pins",
-                    "items": [
-                        {
-                            "description": "Symbol U6 Pin 1 [Input, Line]",
-                            "pos": {
-                                "x": 1.1684,
-                                "y": 0.8128
-                            },
-                            "uuid": "63dd85a1-7dd2-46cb-89b5-0b32933f4eaa"
-                        }
-                    ],
-                    "severity": "error",
-                    "type": "pin_not_driven"
-                },
-                {
-                    "description": "Both A1 and A2 are attached to the same items; A1 will be used in the netlist",
-                    "items": [
-                        {
-                            "description": "Hierarchical Label 'A1'",
-                            "pos": {
-                                "x": 0.254,
-                                "y": 0.2286
-                            },
-                            "uuid": "fd5136cd-d186-4213-9656-87c62f685222"
-                        },
-                        {
-                            "description": "Hierarchical Label 'A2'",
-                            "pos": {
-                                "x": 0.254,
-                                "y": 0.254
-                            },
-                            "uuid": "a8d87d78-8c24-4ec9-b748-e6f86d97e5d8"
-                        }
-                    ],
-                    "severity": "warning",
-                    "type": "multiple_net_names"
-                }
-            ]
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/44144c71-bae3-46ff-a643-c4e3b3edfa0d",
+            "violations": []
         },
         {
             "path": "/Control Logic/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/b931b66a-09e5-4b2b-8e9b-b70681d8f4ed",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/6dba91f8-395f-43bd-801a-ccee74fabd1a",
             "violations": []
         },
         {
             "path": "/Write Clk Gen/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/23053ae3-bd53-4196-8a3c-073c40fbb847",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/76fee4bb-f5f8-4b50-824f-ed3768aac1f4",
             "violations": []
         },
         {
             "path": "/Read OE Gen/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/222c3ec7-8bae-4480-b306-95670f2931aa",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/68e09017-ddef-4129-b689-5eb076279e58",
             "violations": []
         },
         {
             "path": "/Byte 0/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/d66b373b-222b-4395-92fd-b60d36219a7c",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/6c69b78e-246a-48f3-a3db-975cf68da10c",
             "violations": []
         },
         {
             "path": "/Byte 1/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/e106f71f-8a23-4344-94c7-213bb594fe21",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/53f27ed1-4db5-4d41-8c59-d93865f750c0",
             "violations": []
         },
         {
             "path": "/Byte 2/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/d59bbe42-3f74-494c-ba65-de57c74fdda1",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/5ae64791-774d-4056-9862-c16dbc0837cd",
             "violations": []
         },
         {
             "path": "/Byte 3/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/691dfd4e-6fe8-4f08-807b-4485f75200fc",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/354fb2ba-fb08-453b-8bb9-cc99f62f4925",
             "violations": []
         },
         {
             "path": "/Byte 4/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/6b3ed3c1-51c4-4462-82fa-b051ab24b468",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/1a9272c9-3087-49a8-87d5-bef27922ee97",
             "violations": []
         },
         {
             "path": "/Byte 5/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/16248a35-fb5f-45c7-86d5-0857a625639d",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/320cccd6-9e16-4b27-8f16-015931fa09f5",
             "violations": []
         },
         {
             "path": "/Byte 6/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/76c24ea9-392a-4c0f-aee5-a158d7c5c4ef",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/9f370438-28c8-46a8-97d0-4552244e263e",
             "violations": []
         },
         {
             "path": "/Byte 7/",
-            "uuid_path": "/aa257ed7-4cae-477a-aee6-d7990a131a5b/c97acf37-fb4c-4495-b93e-7187cd5a50e9",
+            "uuid_path": "/d302d7d7-06e7-4a65-8272-76c7f9cfca06/c37e3904-ad82-468f-9074-8c1bb7dbc2ce",
             "violations": []
         }
     ],

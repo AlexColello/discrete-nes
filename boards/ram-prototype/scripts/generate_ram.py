@@ -654,8 +654,9 @@ def generate_address_decoder():
     hl_out_x = and_x + 22 * GRID
 
     # X positions for 6 vertical trunks (A0, A1, A2, A0_INV, A1_INV, A2_INV)
-    # Spaced between inverters and AND gates
-    addr_trunk_x = [base_x + 8 * GRID + i * 2 * GRID for i in range(3)]   # A0, A1, A2
+    # True address trunks: placed RIGHT of inverter inputs (X=55.88) so that
+    # inverter branch wires going left don't cross other address trunks.
+    addr_trunk_x = [base_x + (13 + i) * GRID for i in range(3)]   # 58.42, 60.96, 63.5
     inv_trunk_x = [base_x + 30 * GRID + i * 2 * GRID for i in range(3)]  # A0_INV, A1_INV, A2_INV
 
     # The AND gates span 8 rows (SEL0-SEL7)
@@ -669,10 +670,13 @@ def generate_address_decoder():
         b.add_wire(base_x, trunk_top_y, addr_trunk_x[i], trunk_top_y)
 
     # -- Three inverters for complemented address bits --
+    # Offset inverter Y by +GRID so inverter pin Y values don't coincide with
+    # AND gate pin Y values (both derive from base_y + i*SYM_SPACING_Y).
+    # This prevents trunk segment endpoints from landing on cross-trunk branch wires.
     inv_in_pins = []   # inverter input pin positions
     inv_out_pins = []  # inverter output pin positions
     for i in range(3):
-        y = base_y + i * SYM_SPACING_Y
+        y = base_y + i * SYM_SPACING_Y + GRID
         _, pins = b.place_symbol("74LVC1G04", inv_x, y)
         b.connect_power(pins)
         inv_in_pins.append(pins["2"])
