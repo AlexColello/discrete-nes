@@ -108,6 +108,36 @@ python scripts/generate_ram_array.py
 - Manual routing initially (better control for prototype)
 - Can revisit automation after validating approach
 
+### kiutils + KiCad 9 ERC Lessons
+
+Hard-won requirements for generating schematics with kiutils that pass KiCad 9 ERC. See `boards/ram-prototype/scripts/generate_ram.py` for working implementation.
+
+**Format requirements:**
+- Set `sch.version = 20250114` (KiCad 9 format) — the kiutils default (20211014, KiCad 6) causes `wire_dangling` on every wire-to-pin connection
+- Set `sch.uuid = uid()` — root UUID is required
+- Set `sch.generator = "eeschema"` — matches KiCad native output
+- Each `SchematicSymbol` needs pin UUIDs: `sym.pins = {"1": uid(), "2": uid(), ...}` — required for KiCad 9 wire connectivity
+
+**Pin position discovery:**
+- NEVER calculate pin positions from library symbol data or manual offsets
+- Use ERC-based probing: place one component at (100,100) in a temp schematic, run `kicad-cli sch erc`, parse the JSON to extract pin positions (ERC coordinates × 100 = mm)
+- Cache the results — pin offsets are stable per (symbol, angle) combo
+
+**Hierarchical schematics:**
+- Child sheet symbols must use the full hierarchical path: `/{root_uuid}/{sheet_block_uuid}` — NOT `/{child_sheet_uuid}/`
+- Multi-instance sheets (e.g., byte.kicad_sch used 8×) need one path per instance with unique reference designators per path
+- Build all sheets first, then post-process to fix instance paths after the root sheet assigns hierarchy UUIDs
+- Don't mix local and global labels with the same name — use local labels in the root sheet for hierarchy pin connections
+
+**Power symbols:**
+- PWR_FLAG should be placed in sub-sheets at IC power pin positions (same point as VCC/GND symbols)
+- Standalone VCC + PWR_FLAG connected only by wire in the root sheet doesn't reliably connect
+- Power symbols placed at IC pin positions connect via overlapping pins (no wire needed)
+
+**Known limitations:**
+- `lib_symbol_mismatch` warnings are a kiutils serialization artifact — harmless, fix with "Update symbols from library" in KiCad
+- Use `round(v, 2)` on all coordinates to eliminate floating-point noise (e.g., `83.82000000000001`)
+
 ### Logic Family - Why TI Little Logic (SN74LVC1G) in DSBGA?
 
 **Design Choice: Bare silicon die visibility**

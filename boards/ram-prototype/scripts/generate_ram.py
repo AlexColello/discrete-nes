@@ -625,6 +625,17 @@ def generate_address_decoder():
         b.add_wire(hl_out_x, hl_y, hl_out_x - LABEL_STUB, hl_y)
         b.add_label(f"SEL{i}", hl_out_x - LABEL_STUB, hl_y)
 
+    # PWR_FLAG symbols on VCC and GND nets to satisfy ERC "power pin not driven"
+    # Place at an open area, connected to power net via short wire
+    pwr_flag_x = hl_out_x + 10 * GRID
+    pwr_flag_y = base_y
+    # VCC PWR_FLAG: VCC symbol + PWR_FLAG at same point
+    _, vcc_pins = b.place_power("VCC", pwr_flag_x, pwr_flag_y)
+    b.place_power("PWR_FLAG", pwr_flag_x, pwr_flag_y)
+    # GND PWR_FLAG: GND symbol + PWR_FLAG at same point
+    _, gnd_pins = b.place_power("GND", pwr_flag_x + 10 * GRID, pwr_flag_y)
+    b.place_power("PWR_FLAG", pwr_flag_x + 10 * GRID, pwr_flag_y)
+
     return b
 
 
@@ -922,25 +933,8 @@ def generate_root_sheet():
         b.add_wire(px, py, label_x, py)
         b.add_label(sig, label_x, py, angle=180)
 
-    # -- PWR_FLAG symbols to satisfy ERC "power pin not driven" --
-    # VCC + PWR_FLAG connected by wire
-    # PWR_FLAG below VCC, angle=180 so pin points downward toward VCC
-    pwr_flag_x = base_x + 10 * GRID
-    pwr_flag_y = base_y - 5 * GRID
-    _, vcc_pins = b.place_power("VCC", pwr_flag_x, pwr_flag_y)
-    vcc_pin_pos = vcc_pins["1"]
-    _, flg_pins = b.place_power("PWR_FLAG", pwr_flag_x, pwr_flag_y + 2.54, angle=180)
-    flg_pin_pos = flg_pins["1"]
-    b.add_wire(*vcc_pin_pos, *flg_pin_pos)
-
-    # GND + PWR_FLAG connected by wire
-    gnd_flag_x = base_x + 14 * GRID
-    gnd_flag_y = base_y - 5 * GRID
-    _, gnd_pins = b.place_power("GND", gnd_flag_x, gnd_flag_y)
-    gnd_pin_pos = gnd_pins["1"]
-    _, flg_pins2 = b.place_power("PWR_FLAG", gnd_flag_x, gnd_flag_y + 2.54, angle=180)
-    flg2_pin_pos = flg_pins2["1"]
-    b.add_wire(*gnd_pin_pos, *flg2_pin_pos)
+    # Note: PWR_FLAG symbols are placed in address_decoder sub-sheet
+    # where they connect to IC power pins on VCC and GND nets
 
     # -- Bus indicator LEDs --
     led_base_x = base_x + 20 * GRID
