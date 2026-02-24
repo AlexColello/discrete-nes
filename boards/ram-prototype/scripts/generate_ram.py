@@ -39,7 +39,8 @@ from kiutils.items.schitems import (
     Junction,
 )
 from kiutils.items.common import (
-    Position, Property, Effects, Font, Stroke, Fill, ColorRGBA, PageSettings,
+    Position, Property, Effects, Font, Justify, Stroke, Fill, ColorRGBA,
+    PageSettings,
 )
 from kiutils.items.syitems import SyRect, SyPolyLine
 
@@ -512,37 +513,46 @@ class SchematicBuilder:
 
     # -- net labels --
 
-    def add_label(self, text, x, y, angle=0):
+    def _label_effects(self, justify=None):
+        """Build Effects for a label, optionally with justify."""
+        if justify:
+            return Effects(font=Font(width=1.27, height=1.27),
+                           justify=Justify(horizontally=justify))
+        return Effects(font=Font(width=1.27, height=1.27))
+
+    def add_label(self, text, x, y, angle=0, justify=None):
         """Add a local net label."""
         x, y = snap(x), snap(y)
         label = LocalLabel()
         label.text = text
         label.position = Position(X=x, Y=y, angle=angle)
-        label.effects = Effects(font=Font(width=1.27, height=1.27))
+        label.effects = self._label_effects(justify)
         label.uuid = uid()
         self.sch.labels.append(label)
         return label
 
-    def add_global_label(self, text, x, y, shape="bidirectional", angle=0):
+    def add_global_label(self, text, x, y, shape="bidirectional", angle=0,
+                         justify=None):
         """Add a global net label."""
         x, y = snap(x), snap(y)
         label = GlobalLabel()
         label.text = text
         label.shape = shape
         label.position = Position(X=x, Y=y, angle=angle)
-        label.effects = Effects(font=Font(width=1.27, height=1.27))
+        label.effects = self._label_effects(justify)
         label.uuid = uid()
         self.sch.globalLabels.append(label)
         return label
 
-    def add_hier_label(self, text, x, y, shape="bidirectional", angle=0):
+    def add_hier_label(self, text, x, y, shape="bidirectional", angle=0,
+                       justify=None):
         """Add a hierarchical label (connects to parent sheet pin)."""
         x, y = snap(x), snap(y)
         label = HierarchicalLabel()
         label.text = text
         label.shape = shape
         label.position = Position(X=x, Y=y, angle=angle)
-        label.effects = Effects(font=Font(width=1.27, height=1.27))
+        label.effects = self._label_effects(justify)
         label.uuid = uid()
         self.sch.hierarchicalLabels.append(label)
         return label
@@ -671,21 +681,18 @@ def generate_address_decoder():
     # -- Hierarchical labels for A0-A2, wired to trunk tops --
     for i in range(3):
         trunk_top_y = snap(base_y - (4 - i) * GRID)  # stagger slightly
-        b.add_hier_label(f"A{i}", base_x, trunk_top_y, shape="input", angle=180)
+        b.add_hier_label(f"A{i}", base_x, trunk_top_y, shape="input", justify="right")
         b.add_wire(base_x, trunk_top_y, addr_trunk_x[i], trunk_top_y)
 
     # -- Three inverters for complemented address bits --
-    # Offset inverter Y by +2*GRID so:
-    #   1. Inverter pin Y values don't coincide with AND gate pin Y values
-    #      (prevents trunk segment endpoints from landing on cross-trunk branches)
-    #   2. NC pin Y (= inv_y - 2.54) doesn't coincide with any AND gate pin Y
-    #      (prevents horizontal branch wires from passing through NC pins)
-    # With +1*GRID offset, NC pin Y = base_y + i*SYM_SPACING which matches
-    # AND pin "1" (dy=0). With +2*GRID, NC Y shifts to non-matching values.
+    # Offset inverter Y by +4*GRID so NEITHER the inverter center Y NOR
+    # the NC pin Y (= inv_y - 2.54) coincides with any AND gate pin Y.
+    # AND pins sit at row_y + {0, ±5.08}. Forbidden offsets (mod 25.4):
+    #   0, ±2.54, ±5.08, 7.62  →  first safe grid-aligned offset = 4*GRID.
     inv_in_pins = []   # inverter input pin positions
     inv_out_pins = []  # inverter output pin positions
     for i in range(3):
-        y = base_y + i * SYM_SPACING_Y + 2 * GRID
+        y = base_y + i * SYM_SPACING_Y + 4 * GRID
         _, pins = b.place_symbol("74LVC1G04", inv_x, y)
         b.connect_power(pins)
         inv_in_pins.append(pins["2"])
@@ -772,7 +779,7 @@ def generate_address_decoder():
         # LED branches below from junction on this wire
         b.place_led_below(led_jct_x, out_pin[1])
         # Hier label at end of wire
-        b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output")
+        b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output", justify="right")
 
     # PWR_FLAG symbols on VCC and GND nets
     pwr_flag_x = hl_out_x + 10 * GRID
@@ -821,7 +828,7 @@ def generate_control_logic():
 
     # -- Hier labels for inputs → wire to inverter inputs --
     # nCE
-    b.add_hier_label("nCE", base_x, ce_y, shape="input", angle=180)
+    b.add_hier_label("nCE", base_x, ce_y, shape="input", justify="right")
     _, ce_inv_pins = b.place_symbol("74LVC1G04", inv_x, ce_y)
     b.connect_power(ce_inv_pins)
     ce_inv_in = ce_inv_pins["2"]
@@ -829,7 +836,7 @@ def generate_control_logic():
     b.add_wire(base_x, ce_y, ce_inv_in[0], ce_inv_in[1])
 
     # nOE
-    b.add_hier_label("nOE", base_x, oe_y, shape="input", angle=180)
+    b.add_hier_label("nOE", base_x, oe_y, shape="input", justify="right")
     _, oe_inv_pins = b.place_symbol("74LVC1G04", inv_x, oe_y)
     b.connect_power(oe_inv_pins)
     oe_inv_in = oe_inv_pins["2"]
@@ -837,7 +844,7 @@ def generate_control_logic():
 
     # nWE — fans out to inverter input AND AND3 input B (via junction)
     nwe_jct_x = base_x + 8 * GRID
-    b.add_hier_label("nWE", base_x, we_y, shape="input", angle=180)
+    b.add_hier_label("nWE", base_x, we_y, shape="input", justify="right")
     _, we_inv_pins = b.place_symbol("74LVC1G04", inv_x, we_y)
     b.connect_power(we_inv_pins)
     we_inv_in = we_inv_pins["2"]
@@ -939,14 +946,14 @@ def generate_control_logic():
     b.add_wire(and1_out[0], and1_out[1], and1_led_x, and1_out[1])
     b.add_wire(and1_led_x, and1_out[1], out_label_x, and1_out[1])
     b.place_led_below(and1_led_x, and1_out[1])
-    b.add_hier_label("WRITE_ACTIVE", out_label_x, and1_out[1], shape="output")
+    b.add_hier_label("WRITE_ACTIVE", out_label_x, and1_out[1], shape="output", justify="right")
 
     # -- AND3 output → LED T-junction → hier label READ_EN --
     and3_led_x = snap(and3_out[0] + 2 * GRID)
     b.add_wire(and3_out[0], and3_out[1], and3_led_x, and3_out[1])
     b.add_wire(and3_led_x, and3_out[1], out_label_x, and3_out[1])
     b.place_led_below(and3_led_x, and3_out[1])
-    b.add_hier_label("READ_EN", out_label_x, and3_out[1], shape="output")
+    b.add_hier_label("READ_EN", out_label_x, and3_out[1], shape="output", justify="right")
 
     return b
 
@@ -970,7 +977,7 @@ def _generate_nand_bank(title, enable_signal, output_prefix):
 
     # Enable signal hier label at top → horizontal wire → trunk
     enable_hier_y = snap(base_y - 2 * GRID)
-    b.add_hier_label(enable_signal, base_x, enable_hier_y, shape="input", angle=180)
+    b.add_hier_label(enable_signal, base_x, enable_hier_y, shape="input", justify="right")
     b.add_wire(base_x, enable_hier_y, enable_trunk_x, enable_hier_y)
 
     # Place 8 NANDs and collect pin positions
@@ -995,7 +1002,7 @@ def _generate_nand_bank(title, enable_signal, output_prefix):
     # -- SEL inputs: hier label → wire → NAND B pin (1:1) --
     for i in range(8):
         b_pin = nand_b_pins[i]
-        b.add_hier_label(f"SEL{i}", base_x, b_pin[1], shape="input", angle=180)
+        b.add_hier_label(f"SEL{i}", base_x, b_pin[1], shape="input", justify="right")
         b.add_wire(base_x, b_pin[1], b_pin[0], b_pin[1])
 
     # -- Outputs: NAND output → LED T-junction → wire → hier label --
@@ -1007,7 +1014,7 @@ def _generate_nand_bank(title, enable_signal, output_prefix):
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
         b.place_led_below(led_jct_x, out_pin[1])
-        b.add_hier_label(out_net, hl_out_x, out_pin[1], shape="output")
+        b.add_hier_label(out_net, hl_out_x, out_pin[1], shape="output", justify="right")
 
     return b
 
@@ -1048,13 +1055,13 @@ def generate_byte_sheet():
 
     # -- WRITE_CLK hier label at top → horizontal wire → trunk --
     wclk_hier_y = snap(base_y - 4 * GRID)
-    b.add_hier_label("WRITE_CLK", base_x, wclk_hier_y, shape="input", angle=180)
+    b.add_hier_label("WRITE_CLK", base_x, wclk_hier_y, shape="input", justify="right")
     b.add_wire(base_x, wclk_hier_y, wclk_trunk_x, wclk_hier_y)
 
     # -- BUF_OE hier label at top → horizontal wire → trunk --
     # Must avoid Y=25.4 (DFF D pin 1 Y for bit 0) to prevent net merging
     boe_hier_y = snap(base_y - 6 * GRID)
-    b.add_hier_label("BUF_OE", base_x, boe_hier_y, shape="input", angle=180)
+    b.add_hier_label("BUF_OE", base_x, boe_hier_y, shape="input", justify="right")
     b.add_wire(base_x, boe_hier_y, boe_trunk_x, boe_hier_y)
 
     # -- Place components and wire each bit --
@@ -1071,7 +1078,7 @@ def generate_byte_sheet():
         # D input: hier label wires directly to DFF D pin
         d_pin = dff_pins["1"]
         hl_y = base_y + bit * DFF_SPACING_Y
-        b.add_hier_label(f"D{bit}", base_x, hl_y, shape="bidirectional", angle=180)
+        b.add_hier_label(f"D{bit}", base_x, hl_y, shape="bidirectional", justify="right")
         # L-wire from hier label to D pin (handle possible Y offset)
         if snap(hl_y) != snap(d_pin[1]):
             b.add_wire(base_x, hl_y, base_x, d_pin[1])
@@ -1109,7 +1116,7 @@ def generate_byte_sheet():
         y_pin = buf_pins["4"]
         led_in = b.place_led_indicator(y_pin[0] + LED_GAP_X, y_pin[1])
         b.add_wire(*y_pin, *led_in)
-        b.add_label(f"D{bit}", *y_pin)
+        b.add_label(f"D{bit}", *y_pin, justify="right")
 
     # -- WRITE_CLK vertical trunk wire (segmented at each branch) --
     clk_ys = [p[1] for p in clk_pin_positions]
@@ -1159,7 +1166,7 @@ def generate_root_sheet():
         px, py = pin_pos
         label_x = px - LABEL_STUB
         b.add_wire(px, py, label_x, py)
-        b.add_label(sig, label_x, py, angle=180)
+        b.add_label(sig, label_x, py, justify="right")
 
     # -- Bus indicator LEDs (to the right of connector, grouped) --
     led_base_x = base_x + 25 * GRID
@@ -1171,7 +1178,7 @@ def generate_root_sheet():
         y = led_y + i * 3 * GRID
         led_in = b.place_led_indicator(led_base_x, y)
         b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
-        b.add_label(f"A{i}", led_in[0] - LABEL_STUB, led_in[1], angle=180)
+        b.add_label(f"A{i}", led_in[0] - LABEL_STUB, led_in[1], justify="right")
 
     # Data bus LEDs (D0-D7) -- gap after address
     data_led_start = led_y + 3 * 3 * GRID + 2 * GRID
@@ -1179,7 +1186,7 @@ def generate_root_sheet():
         y = data_led_start + i * 3 * GRID
         led_in = b.place_led_indicator(led_base_x, y)
         b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
-        b.add_label(f"D{i}", led_in[0] - LABEL_STUB, led_in[1], angle=180)
+        b.add_label(f"D{i}", led_in[0] - LABEL_STUB, led_in[1], justify="right")
 
     # Control signal LEDs (nCE, nOE, nWE) -- gap after data
     ctrl_led_start = data_led_start + 8 * 3 * GRID + 2 * GRID
@@ -1188,7 +1195,7 @@ def generate_root_sheet():
         y = ctrl_led_start + i * 3 * GRID
         led_in = b.place_led_indicator(led_base_x, y)
         b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
-        b.add_label(name, led_in[0] - LABEL_STUB, led_in[1], angle=180)
+        b.add_label(name, led_in[0] - LABEL_STUB, led_in[1], justify="right")
 
     # -- Hierarchical sheet references --
     # Column 1: control sheets (variable height based on pin count)
@@ -1247,7 +1254,7 @@ def generate_root_sheet():
         for pin_idx, (pin_name, pin_type) in enumerate(pins):
             pin_y = sy + 2.54 + pin_idx * 2.54
             b.add_wire(sx, pin_y, sx - wire_stub, pin_y)
-            b.add_label(pin_name, sx - wire_stub, pin_y, angle=0)
+            b.add_label(pin_name, sx - wire_stub, pin_y, justify="right")
 
     yellow_fill = ColorRGBA(R=255, G=255, B=225, A=255, precision=4)
     green_fill = ColorRGBA(R=225, G=255, B=225, A=255, precision=4)
@@ -1348,9 +1355,64 @@ def generate_root_sheet():
             else:
                 net_name = pin_name
             b.add_wire(sx, pin_y, sx - wire_stub, pin_y)
-            b.add_label(net_name, sx - wire_stub, pin_y, angle=0)
+            b.add_label(net_name, sx - wire_stub, pin_y, justify="right")
 
     return b
+
+
+# --------------------------------------------------------------
+# KiCad format normalization
+# --------------------------------------------------------------
+
+def normalize_via_kicad(filepaths):
+    """Re-save schematic files through KiCad's eeschema to normalize formatting.
+
+    kiutils generates valid KiCad S-expressions but with slightly different
+    formatting (number precision, whitespace) than KiCad's native editor.
+    This causes large diffs when the user later edits and saves in KiCad.
+
+    Opens each file in eeschema, sends Ctrl+S to save in KiCad's native
+    format, then closes the window.  Requires KiCad to be installed.
+    """
+    import time
+    import ctypes
+
+    EESCHEMA = r"C:\Program Files\KiCad\9.0\bin\eeschema.exe"
+    if not os.path.exists(EESCHEMA):
+        print("  WARNING: eeschema not found, skipping format normalization")
+        return
+
+    print("\nNormalizing formatting via eeschema...")
+
+    for filepath in filepaths:
+        filename = os.path.basename(filepath)
+        print(f"  Normalizing: {filename} ...", end=" ", flush=True)
+
+        # Launch eeschema with the file
+        proc = subprocess.Popen([EESCHEMA, filepath])
+
+        # Wait for the window to load
+        time.sleep(3)
+
+        # Send Ctrl+S via PowerShell SendKeys (saves in KiCad's native format)
+        subprocess.run(
+            ["powershell", "-Command",
+             "Add-Type -AssemblyName System.Windows.Forms; "
+             "[System.Windows.Forms.SendKeys]::SendWait('^s'); "
+             "Start-Sleep -Milliseconds 1000; "
+             "[System.Windows.Forms.SendKeys]::SendWait('%{F4}')"],
+            capture_output=True, timeout=10,
+        )
+
+        # Wait for eeschema to close
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+        print("done")
+
+    print("  Format normalization complete")
 
 
 # --------------------------------------------------------------
@@ -1512,10 +1574,18 @@ def main():
 
     # Save all files
     print("\nSaving files...")
+    saved_paths = []
     for name, builder in builders.items():
         filepath = os.path.join(BOARD_DIR, f"{name}.kicad_sch")
         builder.save(filepath)
+        saved_paths.append(filepath)
         print(f"  Saved: {filepath}")
+
+    # Re-save each file through KiCad to normalize formatting.
+    # kiutils S-expression output differs from KiCad's native format, causing
+    # large diffs when the user edits and saves in KiCad.  Opening each file
+    # in eeschema and saving it normalizes the formatting.
+    normalize_via_kicad(saved_paths)
 
     # Component count summary
     totals = count_components(builders)

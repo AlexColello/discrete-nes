@@ -32,7 +32,7 @@ from kiutils.schematic import Schematic
 # --------------------------------------------------------------
 
 GRID = 2.54
-TOLERANCE = 0.02  # mm tolerance for coordinate comparison
+TOLERANCE = 0.0001  # mm tolerance for coordinate comparison
 
 BOARD_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 OUTPUT_DIR = os.path.join(BOARD_DIR, "verify_output")
@@ -459,13 +459,58 @@ def check_tjunctions_without_dots(data):
 # ERC via kicad-cli
 # --------------------------------------------------------------
 
-def run_erc(root_sch_path, output_dir):
-    """Run kicad-cli ERC on the root schematic.
+def _is_standalone_artifact(violation):
+    """Check if an ERC violation is an expected standalone sub-sheet artifact.
+
+    When running ERC on a sub-sheet in isolation (not via the root sheet),
+    certain errors are expected because hierarchical connections don't exist:
+    - Hierarchical labels "cannot be connected to non-existent parent sheet"
+    - Input pins "not driven" when their drivers are hierarchical labels
+    - Power pins not driven (no PWR_FLAG in isolated context)
+    """
+    desc = violation.get("description", "")
+    vtype = violation.get("type", "")
+
+    # Hierarchical labels can't connect when sheet is standalone
+    if "cannot be connected to non-existent parent sheet" in desc:
+        return True
+
+    # Hierarchical labels show as "dangling" standalone because KiCad
+    # can't resolve their parent-side connections without the hierarchy.
+    # The "Hierarchical Label" text is in items[].description, not the
+    # violation description.
+    if vtype == "label_dangling":
+        items = violation.get("items", [])
+        if any("Hierarchical Label" in it.get("description", "")
+               for it in items):
+            return True
+
+    # Input pins fed by hierarchical labels show as "not driven" standalone
+    if vtype == "pin_not_driven" and "Input pin not driven" in desc:
+        return True
+
+    # Power pins not driven in isolation
+    if vtype == "power_pin_not_driven":
+        return True
+
+    return False
+
+
+def run_erc(sch_path, output_dir, label=None, standalone=False):
+    """Run kicad-cli ERC on a schematic.
+
+    Args:
+        sch_path: Path to the .kicad_sch file
+        output_dir: Directory for output files
+        label: Label for output filenames (default: derived from sch_path)
+        standalone: If True, filter out expected standalone sub-sheet artifacts
 
     Returns (issues_list, error_count, warning_count).
     """
-    erc_json = os.path.join(output_dir, "erc_results.json")
-    erc_rpt = os.path.join(output_dir, "erc_results.rpt")
+    if label is None:
+        label = os.path.splitext(os.path.basename(sch_path))[0]
+
+    erc_json = os.path.join(output_dir, f"erc_{label}.json")
 
     if not os.path.exists(KICAD_CLI):
         return [f"  kicad-cli not found at {KICAD_CLI}"], 0, 0
@@ -473,19 +518,14 @@ def run_erc(root_sch_path, output_dir):
     # JSON report
     subprocess.run(
         [KICAD_CLI, "sch", "erc", "--format", "json",
-         "--severity-all", "--output", erc_json, root_sch_path],
-        capture_output=True, text=True,
-    )
-    # Text report
-    subprocess.run(
-        [KICAD_CLI, "sch", "erc",
-         "--severity-all", "--output", erc_rpt, root_sch_path],
+         "--severity-all", "--output", erc_json, sch_path],
         capture_output=True, text=True,
     )
 
     issues = []
     real_errors = 0
     warnings = 0
+    filtered_count = 0
 
     if os.path.exists(erc_json):
         with open(erc_json) as f:
@@ -501,6 +541,11 @@ def run_erc(root_sch_path, output_dir):
                 # lib_symbol_mismatch is a known harmless kiutils artifact
                 if vtype == "lib_symbol_mismatch":
                     warnings += 1
+                    continue
+
+                # Filter standalone artifacts for sub-sheet ERC
+                if standalone and _is_standalone_artifact(v):
+                    filtered_count += 1
                     continue
 
                 if severity == "error":
@@ -520,6 +565,11 @@ def run_erc(root_sch_path, output_dir):
                         )
     else:
         issues.append("  ERC JSON output not generated")
+
+    if standalone and filtered_count > 0:
+        issues.append(
+            f"  (filtered {filtered_count} standalone artifact(s))"
+        )
 
     return issues, real_errors, warnings
 
@@ -595,10 +645,12 @@ def main():
 
     # -- ERC --
     if not skip_erc:
+        # Root sheet ERC (full hierarchy)
         root_sch = os.path.join(BOARD_DIR, "ram.kicad_sch")
         if os.path.exists(root_sch):
-            print(f"\n--- ERC (kicad-cli) ---")
-            erc_issues, erc_errors, erc_warnings = run_erc(root_sch, OUTPUT_DIR)
+            print(f"\n--- ERC: ram.kicad_sch (root, full hierarchy) ---")
+            erc_issues, erc_errors, erc_warnings = run_erc(
+                root_sch, OUTPUT_DIR, label="root")
 
             if erc_issues:
                 for issue in erc_issues:
@@ -608,6 +660,27 @@ def main():
             print(
                 f"  ERC: {erc_errors} error(s), {erc_warnings} warning(s) "
                 f"(lib_symbol_mismatch excluded from errors)"
+            )
+
+        # Per-sub-sheet standalone ERC
+        for sch_file in SCHEMATIC_FILES:
+            if sch_file == "ram.kicad_sch":
+                continue  # already checked as root
+            filepath = os.path.join(BOARD_DIR, sch_file)
+            if not os.path.exists(filepath):
+                continue
+            label = os.path.splitext(sch_file)[0]
+            print(f"\n--- ERC: {sch_file} (standalone) ---")
+            erc_issues, erc_errors, erc_warnings = run_erc(
+                filepath, OUTPUT_DIR, label=label, standalone=True)
+
+            if erc_issues:
+                for issue in erc_issues:
+                    print(issue)
+            total_errors += erc_errors
+            total_warnings += erc_warnings
+            print(
+                f"  ERC: {erc_errors} error(s), {erc_warnings} warning(s)"
             )
     else:
         print(f"\n--- ERC skipped (--no-erc) ---")
@@ -621,7 +694,7 @@ def main():
         if os.path.exists(root_sch):
             result = subprocess.run(
                 [KICAD_CLI, "sch", "export", "svg",
-                 "--output", svg_dir, "--pages-all", root_sch],
+                 "--output", svg_dir, root_sch],
                 capture_output=True, text=True,
             )
             if result.returncode == 0:
