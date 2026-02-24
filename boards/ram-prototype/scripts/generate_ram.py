@@ -74,7 +74,7 @@ SYMBOL_LIB_MAP = {
     "VCC": "power",
     "GND": "power",
     "PWR_FLAG": "power",
-    "Conn_01x14": "Connector_Generic",
+    "Conn_01x16": "Connector_Generic",
 }
 
 
@@ -109,7 +109,7 @@ def load_lib_symbols():
         ],
         "Device.kicad_sym": ["R_Small", "LED_Small", "C_Small"],
         "power.kicad_sym": ["VCC", "GND", "PWR_FLAG"],
-        "Connector_Generic.kicad_sym": ["Conn_01x14"],
+        "Connector_Generic.kicad_sym": ["Conn_01x16"],
     }
     for lib_file, wanted in stock_libs.items():
         lib_path = os.path.join(kicad_sym_dir, lib_file)
@@ -204,8 +204,8 @@ def discover_pin_offsets():
         ("74LVC1G125", "U", 0),
         ("R_Small", "R", 90),
         ("LED_Small", "D", 180),
-        ("Conn_01x14", "J", 0),
-        ("Conn_01x14", "J", 180),
+        ("Conn_01x16", "J", 0),
+        ("Conn_01x16", "J", 180),
     ]
     origin = (100.0, 100.0)
     offsets = {}
@@ -312,8 +312,8 @@ def get_pin_offsets():
         specs = [
             ("74LVC1G04", 0), ("74LVC1G08", 0), ("74LVC1G00", 0),
             ("74LVC1G11", 0), ("74LVC1G79", 0), ("74LVC1G125", 0),
-            ("R_Small", 90), ("LED_Small", 180), ("Conn_01x14", 0),
-            ("Conn_01x14", 180),
+            ("R_Small", 90), ("LED_Small", 180), ("Conn_01x16", 0),
+            ("Conn_01x16", 180),
         ]
         for sym_name, angle in specs:
             key = (sym_name, angle)
@@ -1159,13 +1159,15 @@ def generate_root_sheet():
     Root sheet: connector, bus indicator LEDs, and hierarchical sheet references.
 
     Layout (left to right):
-      1. Connector J1 + bus indicator LEDs
-      2. Control hierarchy sheets (address decoder, control logic, write clk, read OE)
-      3. Byte hierarchy sheets (2 columns of 4)
+      1. Connector J1 (16-pin, with VCC/GND) + bus indicator LEDs
+      2. Column 1: Address Decoder (top) + Control Logic (bottom)
+      3. Column 2: Write Clk Gen (top) + Read OE Gen (bottom)
+      4. Byte sheets: 2 columns of 4
 
     Wiring strategy:
       - D0-D7: local labels (high fanout — connector + LEDs + 8 byte sheets)
       - All other signals: direct wires between sheet pins
+      - Each control block has inputs on LEFT, outputs on RIGHT
     """
     b = SchematicBuilder(title="8-Byte Discrete RAM", page_size="A2")
     base_x, base_y = 25.4, 25.4
@@ -1173,12 +1175,10 @@ def generate_root_sheet():
     # -- External connector (flipped 180° so pins face RIGHT) --
     conn_x = base_x
     conn_y = base_y + 5 * GRID
-    _, conn_pins = b.place_symbol("Conn_01x14", conn_x, conn_y,
+    _, conn_pins = b.place_symbol("Conn_01x16", conn_x, conn_y,
                                   ref_prefix="J", value="SRAM_Bus", angle=180)
 
-    # -- Hierarchical sheet layout constants --
-    ctrl_sheet_x = base_x + 60 * GRID
-    ctrl_sheet_w = 28 * GRID
+    # -- Layout constants --
     sheet_gap = 5 * GRID
     wire_stub = 5.08
 
@@ -1188,7 +1188,7 @@ def generate_root_sheet():
     def _pin_y(sy, pin_idx):
         return snap(sy + 2.54 + pin_idx * 2.54)
 
-    # -- Helper to create a sheet block (no labels or wires — just the block) --
+    # -- Helper to create a sheet block --
     def _add_sheet_block(name, filename, pins, sx, sy, sw, sh, fill_color,
                          right_pins=None):
         """Create sheet block, return dict mapping pin_name -> (x, y).
@@ -1216,24 +1216,36 @@ def generate_root_sheet():
             position=Position(X=sx + sw, Y=sy + sh + 1.27, angle=0),
             effects=Effects(font=Font(width=1.27, height=1.27)),
         )
+        # Count left and right pins separately for Y positioning
+        left_pins_list = [(pn, pt) for pn, pt in pins if pn not in right_pins]
+        right_pins_list = [(pn, pt) for pn, pt in pins if pn in right_pins]
+
         pin_positions = {}
-        for pin_idx, (pin_name, pin_type) in enumerate(pins):
+        # Place left pins
+        for pin_idx, (pin_name, pin_type) in enumerate(left_pins_list):
             pin = HierarchicalPin()
             pin.name = pin_name
             pin.connectionType = pin_type
             py = _pin_y(sy, pin_idx)
-            if pin_name in right_pins:
-                pin.position = Position(X=sx + sw, Y=py, angle=0)
-                pin.effects = Effects(font=Font(width=1.27, height=1.27),
-                                      justify=Justify(horizontally="right"))
-                pin_positions[pin_name] = (sx + sw, py)
-            else:
-                pin.position = Position(X=sx, Y=py, angle=180)
-                pin.effects = Effects(font=Font(width=1.27, height=1.27),
-                                      justify=Justify(horizontally="left"))
-                pin_positions[pin_name] = (sx, py)
+            pin.position = Position(X=sx, Y=py, angle=180)
+            pin.effects = Effects(font=Font(width=1.27, height=1.27),
+                                  justify=Justify(horizontally="left"))
+            pin_positions[pin_name] = (sx, py)
             pin.uuid = uid()
             sheet.pins.append(pin)
+        # Place right pins
+        for pin_idx, (pin_name, pin_type) in enumerate(right_pins_list):
+            pin = HierarchicalPin()
+            pin.name = pin_name
+            pin.connectionType = pin_type
+            py = _pin_y(sy, pin_idx)
+            pin.position = Position(X=sx + sw, Y=py, angle=0)
+            pin.effects = Effects(font=Font(width=1.27, height=1.27),
+                                  justify=Justify(horizontally="right"))
+            pin_positions[pin_name] = (sx + sw, py)
+            pin.uuid = uid()
+            sheet.pins.append(pin)
+
         sheet.instances.append(HierarchicalSheetProjectInstance(
             name=PROJECT_NAME,
             paths=[HierarchicalSheetProjectPath(
@@ -1248,104 +1260,130 @@ def generate_root_sheet():
     green_fill = ColorRGBA(R=225, G=255, B=225, A=255, precision=4)
 
     # ================================================================
+    # 2-Column layout positions
+    # ================================================================
+    col1_x = snap(base_x + 25 * GRID)
+    col1_w = snap(28 * GRID)
+    inter_col_gap = snap(15 * GRID)
+    col2_x = snap(col1_x + col1_w + inter_col_gap)
+    col2_w = snap(28 * GRID)
+    col2_byte_gap = snap(15 * GRID)
+    byte_col1_x = snap(col2_x + col2_w + col2_byte_gap)
+    byte_w = snap(22 * GRID)
+    byte_inter_gap = snap(20 * GRID)
+    byte_col2_x = snap(byte_col1_x + byte_w + byte_inter_gap)
+
+    # ================================================================
     # Place all sheet blocks, collecting pin positions
     # ================================================================
 
-    # Address decoder (11 pins)
-    addr_pin_defs = [("A0", "input"), ("A1", "input"), ("A2", "input")]
-    addr_pin_defs += [(f"SEL{i}", "output") for i in range(8)]
-    addr_h = _sheet_height(len(addr_pin_defs))
-    y_cursor = base_y
-    addr_sy = y_cursor
+    # -- Column 1 top: Address Decoder (3 input + 8 output = 11 pins) --
+    addr_left_defs = [("A0", "input"), ("A1", "input"), ("A2", "input")]
+    addr_right_defs = [(f"SEL{i}", "output") for i in range(8)]
+    addr_pin_defs = addr_left_defs + addr_right_defs
+    addr_right_names = {f"SEL{i}" for i in range(8)}
+    addr_num_left = len(addr_left_defs)
+    addr_num_right = len(addr_right_defs)
+    addr_h = _sheet_height(max(addr_num_left, addr_num_right))
+    addr_sy = base_y
     addr_pp = _add_sheet_block("Address Decoder", "address_decoder.kicad_sch",
-                               addr_pin_defs, ctrl_sheet_x, addr_sy,
-                               ctrl_sheet_w, addr_h, yellow_fill)
+                               addr_pin_defs, col1_x, addr_sy,
+                               col1_w, addr_h, yellow_fill,
+                               right_pins=addr_right_names)
 
-    # Control logic (5 pins)
-    y_cursor += addr_h + sheet_gap
-    ctrl_sy = y_cursor
-    ctrl_pin_defs = [("nCE", "input"), ("nOE", "input"), ("nWE", "input"),
-                     ("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
-    ctrl_h = _sheet_height(len(ctrl_pin_defs))
+    # -- Column 1 bottom: Control Logic (3 input + 2 output = 5 pins) --
+    ctrl_left_defs = [("nCE", "input"), ("nOE", "input"), ("nWE", "input")]
+    ctrl_right_defs = [("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
+    ctrl_pin_defs = ctrl_left_defs + ctrl_right_defs
+    ctrl_right_names = {"WRITE_ACTIVE", "READ_EN"}
+    ctrl_num_left = len(ctrl_left_defs)
+    ctrl_num_right = len(ctrl_right_defs)
+    ctrl_h = _sheet_height(max(ctrl_num_left, ctrl_num_right))
+    ctrl_sy = snap(addr_sy + addr_h + sheet_gap)
     ctrl_pp = _add_sheet_block("Control Logic", "control_logic.kicad_sch",
-                               ctrl_pin_defs, ctrl_sheet_x, ctrl_sy,
-                               ctrl_sheet_w, ctrl_h, yellow_fill)
+                               ctrl_pin_defs, col1_x, ctrl_sy,
+                               col1_w, ctrl_h, yellow_fill,
+                               right_pins=ctrl_right_names)
 
-    # Write clock gen (17 pins)
-    y_cursor += ctrl_h + sheet_gap
-    wclk_sy = y_cursor
-    wclk_pin_defs = [("WRITE_ACTIVE", "input")]
-    wclk_pin_defs += [(f"SEL{i}", "input") for i in range(8)]
-    wclk_pin_defs += [(f"WRITE_CLK_{i}", "output") for i in range(8)]
-    wclk_h = _sheet_height(len(wclk_pin_defs))
+    # -- Column 2 top: Write Clk Gen (9 input + 8 output = 17 pins) --
+    wclk_left_defs = [("WRITE_ACTIVE", "input")]
+    wclk_left_defs += [(f"SEL{i}", "input") for i in range(8)]
+    wclk_right_defs = [(f"WRITE_CLK_{i}", "output") for i in range(8)]
+    wclk_pin_defs = wclk_left_defs + wclk_right_defs
+    wclk_right_names = {f"WRITE_CLK_{i}" for i in range(8)}
+    wclk_num_left = len(wclk_left_defs)
+    wclk_num_right = len(wclk_right_defs)
+    wclk_h = _sheet_height(max(wclk_num_left, wclk_num_right))
+    wclk_sy = base_y
     wclk_pp = _add_sheet_block("Write Clk Gen", "write_clk_gen.kicad_sch",
-                               wclk_pin_defs, ctrl_sheet_x, wclk_sy,
-                               ctrl_sheet_w, wclk_h, yellow_fill)
+                               wclk_pin_defs, col2_x, wclk_sy,
+                               col2_w, wclk_h, yellow_fill,
+                               right_pins=wclk_right_names)
 
-    # Read OE gen (17 pins)
-    y_cursor += wclk_h + sheet_gap
-    roe_sy = y_cursor
-    roe_pin_defs = [("READ_EN", "input")]
-    roe_pin_defs += [(f"SEL{i}", "input") for i in range(8)]
-    roe_pin_defs += [(f"BUF_OE_{i}", "output") for i in range(8)]
-    roe_h = _sheet_height(len(roe_pin_defs))
+    # -- Column 2 bottom: Read OE Gen (9 input + 8 output = 17 pins) --
+    roe_left_defs = [("READ_EN", "input")]
+    roe_left_defs += [(f"SEL{i}", "input") for i in range(8)]
+    roe_right_defs = [(f"BUF_OE_{i}", "output") for i in range(8)]
+    roe_pin_defs = roe_left_defs + roe_right_defs
+    roe_right_names = {f"BUF_OE_{i}" for i in range(8)}
+    roe_num_left = len(roe_left_defs)
+    roe_num_right = len(roe_right_defs)
+    roe_h = _sheet_height(max(roe_num_left, roe_num_right))
+    roe_sy = snap(wclk_sy + wclk_h + sheet_gap)
     roe_pp = _add_sheet_block("Read OE Gen", "read_oe_gen.kicad_sch",
-                              roe_pin_defs, ctrl_sheet_x, roe_sy,
-                              ctrl_sheet_w, roe_h, yellow_fill)
+                              roe_pin_defs, col2_x, roe_sy,
+                              col2_w, roe_h, yellow_fill,
+                              right_pins=roe_right_names)
 
-    # Byte sheets (2 columns of 4)
+    # -- Byte sheets (2 columns of 4, all pins on LEFT) --
     byte_pin_defs = [("WRITE_CLK", "input"), ("BUF_OE", "input")]
     byte_pin_defs += [(f"D{bit}", "bidirectional") for bit in range(8)]
     byte_h = _sheet_height(len(byte_pin_defs))
-    byte_w = 22 * GRID
-    byte_col1_x = ctrl_sheet_x + ctrl_sheet_w + 18 * GRID
-    byte_col2_x = byte_col1_x + byte_w + 18 * GRID
 
-    byte_pp = []  # list of pin_positions dicts, one per byte
+    byte_pp = []
     for byte_idx in range(8):
         col = byte_idx // 4
         row = byte_idx % 4
         sx = byte_col1_x if col == 0 else byte_col2_x
-        sy = base_y + row * (byte_h + sheet_gap)
+        sy = snap(base_y + row * (byte_h + sheet_gap))
         pp = _add_sheet_block(f"Byte {byte_idx}", "byte.kicad_sch",
-                              byte_pin_defs, sx, sy, byte_w, byte_h, green_fill,
-                              right_pins={"WRITE_CLK", "BUF_OE"})
+                              byte_pin_defs, sx, sy, byte_w, byte_h, green_fill)
         byte_pp.append(pp)
 
     # ================================================================
-    # Connector pin positions (connector is flipped 180°, pins face RIGHT)
+    # Connector pin positions (16-pin, flipped 180°, pins face RIGHT)
+    # Pins 1-14: signals, Pin 15: VCC, Pin 16: GND
     # ================================================================
-    signal_names = ["A0","A1","A2",
-                    "D0","D1","D2","D3","D4","D5","D6","D7",
-                    "nCE","nOE","nWE"]
+    signal_names = ["A0", "A1", "A2",
+                    "D0", "D1", "D2", "D3", "D4",
+                    "D5", "D6", "D7",
+                    "nCE", "nOE", "nWE"]
     conn_signal_pos = {}
     for pin_num_int, sig in enumerate(signal_names, start=1):
         conn_signal_pos[sig] = conn_pins[str(pin_num_int)]
 
     # ================================================================
-    # LED fanout from connector — ALL 14 signals get an LED + label
+    # Connector power pins (VCC at pin 15, GND at pin 16)
     # ================================================================
-    # With connector flipped, pins face right. Each pin wire goes right,
-    # passes through an LED junction (where LED drops below), then
-    # continues right to a label. Labels connect to sheet block pins.
-    #
-    # This avoids long horizontal wires that would overlap with other
-    # signals' LED chains (LED drop of 3*GRID = 7.62mm causes LED
-    # components to land at the same Y as signals 3 pins away).
-    #
-    # Stagger LED junction X positions into 4 groups (by pin index % 4)
-    # so vertical LED drop wires don't overlap. Pins 4+ apart have
-    # non-overlapping Y ranges for the LED drop.
-    #
-    # LED drop = 3.5*GRID (8.89mm): half-integer pin spacings ensure
-    # the LED chain Y never coincides with any connector pin Y, since
-    # pin Y values differ by integer multiples of GRID.
-    #
-    # X group offsets [0, 0.5, 4, 4.5]*GRID: all pair differences are
-    # {0.5, 3.5, 4, 4.5}*GRID. LED pin X positions from jct_x are at
-    # offsets {0, 2, 3, 5}*GRID — half-integer group diffs never match.
-    # Label endpoints (jct_x + GRID) don't coincide with any group's
-    # jct_x, avoiding T-junctions on vertical drop wires.
+    vcc_pos = conn_pins["15"]
+    gnd_pos = conn_pins["16"]
+    # Place power symbols at connector power pins (no PWR_FLAG here —
+    # sub-sheets already have PWR_FLAG; adding it here would cause ERC
+    # "power output to power output" errors on the shared VCC/GND nets)
+    pwr_wire_len = snap(3 * GRID)
+    # VCC: wire from connector pin rightward, power symbol at end
+    b.add_wire(vcc_pos[0], vcc_pos[1], vcc_pos[0] + pwr_wire_len, vcc_pos[1])
+    b.place_power("VCC", vcc_pos[0] + pwr_wire_len, vcc_pos[1], angle=90)
+    # GND: wire from connector pin rightward, power symbol at end
+    b.add_wire(gnd_pos[0], gnd_pos[1], gnd_pos[0] + pwr_wire_len, gnd_pos[1])
+    b.place_power("GND", gnd_pos[0] + pwr_wire_len, gnd_pos[1], angle=90)
+
+    # ================================================================
+    # LED fanout from connector — ALL 14 signal pins get LEDs + labels
+    # ================================================================
+    # Labels are used for connector → sheet pin connections to avoid
+    # horizontal wire overlaps (connector pin Y can coincide with
+    # sheet pin Y, causing wires at the same Y to merge nets).
     conn_pin_x = conn_signal_pos[signal_names[0]][0]
     led_jct_base = snap(conn_pin_x + 3 * GRID)
     led_drop = snap(3.5 * GRID)
@@ -1359,7 +1397,7 @@ def generate_root_sheet():
 
         # Connector pin → LED junction (horizontal)
         b.add_wire(cx, cy, jct_x, cy)
-        # LED drops below from junction (half-integer drop avoids Y conflicts)
+        # LED drops below from junction
         b.place_led_below(jct_x, cy, drop=led_drop)
         # Continue from junction to label
         label_x = snap(jct_x + GRID)
@@ -1367,11 +1405,21 @@ def generate_root_sheet():
         b.add_label(sig, label_x, cy)
 
     # ================================================================
-    # Label-based connections to sheet block pins
+    # Label-based connections: connector labels → sheet block pins
     # ================================================================
-    # All signals that span large X distances use labels to avoid
-    # wire overlap issues. Direct wires are only used between
-    # vertically-adjacent sheet blocks in the same column.
+
+    # -- A0-A2 labels on Address Decoder LEFT pins --
+    for i in range(3):
+        sig = f"A{i}"
+        px, py = addr_pp[sig]
+        b.add_wire(px, py, px - wire_stub, py)
+        b.add_label(sig, px - wire_stub, py, justify="right")
+
+    # -- nCE/nOE/nWE labels on Control Logic LEFT pins --
+    for sig in ["nCE", "nOE", "nWE"]:
+        px, py = ctrl_pp[sig]
+        b.add_wire(px, py, px - wire_stub, py)
+        b.add_label(sig, px - wire_stub, py, justify="right")
 
     # -- D0-D7 labels on byte sheet pins (LEFT side) --
     for byte_idx in range(8):
@@ -1382,79 +1430,107 @@ def generate_root_sheet():
             b.add_wire(px, py, px - wire_stub, py)
             b.add_label(sig, px - wire_stub, py, justify="right")
 
-    # -- A0-A2 labels on address decoder sheet pins (LEFT side) --
-    for i in range(3):
-        sig = f"A{i}"
-        px, py = addr_pp[sig]
-        b.add_wire(px, py, px - wire_stub, py)
-        b.add_label(sig, px - wire_stub, py, justify="right")
-
-    # -- nCE/nOE/nWE labels on control logic sheet pins (LEFT side) --
-    for sig in ["nCE", "nOE", "nWE"]:
-        px, py = ctrl_pp[sig]
-        b.add_wire(px, py, px - wire_stub, py)
-        b.add_label(sig, px - wire_stub, py, justify="right")
-
     # ================================================================
-    # Direct wire routing for inter-sheet signals (same column)
+    # Route C: Col1 RIGHT → Col2 LEFT (SEL0-7 trunks)
     # ================================================================
-
-    # -- SEL0-7: address decoder → write_clk_gen + read_oe_gen --
-    sel_trunk_base_x = snap(ctrl_sheet_x - 3 * GRID)
+    # 8 vertical trunks in the inter-column gap
+    sel_trunk_base_x = snap(col2_x - 3 * GRID)
     sel_trunk_x = [snap(sel_trunk_base_x - i * GRID) for i in range(8)]
 
     for i in range(8):
         sig = f"SEL{i}"
+        # Source: Address Decoder RIGHT pin
         ax, ay = addr_pp[sig]
+        # Destinations: Write Clk Gen LEFT pin + Read OE Gen LEFT pin
         wx, wy = wclk_pp[sig]
         rx, ry = roe_pp[sig]
         tx = sel_trunk_x[i]
 
+        # Horizontal from addr decoder RIGHT to trunk
         b.add_wire(ax, ay, tx, ay)
-        trunk_ys = sorted([snap(ay), snap(wy), snap(ry)])
+        # Segmented vertical trunk
+        trunk_ys = sorted(set([snap(ay), snap(wy), snap(ry)]))
         b.add_segmented_trunk(tx, trunk_ys)
+        # Horizontal branches to col2 LEFT pins
         b.add_wire(tx, wy, wx, wy)
         b.add_wire(tx, ry, rx, ry)
 
-    # -- WRITE_ACTIVE: control logic → write_clk_gen --
+    # ================================================================
+    # Route D: Col1 RIGHT → Col2 LEFT (WRITE_ACTIVE, READ_EN)
+    # ================================================================
+    # Trunk X positions BETWEEN sel_trunk_x[0] and col2_x to avoid
+    # horizontal overlaps with SEL wires at the same Y
+    wa_trunk_x = snap(sel_trunk_base_x + 1 * GRID)
+    re_trunk_x = snap(sel_trunk_base_x + 2 * GRID)
+
+    # WRITE_ACTIVE: Control Logic RIGHT → Write Clk Gen LEFT
     wa_src = ctrl_pp["WRITE_ACTIVE"]
     wa_dst = wclk_pp["WRITE_ACTIVE"]
-    wa_trunk_x = snap(ctrl_sheet_x - 12 * GRID)
     b.add_wire(wa_src[0], wa_src[1], wa_trunk_x, wa_src[1])
     b.add_wire(wa_trunk_x, wa_src[1], wa_trunk_x, wa_dst[1])
     b.add_wire(wa_trunk_x, wa_dst[1], wa_dst[0], wa_dst[1])
 
-    # -- READ_EN: control logic → read_oe_gen --
+    # READ_EN: Control Logic RIGHT → Read OE Gen LEFT
     re_src = ctrl_pp["READ_EN"]
     re_dst = roe_pp["READ_EN"]
-    re_trunk_x = snap(ctrl_sheet_x - 13 * GRID)
     b.add_wire(re_src[0], re_src[1], re_trunk_x, re_src[1])
     b.add_wire(re_trunk_x, re_src[1], re_trunk_x, re_dst[1])
     b.add_wire(re_trunk_x, re_dst[1], re_dst[0], re_dst[1])
 
-    # -- WRITE_CLK_0-7: labels on write_clk_gen outputs + byte sheet pins --
-    for i in range(8):
-        sig = f"WRITE_CLK_{i}"
-        # write_clk_gen output (LEFT side of sheet)
-        src_x, src_y = wclk_pp[sig]
-        b.add_wire(src_x, src_y, src_x - wire_stub, src_y)
-        b.add_label(sig, src_x - wire_stub, src_y, justify="right")
-        # byte sheet WRITE_CLK input (RIGHT side of sheet)
-        dst_x, dst_y = byte_pp[i]["WRITE_CLK"]
-        b.add_wire(dst_x, dst_y, dst_x + wire_stub, dst_y)
-        b.add_label(sig, dst_x + wire_stub, dst_y)
+    # ================================================================
+    # Route E: Col2 RIGHT → Byte Col1 (WRITE_CLK_0-3)
+    # ================================================================
+    # Direct wires for WRITE_CLK_0-3 (col2 RIGHT → byte_col1 LEFT).
+    # BUF_OE uses labels because its col2 RIGHT pin Y values coincide
+    # with SEL trunk branch Y values to roe_pp LEFT, causing H overlaps.
+    route_e_base_x = snap(col2_x + col2_w + 2 * GRID)
+    wclk_route_x = [snap(route_e_base_x + i * GRID) for i in range(4)]
 
-    # -- BUF_OE_0-7: labels on read_oe_gen outputs + byte sheet pins --
-    for i in range(8):
+    for i in range(4):
+        sig = f"WRITE_CLK_{i}"
+        src_x, src_y = wclk_pp[sig]
+        dst_x, dst_y = byte_pp[i]["WRITE_CLK"]
+        rx = wclk_route_x[i]
+
+        b.add_wire(src_x, src_y, rx, src_y)
+        if abs(src_y - dst_y) > 0.01:
+            b.add_wire(rx, src_y, rx, dst_y)
+        b.add_wire(rx, dst_y, dst_x, dst_y)
+
+    # ================================================================
+    # Route E/F: Labels for BUF_OE_0-7 and WRITE_CLK_4-7
+    # ================================================================
+    # BUF_OE_0-3: labels (roe_pp RIGHT pin Y overlaps with SEL→roe H wires)
+    for i in range(4):
         sig = f"BUF_OE_{i}"
-        # read_oe_gen output (LEFT side of sheet)
         src_x, src_y = roe_pp[sig]
-        b.add_wire(src_x, src_y, src_x - wire_stub, src_y)
-        b.add_label(sig, src_x - wire_stub, src_y, justify="right")
-        # byte sheet BUF_OE input (RIGHT side of sheet)
+        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
+        b.add_label(sig, src_x + wire_stub, src_y)
         dst_x, dst_y = byte_pp[i]["BUF_OE"]
-        b.add_wire(dst_x, dst_y, dst_x + wire_stub, dst_y)
-        b.add_label(sig, dst_x + wire_stub, dst_y)
+        b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
+        b.add_label(sig, dst_x - wire_stub, dst_y, justify="right")
+
+    # WRITE_CLK_4-7: labels (cross past byte_col1 blocks)
+    for i in range(4):
+        byte_idx = 4 + i
+        sig = f"WRITE_CLK_{byte_idx}"
+        src_x, src_y = wclk_pp[sig]
+        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
+        b.add_label(sig, src_x + wire_stub, src_y)
+        dst_x, dst_y = byte_pp[byte_idx]["WRITE_CLK"]
+        b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
+        b.add_label(sig, dst_x - wire_stub, dst_y, justify="right")
+
+    # BUF_OE_4-7: labels (cross past byte_col1 blocks)
+    for i in range(4):
+        byte_idx = 4 + i
+        sig = f"BUF_OE_{byte_idx}"
+        src_x, src_y = roe_pp[sig]
+        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
+        b.add_label(sig, src_x + wire_stub, src_y)
+        dst_x, dst_y = byte_pp[byte_idx]["BUF_OE"]
+        b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
+        b.add_label(sig, dst_x - wire_stub, dst_y, justify="right")
 
     return b
 
