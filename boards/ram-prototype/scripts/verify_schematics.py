@@ -8,7 +8,8 @@ Checks for common issues that have caused ERC failures or visual problems:
 3. Dangling wire endpoints (not connected to any pin, wire, label, junction)
 4. Wires passing through component pins (unintended connections)
 5. T-junctions without explicit junction dots (visual issue)
-6. ERC via kicad-cli on the root schematic
+6. Netlist connectivity (hierarchy pin connections match expected topology)
+7. ERC via kicad-cli on the root schematic
 
 Results are written to verify_output/ directory (gitignored).
 SVGs are exported to verify_output/svg/ for visual inspection.
@@ -66,20 +67,25 @@ def pts_close(a, b):
 def _extract_lib_pins(lib_sym):
     """Extract pin positions from a library symbol definition.
 
-    Returns [(pin_number, lib_x, lib_y), ...] where coordinates are in
-    library space (Y-up).
+    Returns [(pin_number, lib_x, lib_y, pin_angle, pin_length), ...]
+    where coordinates are in library space (Y-up).
+    pin_angle is the direction from body to tip (0=right, 90=up, 180=left, 270=down).
     """
     pins = []
     # kiutils stores sub-symbols in lib_sym.symbols
     # Sub-symbols named like "74LVC1G04_1_1" contain the pins for unit 1
     for sub_sym in getattr(lib_sym, 'symbols', []):
         for pin in getattr(sub_sym, 'pins', []):
-            pins.append((pin.number, pin.position.X, pin.position.Y))
+            pa = getattr(pin.position, 'angle', 0) or 0
+            pl = getattr(pin, 'length', 2.54) or 2.54
+            pins.append((pin.number, pin.position.X, pin.position.Y, pa, pl))
     # Also check the units property (kiutils convenience)
     if not pins:
         for unit in getattr(lib_sym, 'units', []):
             for pin in getattr(unit, 'pins', []):
-                pins.append((pin.number, pin.position.X, pin.position.Y))
+                pa = getattr(pin.position, 'angle', 0) or 0
+                pl = getattr(pin, 'length', 2.54) or 2.54
+                pins.append((pin.number, pin.position.X, pin.position.Y, pa, pl))
     return pins
 
 
@@ -125,13 +131,14 @@ def parse_schematic(filepath):
                 wires.append((p1, p2))
 
     # -- Library symbol pin map --
-    lib_pin_map = {}  # lib_id -> [(pin_num, lib_x, lib_y)]
+    lib_pin_map = {}  # lib_id -> [(pin_num, lib_x, lib_y, pin_angle, pin_length)]
     for lib_sym in sch.libSymbols:
         lib_pin_map[lib_sym.libId] = _extract_lib_pins(lib_sym)
 
     # -- Component instances and pin positions --
     pins = {}          # (x,y) -> (ref, pin_num, pin_type_or_name)
     pin_positions = set()
+    pin_stubs = {}     # (x,y) -> (stub_dx, stub_dy, stub_len) direction from tip toward body
     components = []
 
     for comp in sch.schematicSymbols:
@@ -152,12 +159,35 @@ def parse_schematic(filepath):
         components.append((ref, lib_name, cx, cy, angle))
 
         if lib_id in lib_pin_map:
-            for pin_num, lx, ly in lib_pin_map[lib_id]:
+            for pin_num, lx, ly, pa, pl in lib_pin_map[lib_id]:
                 dx, dy = _pin_schematic_offset(lx, ly, angle)
                 abs_x = snap(cx + dx)
                 abs_y = snap(cy + dy)
                 pins[(abs_x, abs_y)] = (ref, pin_num, lib_name)
                 pin_positions.add((abs_x, abs_y))
+
+                # Compute stub direction (from tip TOWARD body) in schematic space.
+                # Library pin angle = direction body→tip.
+                # After component rotation and Y-negation, the stub direction
+                # (tip→body) is the reverse of the rotated pin direction.
+                # Library Y-up: pin angle 0=right, 90=up, 180=left, 270=down
+                # Schematic Y-down: negate Y component.
+                tip_angle_lib = pa  # body→tip in library coords
+                # In library coords, body→tip direction vector:
+                tip_rad = math.radians(tip_angle_lib)
+                btx = round(math.cos(tip_rad), 6)
+                bty = round(math.sin(tip_rad), 6)
+                # Convert to schematic coords (negate Y), then apply component rotation
+                bty_sch = -bty
+                rot_rad = math.radians(angle)
+                cos_r = round(math.cos(rot_rad), 6)
+                sin_r = round(math.sin(rot_rad), 6)
+                # Rotate body→tip vector by component angle (CW in schematic)
+                sdx = cos_r * btx + sin_r * bty_sch
+                sdy = -sin_r * btx + cos_r * bty_sch
+                # KiCad pin_angle is the direction from tip toward body,
+                # so (sdx, sdy) after rotation IS the stub direction.
+                pin_stubs[(abs_x, abs_y)] = (round(sdx, 6), round(sdy, 6), pl)
 
     # -- Junctions --
     junctions = set()
@@ -188,6 +218,7 @@ def parse_schematic(filepath):
         'wires': wires,
         'pins': pins,
         'pin_positions': pin_positions,
+        'pin_stubs': pin_stubs,
         'junctions': junctions,
         'labels': labels,
         'no_connects': no_connects,
@@ -455,6 +486,301 @@ def check_tjunctions_without_dots(data):
     return issues
 
 
+def check_wire_overlaps_pin_stub(data):
+    """Check for wires that overlap with a pin's built-in stub line.
+
+    A pin stub is the short line from the pin connection point (tip) toward
+    the component body.  When a wire has an endpoint at the tip and extends
+    in the stub direction, it visually doubles the stub line.
+
+    Uses the computed stub direction vector from parse_schematic().
+    """
+    wires = data['wires']
+    pins = data['pins']
+    pin_stubs = data.get('pin_stubs', {})
+
+    if not pin_stubs:
+        return []
+
+    issues = []
+    seen = set()
+
+    for (px, py), (ref, pin_num, lib_name) in pins.items():
+        if ref.startswith("#"):
+            continue  # skip power symbols
+        if lib_name.startswith("Conn"):
+            continue  # connector pins always have wires in stub direction
+        if (px, py) not in pin_stubs:
+            continue
+
+        sdx, sdy, slen = pin_stubs[(px, py)]
+        if abs(sdx) < 0.01 and abs(sdy) < 0.01:
+            continue
+
+        for w_idx, ((x1, y1), (x2, y2)) in enumerate(wires):
+            # Check if wire has one endpoint at the pin tip
+            if pts_close((x1, y1), (px, py)):
+                other = (x2, y2)
+            elif pts_close((x2, y2), (px, py)):
+                other = (x1, y1)
+            else:
+                continue
+
+            # Wire direction from pin tip toward other endpoint
+            wx = other[0] - px
+            wy = other[1] - py
+            wire_len = math.sqrt(wx * wx + wy * wy)
+            if wire_len < TOLERANCE:
+                continue
+
+            # Dot product: positive means wire goes in stub direction
+            dot = wx * sdx + wy * sdy
+            # Normalize by wire length to get cosine of angle
+            cos_angle = dot / wire_len
+            # Flag if wire is closely aligned with stub direction (within ~15 degrees)
+            if cos_angle > 0.96:
+                key = (px, py, ref, pin_num)
+                if key not in seen:
+                    issues.append(
+                        f"  Wire #{w_idx} overlaps stub of {ref} pin {pin_num} "
+                        f"at ({px},{py})"
+                    )
+                    seen.add(key)
+
+    return issues
+
+
+# --------------------------------------------------------------
+# Netlist verification
+# --------------------------------------------------------------
+
+class _UnionFind:
+    """Simple union-find for net connectivity."""
+
+    def __init__(self):
+        self._parent = {}
+
+    def find(self, x):
+        if x not in self._parent:
+            self._parent[x] = x
+        while self._parent[x] != x:
+            self._parent[x] = self._parent[self._parent[x]]
+            x = self._parent[x]
+        return x
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self._parent[ra] = rb
+
+
+def check_netlist():
+    """Verify root sheet netlist connectivity.
+
+    Builds nets from wire connectivity in ram.kicad_sch using union-find,
+    then checks that expected pairs of hierarchy sheet pins are on the same
+    net (e.g., address decoder SEL0 → write_clk_gen SEL0) and that signals
+    that should be separate are NOT merged.
+
+    Returns list of issue strings (empty if all checks pass).
+    """
+    filepath = os.path.join(BOARD_DIR, "ram.kicad_sch")
+    if not os.path.exists(filepath):
+        return ["  ram.kicad_sch not found"]
+
+    sch = Schematic.from_file(filepath)
+    uf = _UnionFind()
+
+    # -- Collect wires --
+    wires = []
+    for item in sch.graphicalItems:
+        if getattr(item, 'type', None) == 'wire':
+            pts = item.points
+            if len(pts) >= 2:
+                p1 = (snap(pts[0].X), snap(pts[0].Y))
+                p2 = (snap(pts[1].X), snap(pts[1].Y))
+                wires.append((p1, p2))
+                uf.union(p1, p2)
+
+    # -- Collect all electrically-active points --
+    all_pts = set()
+    for p1, p2 in wires:
+        all_pts.add(p1)
+        all_pts.add(p2)
+
+    # Sheet pins: map (x,y) -> "SheetName:PinName"
+    sheet_pin_ids = {}
+    for sheet in sch.sheets:
+        sname = sheet.sheetName.value
+        for pin in sheet.pins:
+            pt = (snap(pin.position.X), snap(pin.position.Y))
+            sheet_pin_ids[pt] = f"{sname}:{pin.name}"
+            all_pts.add(pt)
+
+    # Labels: map (x,y) -> label text
+    label_pts = {}
+    for lbl in getattr(sch, 'labels', []):
+        pt = (snap(lbl.position.X), snap(lbl.position.Y))
+        label_pts[pt] = lbl.text
+        all_pts.add(pt)
+
+    # Component pins (connector, LEDs, resistors)
+    lib_pin_map = {}
+    for lib_sym in sch.libSymbols:
+        lib_pin_map[lib_sym.libId] = _extract_lib_pins(lib_sym)
+
+    comp_pin_ids = {}  # (x,y) -> "Ref:pin_num"
+    for comp in sch.schematicSymbols:
+        lib_id = comp.libId
+        cx, cy = snap(comp.position.X), snap(comp.position.Y)
+        angle = comp.position.angle or 0
+        ref = "?"
+        for prop in comp.properties:
+            if prop.key == "Reference":
+                ref = prop.value
+                break
+        if lib_id in lib_pin_map:
+            for pin_num, lx, ly, pa, pl in lib_pin_map[lib_id]:
+                dx, dy = _pin_schematic_offset(lx, ly, angle)
+                pt = (snap(cx + dx), snap(cy + dy))
+                comp_pin_ids[pt] = f"{ref}:{pin_num}"
+                all_pts.add(pt)
+
+    # Junctions
+    for j in sch.junctions:
+        all_pts.add((snap(j.position.X), snap(j.position.Y)))
+
+    # -- Merge points that touch wires (T-junctions + endpoints) --
+    for pt in all_pts:
+        for (x1, y1), (x2, y2) in wires:
+            if abs(y1 - y2) < TOLERANCE:  # horizontal
+                xmin, xmax = min(x1, x2), max(x1, x2)
+                if (abs(pt[1] - y1) < TOLERANCE and
+                        xmin - TOLERANCE <= pt[0] <= xmax + TOLERANCE):
+                    uf.union(pt, (x1, y1))
+            elif abs(x1 - x2) < TOLERANCE:  # vertical
+                ymin, ymax = min(y1, y2), max(y1, y2)
+                if (abs(pt[0] - x1) < TOLERANCE and
+                        ymin - TOLERANCE <= pt[1] <= ymax + TOLERANCE):
+                    uf.union(pt, (x1, y1))
+
+    # -- Merge same-name labels (implicit net connections) --
+    label_groups = defaultdict(list)
+    for pt, name in label_pts.items():
+        label_groups[name].append(pt)
+    for name, pts in label_groups.items():
+        for i in range(1, len(pts)):
+            uf.union(pts[0], pts[i])
+
+    # -- Build net membership: root -> set of identifiers --
+    nets = defaultdict(set)
+    for pt, sid in sheet_pin_ids.items():
+        nets[uf.find(pt)].add(sid)
+    for pt, name in label_pts.items():
+        nets[uf.find(pt)].add(f"label:{name}")
+
+    def on_same_net(id_a, id_b):
+        """Check if two identifiers are on the same net."""
+        for root, members in nets.items():
+            if id_a in members and id_b in members:
+                return True
+        return False
+
+    def id_exists(identifier):
+        """Check if an identifier appears in any net."""
+        return any(identifier in m for m in nets.values())
+
+    # -- Define expected connections --
+    issues = []
+
+    # 1. SEL0-7: addr decoder → write_clk_gen AND read_oe_gen
+    for i in range(8):
+        ad = f"Address Decoder:SEL{i}"
+        wc = f"Write Clk Gen:SEL{i}"
+        ro = f"Read OE Gen:SEL{i}"
+        if not on_same_net(ad, wc):
+            issues.append(f"  {ad} not connected to {wc}")
+        if not on_same_net(ad, ro):
+            issues.append(f"  {ad} not connected to {ro}")
+
+    # 2. WRITE_ACTIVE: control logic → write_clk_gen
+    if not on_same_net("Control Logic:WRITE_ACTIVE",
+                       "Write Clk Gen:WRITE_ACTIVE"):
+        issues.append(
+            "  Control Logic:WRITE_ACTIVE not connected to "
+            "Write Clk Gen:WRITE_ACTIVE")
+
+    # 3. READ_EN: control logic → read_oe_gen
+    if not on_same_net("Control Logic:READ_EN", "Read OE Gen:READ_EN"):
+        issues.append(
+            "  Control Logic:READ_EN not connected to Read OE Gen:READ_EN")
+
+    # 4. WRITE_CLK_i: write_clk_gen → byte_i
+    for i in range(8):
+        wc = f"Write Clk Gen:WRITE_CLK_{i}"
+        by = f"Byte {i}:WRITE_CLK"
+        if not on_same_net(wc, by):
+            issues.append(f"  {wc} not connected to {by}")
+
+    # 5. BUF_OE_i: read_oe_gen → byte_i
+    for i in range(8):
+        ro = f"Read OE Gen:BUF_OE_{i}"
+        by = f"Byte {i}:BUF_OE"
+        if not on_same_net(ro, by):
+            issues.append(f"  {ro} not connected to {by}")
+
+    # 6. D0-D7: all byte sheet D_i pins connected via labels
+    for bit in range(8):
+        lbl = f"label:D{bit}"
+        for byte_idx in range(8):
+            pin_id = f"Byte {byte_idx}:D{bit}"
+            if not on_same_net(lbl, pin_id):
+                issues.append(f"  {pin_id} not on label D{bit} net")
+
+    # 7. A0-A2: connector → address decoder (via wires)
+    for i in range(3):
+        ad = f"Address Decoder:A{i}"
+        if not id_exists(ad):
+            issues.append(f"  {ad} not found in any net")
+
+    # 8. nCE/nOE/nWE: connector → control logic (via wires)
+    for sig in ["nCE", "nOE", "nWE"]:
+        cl = f"Control Logic:{sig}"
+        if not id_exists(cl):
+            issues.append(f"  {cl} not found in any net")
+
+    # -- Check signal isolation (different signals not merged) --
+    isolation_pairs = [
+        # Address signals must be separate
+        ("Address Decoder:A0", "Address Decoder:A1"),
+        ("Address Decoder:A0", "Address Decoder:A2"),
+        ("Address Decoder:A1", "Address Decoder:A2"),
+        # Control signals must be separate
+        ("Control Logic:nCE", "Control Logic:nOE"),
+        ("Control Logic:nCE", "Control Logic:nWE"),
+        ("Control Logic:nOE", "Control Logic:nWE"),
+        # Select lines must be separate
+        ("Address Decoder:SEL0", "Address Decoder:SEL1"),
+        ("Address Decoder:SEL0", "Address Decoder:SEL7"),
+        # Write clocks must be separate
+        ("Write Clk Gen:WRITE_CLK_0", "Write Clk Gen:WRITE_CLK_1"),
+        ("Write Clk Gen:WRITE_CLK_0", "Write Clk Gen:WRITE_CLK_7"),
+        # Buffer OE must be separate
+        ("Read OE Gen:BUF_OE_0", "Read OE Gen:BUF_OE_1"),
+        ("Read OE Gen:BUF_OE_0", "Read OE Gen:BUF_OE_7"),
+        # Data bus and control must be separate
+        ("label:D0", "Address Decoder:A0"),
+        ("label:D0", "Control Logic:nCE"),
+        # WRITE_ACTIVE vs READ_EN
+        ("Control Logic:WRITE_ACTIVE", "Control Logic:READ_EN"),
+    ]
+    for id_a, id_b in isolation_pairs:
+        if on_same_net(id_a, id_b):
+            issues.append(f"  NET MERGE: {id_a} and {id_b} on same net!")
+
+    return issues
+
+
 # --------------------------------------------------------------
 # ERC via kicad-cli
 # --------------------------------------------------------------
@@ -484,6 +810,11 @@ def _is_standalone_artifact(violation):
         if any("Hierarchical Label" in it.get("description", "")
                for it in items):
             return True
+
+    # Wire endpoints touching hierarchical labels also show as "dangling"
+    # in standalone mode because the hier label's parent connection is missing.
+    if vtype == "wire_dangling":
+        return True
 
     # Input pins fed by hierarchical labels show as "not driven" standalone
     if vtype == "pin_not_driven" and "Input pin not driven" in desc:
@@ -627,6 +958,11 @@ def main():
         if tjuncs:
             file_results.append(("T-junction (no dot)", tjuncs, False))
 
+        # 6. Wire overlaps pin stub (error — wires doubling pin stubs)
+        stubs = check_wire_overlaps_pin_stub(data)
+        if stubs:
+            file_results.append(("Wire Overlaps Pin Stub", stubs, True))
+
         if file_results:
             for category, issues, is_error in file_results:
                 count = len(issues)
@@ -642,6 +978,17 @@ def main():
             print("  All checks passed")
 
         all_results[sch_file] = file_results
+
+    # -- Netlist connectivity check --
+    print(f"\n--- Netlist: ram.kicad_sch ---")
+    netlist_issues = check_netlist()
+    if netlist_issues:
+        print(f"  [ERROR] Netlist Connectivity: {len(netlist_issues)}")
+        for issue in netlist_issues:
+            print(issue)
+        total_errors += len(netlist_issues)
+    else:
+        print("  All expected connections verified")
 
     # -- ERC --
     if not skip_erc:

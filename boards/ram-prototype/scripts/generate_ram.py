@@ -360,6 +360,10 @@ class SchematicBuilder:
         lib_prefix = SYMBOL_LIB_MAP.get(sym_name, "")
         if lib_prefix:
             sym_copy.libId = f"{lib_prefix}:{sym_name}"
+        # Hide Sim.Pins property (e.g. LED_Small has "1=K 2=A" that shows as "KA")
+        for prop in getattr(sym_copy, 'properties', []):
+            if prop.key == "Sim.Pins":
+                prop.effects = Effects(font=Font(width=1.27, height=1.27), hide=True)
         self.sch.libSymbols.append(sym_copy)
         self._embedded_symbols.add(sym_name)
 
@@ -667,11 +671,11 @@ def generate_address_decoder():
     hl_out_x = and_x + 22 * GRID
 
     # X positions for 6 vertical trunks (A0, A1, A2, A0_INV, A1_INV, A2_INV)
-    # True address trunks: placed RIGHT of inverter inputs (X=55.88) so that
-    # inverter branch wires going left don't cross other address trunks.
-    # Use half-grid offset (12.5+i) to avoid X=63.5 which is the NC pin X of
-    # the 74LVC1G04 inverters (inv_x - 7.62 = 71.12 - 7.62 = 63.5).
-    addr_trunk_x = [snap(base_x + (12.5 + i) * GRID) for i in range(3)]   # 57.15, 59.69, 62.23
+    # True address trunks: placed LEFT of inverter inputs (X=55.88) so that
+    # branch wires go rightward to the pin — away from the stub (which goes
+    # rightward from tip into body).  Stagger A0 closest, A2 furthest left.
+    inv_in_x = inv_x - 15.24  # 55.88: inverter input pin X (74LVC1G04 pin 2)
+    addr_trunk_x = [snap(inv_in_x - (1.5 + i) * GRID) for i in range(3)]   # 52.07, 49.53, 46.99
     inv_trunk_x = [base_x + 31 * GRID + i * 2 * GRID for i in range(3)]  # A0_INV, A1_INV, A2_INV (shifted +GRID to avoid LED cathode GND overlap)
 
     # The AND gates span 8 rows (SEL0-SEL7)
@@ -912,10 +916,10 @@ def generate_control_logic():
     b.place_led_below(oe_led_x, oe_out[1])
 
     # -- Wire WE output to AND1.B --
-    # Route WE vertical to the RIGHT of AND input pins (X > and1_b[0]) so it
-    # doesn't pass through AND2 pins which share the same X column.
+    # Route WE vertical to the LEFT of AND input pins so the branch wire
+    # approaches from the left — away from the pin stub direction.
     we_led_x = snap(we_out[0] + 2 * GRID)
-    we_vert_x = snap(and1_b[0] + 2 * GRID)
+    we_vert_x = snap(and1_b[0] - 2 * GRID)
     b.add_wire(we_out[0], we_out[1], we_led_x, we_out[1])
     b.add_wire(we_led_x, we_out[1], we_vert_x, we_out[1])
     b.add_wire(we_vert_x, we_out[1], we_vert_x, and1_b[1])
@@ -1097,13 +1101,27 @@ def generate_byte_sheet():
         b.connect_power(buf_pins)
 
         a_pin = buf_pins["2"]
+        vcc_pin = buf_pins["5"]
         # L-wire from DFF Q → buffer A (Q and A may have different Y offsets)
         # Split horizontal wire at LED junction point
         q_led_x = snap(q_pin[0] + 2 * GRID)
         b.add_wire(q_pin[0], q_pin[1], q_led_x, q_pin[1])
-        b.add_wire(q_led_x, q_pin[1], a_pin[0], q_pin[1])
-        if snap(q_pin[1]) != snap(a_pin[1]):
-            b.add_wire(a_pin[0], q_pin[1], a_pin[0], a_pin[1])
+
+        # Check if horizontal wire at q_pin[1] would pass through VCC pin 5
+        wire_y = snap(q_pin[1])
+        x_lo = min(q_led_x, a_pin[0])
+        x_hi = max(q_led_x, a_pin[0])
+        vcc_on_path = (abs(snap(vcc_pin[1]) - wire_y) < 0.01 and
+                       x_lo + 0.01 < snap(vcc_pin[0]) < x_hi - 0.01)
+
+        if vcc_on_path:
+            # Route around VCC pin: vertical to a_pin Y, then horizontal
+            b.add_wire(q_led_x, q_pin[1], q_led_x, a_pin[1])
+            b.add_wire(q_led_x, a_pin[1], a_pin[0], a_pin[1])
+        else:
+            b.add_wire(q_led_x, q_pin[1], a_pin[0], q_pin[1])
+            if snap(q_pin[1]) != snap(a_pin[1]):
+                b.add_wire(a_pin[0], q_pin[1], a_pin[0], a_pin[1])
         # LED branches down from junction on the horizontal segment
         b.place_led_below(q_led_x, q_pin[1])
 
@@ -1143,6 +1161,10 @@ def generate_root_sheet():
       1. Connector J1 + bus indicator LEDs
       2. Control hierarchy sheets (address decoder, control logic, write clk, read OE)
       3. Byte hierarchy sheets (2 columns of 4)
+
+    Wiring strategy:
+      - D0-D7: local labels (high fanout — connector + LEDs + 8 byte sheets)
+      - All other signals: direct wires between sheet pins
     """
     b = SchematicBuilder(title="8-Byte Discrete RAM", page_size="A2")
     base_x, base_y = 25.4, 25.4
@@ -1153,63 +1175,21 @@ def generate_root_sheet():
     _, conn_pins = b.place_symbol("Conn_01x14", conn_x, conn_y,
                                   ref_prefix="J", value="SRAM_Bus")
 
-    # Wire connector pins to local labels
-    signal_names = [
-        "A0", "A1", "A2",
-        "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",
-        "nCE", "nOE", "nWE",
-    ]
-
-    for pin_num_int, sig in enumerate(signal_names, start=1):
-        pin_num = str(pin_num_int)
-        pin_pos = conn_pins[pin_num]
-        px, py = pin_pos
-        label_x = px - LABEL_STUB
-        b.add_wire(px, py, label_x, py)
-        b.add_label(sig, label_x, py, justify="right")
-
-    # -- Bus indicator LEDs (to the right of connector, grouped) --
-    led_base_x = base_x + 25 * GRID
-    led_y = base_y
-
-    # Group label
-    # Address LEDs (A0-A2)
-    for i in range(3):
-        y = led_y + i * 3 * GRID
-        led_in = b.place_led_indicator(led_base_x, y)
-        b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
-        b.add_label(f"A{i}", led_in[0] - LABEL_STUB, led_in[1], justify="right")
-
-    # Data bus LEDs (D0-D7) -- gap after address
-    data_led_start = led_y + 3 * 3 * GRID + 2 * GRID
-    for i in range(8):
-        y = data_led_start + i * 3 * GRID
-        led_in = b.place_led_indicator(led_base_x, y)
-        b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
-        b.add_label(f"D{i}", led_in[0] - LABEL_STUB, led_in[1], justify="right")
-
-    # Control signal LEDs (nCE, nOE, nWE) -- gap after data
-    ctrl_led_start = data_led_start + 8 * 3 * GRID + 2 * GRID
-    ctrl_names = ["nCE", "nOE", "nWE"]
-    for i, name in enumerate(ctrl_names):
-        y = ctrl_led_start + i * 3 * GRID
-        led_in = b.place_led_indicator(led_base_x, y)
-        b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
-        b.add_label(name, led_in[0] - LABEL_STUB, led_in[1], justify="right")
-
-    # -- Hierarchical sheet references --
-    # Column 1: control sheets (variable height based on pin count)
+    # -- Hierarchical sheet layout constants --
     ctrl_sheet_x = base_x + 60 * GRID
     ctrl_sheet_w = 28 * GRID
     sheet_gap = 5 * GRID
     wire_stub = 5.08
 
     def _sheet_height(num_pins):
-        """Calculate sheet height to fit pins with 2.54mm spacing + margin."""
         return snap(num_pins * 2.54 + 5.08)
 
-    def add_sheet_ref(name, filename, pins, sx, sy, sw, sh, fill_color):
-        """Add a hierarchical sheet rectangle with pins."""
+    def _pin_y(sy, pin_idx):
+        return snap(sy + 2.54 + pin_idx * 2.54)
+
+    # -- Helper to create a sheet block (no labels or wires — just the block) --
+    def _add_sheet_block(name, filename, pins, sx, sy, sw, sh, fill_color):
+        """Create sheet block, return dict mapping pin_name -> (x, y)."""
         sheet = HierarchicalSheet()
         sheet.position = Position(X=sx, Y=sy)
         sheet.width = sw
@@ -1227,19 +1207,18 @@ def generate_root_sheet():
             position=Position(X=sx + sw, Y=sy + sh + 1.27, angle=0),
             effects=Effects(font=Font(width=1.27, height=1.27)),
         )
-
-        # Add hierarchical pins along left edge
+        pin_positions = {}
         for pin_idx, (pin_name, pin_type) in enumerate(pins):
             pin = HierarchicalPin()
             pin.name = pin_name
             pin.connectionType = pin_type
-            pin.position = Position(X=sx,
-                                    Y=sy + 2.54 + pin_idx * 2.54, angle=180)
-            pin.effects = Effects(font=Font(width=1.27, height=1.27))
+            py = _pin_y(sy, pin_idx)
+            pin.position = Position(X=sx, Y=py, angle=180)
+            pin.effects = Effects(font=Font(width=1.27, height=1.27),
+                                  justify=Justify(horizontally="left"))
             pin.uuid = uid()
             sheet.pins.append(pin)
-
-        # Instance path
+            pin_positions[pin_name] = (sx, py)
         sheet.instances.append(HierarchicalSheetProjectInstance(
             name=PROJECT_NAME,
             paths=[HierarchicalSheetProjectPath(
@@ -1247,53 +1226,59 @@ def generate_root_sheet():
                 page=str(len(b.sch.sheets) + 2),
             )]
         ))
-
         b.sch.sheets.append(sheet)
-
-        # Wire + label for each pin
-        for pin_idx, (pin_name, pin_type) in enumerate(pins):
-            pin_y = sy + 2.54 + pin_idx * 2.54
-            b.add_wire(sx, pin_y, sx - wire_stub, pin_y)
-            b.add_label(pin_name, sx - wire_stub, pin_y, justify="right")
+        return pin_positions
 
     yellow_fill = ColorRGBA(R=255, G=255, B=225, A=255, precision=4)
     green_fill = ColorRGBA(R=225, G=255, B=225, A=255, precision=4)
 
+    # ================================================================
+    # Place all sheet blocks, collecting pin positions
+    # ================================================================
+
     # Address decoder (11 pins)
-    addr_pins = [("A0", "input"), ("A1", "input"), ("A2", "input")]
-    addr_pins += [(f"SEL{i}", "output") for i in range(8)]
-    addr_h = _sheet_height(len(addr_pins))
+    addr_pin_defs = [("A0", "input"), ("A1", "input"), ("A2", "input")]
+    addr_pin_defs += [(f"SEL{i}", "output") for i in range(8)]
+    addr_h = _sheet_height(len(addr_pin_defs))
     y_cursor = base_y
-    add_sheet_ref("Address Decoder", "address_decoder.kicad_sch",
-                  addr_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, addr_h, yellow_fill)
+    addr_sy = y_cursor
+    addr_pp = _add_sheet_block("Address Decoder", "address_decoder.kicad_sch",
+                               addr_pin_defs, ctrl_sheet_x, addr_sy,
+                               ctrl_sheet_w, addr_h, yellow_fill)
 
     # Control logic (5 pins)
     y_cursor += addr_h + sheet_gap
-    ctrl_pins = [("nCE", "input"), ("nOE", "input"), ("nWE", "input"),
-                 ("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
-    ctrl_h = _sheet_height(len(ctrl_pins))
-    add_sheet_ref("Control Logic", "control_logic.kicad_sch",
-                  ctrl_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, ctrl_h, yellow_fill)
+    ctrl_sy = y_cursor
+    ctrl_pin_defs = [("nCE", "input"), ("nOE", "input"), ("nWE", "input"),
+                     ("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
+    ctrl_h = _sheet_height(len(ctrl_pin_defs))
+    ctrl_pp = _add_sheet_block("Control Logic", "control_logic.kicad_sch",
+                               ctrl_pin_defs, ctrl_sheet_x, ctrl_sy,
+                               ctrl_sheet_w, ctrl_h, yellow_fill)
 
     # Write clock gen (17 pins)
     y_cursor += ctrl_h + sheet_gap
-    wclk_pins = [("WRITE_ACTIVE", "input")]
-    wclk_pins += [(f"SEL{i}", "input") for i in range(8)]
-    wclk_pins += [(f"WRITE_CLK_{i}", "output") for i in range(8)]
-    wclk_h = _sheet_height(len(wclk_pins))
-    add_sheet_ref("Write Clk Gen", "write_clk_gen.kicad_sch",
-                  wclk_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, wclk_h, yellow_fill)
+    wclk_sy = y_cursor
+    wclk_pin_defs = [("WRITE_ACTIVE", "input")]
+    wclk_pin_defs += [(f"SEL{i}", "input") for i in range(8)]
+    wclk_pin_defs += [(f"WRITE_CLK_{i}", "output") for i in range(8)]
+    wclk_h = _sheet_height(len(wclk_pin_defs))
+    wclk_pp = _add_sheet_block("Write Clk Gen", "write_clk_gen.kicad_sch",
+                               wclk_pin_defs, ctrl_sheet_x, wclk_sy,
+                               ctrl_sheet_w, wclk_h, yellow_fill)
 
     # Read OE gen (17 pins)
     y_cursor += wclk_h + sheet_gap
-    roe_pins = [("READ_EN", "input")]
-    roe_pins += [(f"SEL{i}", "input") for i in range(8)]
-    roe_pins += [(f"BUF_OE_{i}", "output") for i in range(8)]
-    roe_h = _sheet_height(len(roe_pins))
-    add_sheet_ref("Read OE Gen", "read_oe_gen.kicad_sch",
-                  roe_pins, ctrl_sheet_x, y_cursor, ctrl_sheet_w, roe_h, yellow_fill)
+    roe_sy = y_cursor
+    roe_pin_defs = [("READ_EN", "input")]
+    roe_pin_defs += [(f"SEL{i}", "input") for i in range(8)]
+    roe_pin_defs += [(f"BUF_OE_{i}", "output") for i in range(8)]
+    roe_h = _sheet_height(len(roe_pin_defs))
+    roe_pp = _add_sheet_block("Read OE Gen", "read_oe_gen.kicad_sch",
+                              roe_pin_defs, ctrl_sheet_x, roe_sy,
+                              ctrl_sheet_w, roe_h, yellow_fill)
 
-    # -- Byte sheets: 2 columns of 4 --
+    # Byte sheets (2 columns of 4)
     byte_pin_defs = [("WRITE_CLK", "input"), ("BUF_OE", "input")]
     byte_pin_defs += [(f"D{bit}", "bidirectional") for bit in range(8)]
     byte_h = _sheet_height(len(byte_pin_defs))
@@ -1301,118 +1286,200 @@ def generate_root_sheet():
     byte_col1_x = ctrl_sheet_x + ctrl_sheet_w + 18 * GRID
     byte_col2_x = byte_col1_x + byte_w + 18 * GRID
 
+    byte_pp = []  # list of pin_positions dicts, one per byte
     for byte_idx in range(8):
         col = byte_idx // 4
         row = byte_idx % 4
         sx = byte_col1_x if col == 0 else byte_col2_x
         sy = base_y + row * (byte_h + sheet_gap)
+        pp = _add_sheet_block(f"Byte {byte_idx}", "byte.kicad_sch",
+                              byte_pin_defs, sx, sy, byte_w, byte_h, green_fill)
+        byte_pp.append(pp)
 
-        sheet = HierarchicalSheet()
-        sheet.position = Position(X=sx, Y=sy)
-        sheet.width = byte_w
-        sheet.height = byte_h
-        sheet.stroke = Stroke(width=0.1)
-        sheet.fill = green_fill
-        sheet.uuid = uid()
-        sheet.sheetName = Property(
-            key="Sheet name", value=f"Byte {byte_idx}", id=0,
-            position=Position(X=sx, Y=sy - 1.27, angle=0),
-            effects=Effects(font=Font(width=1.27, height=1.27)),
-        )
-        sheet.fileName = Property(
-            key="Sheet file", value="byte.kicad_sch", id=1,
-            position=Position(X=sx + byte_w, Y=sy + byte_h + 1.27, angle=0),
-            effects=Effects(font=Font(width=1.27, height=1.27)),
-        )
+    # ================================================================
+    # Connector pin positions
+    # ================================================================
+    signal_names = ["A0","A1","A2",
+                    "D0","D1","D2","D3","D4","D5","D6","D7",
+                    "nCE","nOE","nWE"]
+    conn_signal_pos = {}
+    for pin_num_int, sig in enumerate(signal_names, start=1):
+        conn_signal_pos[sig] = conn_pins[str(pin_num_int)]
 
-        for pin_idx, (pin_name, pin_type) in enumerate(byte_pin_defs):
-            pin = HierarchicalPin()
-            pin.name = pin_name
-            pin.connectionType = pin_type
-            pin.position = Position(X=sx,
-                                    Y=sy + 2.54 + pin_idx * 2.54, angle=180)
-            pin.effects = Effects(font=Font(width=1.27, height=1.27))
-            pin.uuid = uid()
-            sheet.pins.append(pin)
+    # D0-D7: connector pin → wire stub → label (kept as labels)
+    for i in range(8):
+        sig = f"D{i}"
+        px, py = conn_signal_pos[sig]
+        b.add_wire(px, py, px - LABEL_STUB, py)
+        b.add_label(sig, px - LABEL_STUB, py, justify="right")
 
-        sheet.instances.append(HierarchicalSheetProjectInstance(
-            name=PROJECT_NAME,
-            paths=[HierarchicalSheetProjectPath(
-                sheetInstancePath=f"/{b.sch.uuid}/{sheet.uuid}/",
-                page=str(len(b.sch.sheets) + 2),
-            )]
-        ))
+    # A0-A2, nCE/nOE/nWE: no stub wires here — routed directly in wire section
 
-        b.sch.sheets.append(sheet)
+    # ================================================================
+    # Bus indicator LEDs
+    # ================================================================
+    # D0-D7 data LEDs use labels (placed in a column to the right).
+    # A0-A2 and nCE/nOE/nWE LEDs branch below main wires via place_led_below.
+    #
+    # Data LED Y must NOT match any connector→ctrl-sheet wire Y (A0-A2, nCE-nWE).
+    # Connector pins are at Y ≈ 25.4 to 58.42 (14 pins × 2.54mm spacing).
+    # Start data LEDs well below: base_y + 18*GRID = 71.12.
+    led_base_x = base_x + 25 * GRID
+    data_led_start = snap(base_y + 18 * GRID)
+    for i in range(8):
+        y = snap(data_led_start + i * 3 * GRID)
+        led_in = b.place_led_indicator(led_base_x, y)
+        b.add_wire(*led_in, led_in[0] - LABEL_STUB, led_in[1])
+        b.add_label(f"D{i}", led_in[0] - LABEL_STUB, led_in[1], justify="right")
 
-        # Wire + labels (map generic pin names to instance-specific nets)
-        for pin_idx, (pin_name, pin_type) in enumerate(byte_pin_defs):
-            pin_y = sy + 2.54 + pin_idx * 2.54
-            if pin_name == "WRITE_CLK":
-                net_name = f"WRITE_CLK_{byte_idx}"
-            elif pin_name == "BUF_OE":
-                net_name = f"BUF_OE_{byte_idx}"
-            else:
-                net_name = pin_name
-            b.add_wire(sx, pin_y, sx - wire_stub, pin_y)
-            b.add_label(net_name, sx - wire_stub, pin_y, justify="right")
+    # ================================================================
+    # D0-D7 labels on byte sheet pins (high fanout — labels are correct)
+    # ================================================================
+    for byte_idx in range(8):
+        pp = byte_pp[byte_idx]
+        for bit in range(8):
+            sig = f"D{bit}"
+            px, py = pp[sig]
+            b.add_wire(px, py, px - wire_stub, py)
+            b.add_label(sig, px - wire_stub, py, justify="right")
+
+    # ================================================================
+    # Direct wire routing for non-data signals
+    # ================================================================
+    # LED junction X positions: stagger per signal pair so vertical LED
+    # drop-wires don't overlap (A0 & nCE share X since their Y ranges
+    # are disjoint; likewise A1/nOE and A2/nWE).
+    led_jct_xs = [snap(base_x + (3 + i) * GRID) for i in range(3)]
+
+    # -- A0-A2: connector → addr decoder, LED branches below --
+    # Each signal gets its own trunk X near the sheet edge to avoid
+    # vertical wire endpoint merges between adjacent signals.
+    # Spaced at 0.5*GRID (1.27mm) from the sheet edge.
+    a_trunk_xs = [snap(ctrl_sheet_x - (0.5 + i * 0.5) * GRID) for i in range(3)]
+    for i in range(3):
+        sig = f"A{i}"
+        cx, cy = conn_signal_pos[sig]       # connector pin
+        ax, ay = addr_pp[sig]                # addr decoder sheet pin
+        jct_x = led_jct_xs[i]
+        tx = a_trunk_xs[i]
+
+        # Connector → LED junction → trunk X (horizontal at connector pin Y)
+        b.add_wire(cx, cy, jct_x, cy)
+        b.add_wire(jct_x, cy, tx, cy)
+        b.place_led_below(jct_x, cy)
+        # L-shape from trunk to sheet pin
+        if snap(cy) != snap(ay):
+            b.add_wire(tx, cy, tx, ay)
+        b.add_wire(tx, ay, ax, ay)
+
+    # -- nCE, nOE, nWE: connector → control logic, LED branches below --
+    # nCE connector pin Y coincides with addr decoder SEL7 pin Y (53.34),
+    # and nOE connector pin Y also equals SEL7 pin Y (53.34) due to grid
+    # alignment. Both must route LEFT of all SEL trunks (min = 152.4) to
+    # avoid horizontal wire overlap at Y=53.34.
+    # nWE connector pin Y (55.88) doesn't match any SEL pin Y — safe.
+    nce_trunk_x = snap(ctrl_sheet_x - 11 * GRID)    # 149.86
+    noe_trunk_x = snap(ctrl_sheet_x - 10.5 * GRID)  # 151.13 (between SEL7 and nCE)
+    ctrl_in_trunk_xs = {
+        "nCE": nce_trunk_x,
+        "nOE": noe_trunk_x,
+        "nWE": snap(ctrl_sheet_x - 2.5 * GRID),
+    }
+    for i, sig in enumerate(["nCE", "nOE", "nWE"]):
+        cx, cy = conn_signal_pos[sig]
+        cpx, cpy = ctrl_pp[sig]
+        jct_x = led_jct_xs[i]
+        tx = ctrl_in_trunk_xs[sig]
+
+        b.add_wire(cx, cy, jct_x, cy)
+        b.add_wire(jct_x, cy, tx, cy)
+        b.place_led_below(jct_x, cy)
+        if snap(cy) != snap(cpy):
+            b.add_wire(tx, cy, tx, cpy)
+        b.add_wire(tx, cpy, cpx, cpy)
+
+    # -- SEL0-7: address decoder → write_clk_gen + read_oe_gen --
+    # Vertical trunks to the left of ctrl_sheet_x, spaced 1*GRID apart
+    sel_trunk_base_x = snap(ctrl_sheet_x - 3 * GRID)  # start close to sheet
+    sel_trunk_x = [snap(sel_trunk_base_x - i * GRID) for i in range(8)]
+
+    for i in range(8):
+        sig = f"SEL{i}"
+        ax, ay = addr_pp[sig]        # addr decoder output pin
+        wx, wy = wclk_pp[sig]        # write_clk_gen input pin
+        rx, ry = roe_pp[sig]         # read_oe_gen input pin
+        tx = sel_trunk_x[i]
+
+        # Addr decoder pin → horizontal to trunk
+        b.add_wire(ax, ay, tx, ay)
+        # Trunk from addr decoder Y down through wclk and roe pin Ys
+        trunk_ys = sorted([snap(ay), snap(wy), snap(ry)])
+        b.add_segmented_trunk(tx, trunk_ys)
+        # Branch to write_clk_gen
+        b.add_wire(tx, wy, wx, wy)
+        # Branch to read_oe_gen
+        b.add_wire(tx, ry, rx, ry)
+
+    # -- WRITE_ACTIVE: control logic → write_clk_gen --
+    wa_src = ctrl_pp["WRITE_ACTIVE"]
+    wa_dst = wclk_pp["WRITE_ACTIVE"]
+    # Route: horizontal stub from ctrl logic pin, vertical down, horizontal to wclk pin
+    wa_trunk_x = snap(ctrl_sheet_x - 12 * GRID)
+    b.add_wire(wa_src[0], wa_src[1], wa_trunk_x, wa_src[1])
+    b.add_wire(wa_trunk_x, wa_src[1], wa_trunk_x, wa_dst[1])
+    b.add_wire(wa_trunk_x, wa_dst[1], wa_dst[0], wa_dst[1])
+
+    # -- READ_EN: control logic → read_oe_gen --
+    re_src = ctrl_pp["READ_EN"]
+    re_dst = roe_pp["READ_EN"]
+    re_trunk_x = snap(ctrl_sheet_x - 13 * GRID)
+    b.add_wire(re_src[0], re_src[1], re_trunk_x, re_src[1])
+    b.add_wire(re_trunk_x, re_src[1], re_trunk_x, re_dst[1])
+    b.add_wire(re_trunk_x, re_dst[1], re_dst[0], re_dst[1])
+
+    # -- WRITE_CLK_0-7: write_clk_gen → byte sheets --
+    # Each WRITE_CLK_i connects to exactly one byte sheet's WRITE_CLK pin.
+    # Col1 bytes (0-3): horizontal to trunk → vertical → horizontal to byte pin.
+    # Col2 bytes (4-7): can't do a single long horizontal wire because it would
+    # cross through byte_col1 data pin area (WRITE_CLK_4 at Y=137.16 overlaps
+    # with Byte 2 D7 pin at same Y). Instead, route to a pre-col1 trunk, go
+    # vertical to a safe crossing Y above all bytes, horizontal across, then
+    # vertical down and horizontal to the col2 byte pin.
+    wclk_route_base_x = snap(byte_col1_x - 3 * GRID)
+    for i in range(8):
+        src = wclk_pp[f"WRITE_CLK_{i}"]
+        dst = byte_pp[i]["WRITE_CLK"]
+        if i < 4:
+            # Col1: simple L-route via trunk
+            route_x = snap(wclk_route_base_x - i * GRID)
+            b.add_wire(src[0], src[1], route_x, src[1])
+            b.add_wire(route_x, src[1], route_x, dst[1])
+            b.add_wire(route_x, dst[1], dst[0], dst[1])
+        else:
+            # Col2: 5-segment route via crossing Y above byte area
+            pre_trunk_x = snap(wclk_route_base_x - i * GRID)
+            col2_route_x = snap(byte_col2_x - 3 * GRID - (i - 4) * GRID)
+            cross_y = snap(base_y - (1 + (i - 4)) * GRID)
+            b.add_wire(src[0], src[1], pre_trunk_x, src[1])
+            b.add_wire(pre_trunk_x, src[1], pre_trunk_x, cross_y)
+            b.add_wire(pre_trunk_x, cross_y, col2_route_x, cross_y)
+            b.add_wire(col2_route_x, cross_y, col2_route_x, dst[1])
+            b.add_wire(col2_route_x, dst[1], dst[0], dst[1])
+
+    # -- BUF_OE_0-7: read_oe_gen → byte sheets --
+    boe_route_base_x = snap(byte_col1_x - 12 * GRID)
+    for i in range(8):
+        src = roe_pp[f"BUF_OE_{i}"]
+        dst = byte_pp[i]["BUF_OE"]
+        if i < 4:
+            route_x = snap(boe_route_base_x - i * GRID)
+        else:
+            route_x = snap(byte_col2_x - 12 * GRID - (i - 4) * GRID)
+        b.add_wire(src[0], src[1], route_x, src[1])
+        b.add_wire(route_x, src[1], route_x, dst[1])
+        b.add_wire(route_x, dst[1], dst[0], dst[1])
 
     return b
-
-
-# --------------------------------------------------------------
-# KiCad format normalization
-# --------------------------------------------------------------
-
-def normalize_via_kicad(filepaths):
-    """Re-save schematic files through KiCad's eeschema to normalize formatting.
-
-    kiutils generates valid KiCad S-expressions but with slightly different
-    formatting (number precision, whitespace) than KiCad's native editor.
-    This causes large diffs when the user later edits and saves in KiCad.
-
-    Opens each file in eeschema, sends Ctrl+S to save in KiCad's native
-    format, then closes the window.  Requires KiCad to be installed.
-    """
-    import time
-    import ctypes
-
-    EESCHEMA = r"C:\Program Files\KiCad\9.0\bin\eeschema.exe"
-    if not os.path.exists(EESCHEMA):
-        print("  WARNING: eeschema not found, skipping format normalization")
-        return
-
-    print("\nNormalizing formatting via eeschema...")
-
-    for filepath in filepaths:
-        filename = os.path.basename(filepath)
-        print(f"  Normalizing: {filename} ...", end=" ", flush=True)
-
-        # Launch eeschema with the file
-        proc = subprocess.Popen([EESCHEMA, filepath])
-
-        # Wait for the window to load
-        time.sleep(3)
-
-        # Send Ctrl+S via PowerShell SendKeys (saves in KiCad's native format)
-        subprocess.run(
-            ["powershell", "-Command",
-             "Add-Type -AssemblyName System.Windows.Forms; "
-             "[System.Windows.Forms.SendKeys]::SendWait('^s'); "
-             "Start-Sleep -Milliseconds 1000; "
-             "[System.Windows.Forms.SendKeys]::SendWait('%{F4}')"],
-            capture_output=True, timeout=10,
-        )
-
-        # Wait for eeschema to close
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-
-        print("done")
-
-    print("  Format normalization complete")
 
 
 # --------------------------------------------------------------
@@ -1580,12 +1647,6 @@ def main():
         builder.save(filepath)
         saved_paths.append(filepath)
         print(f"  Saved: {filepath}")
-
-    # Re-save each file through KiCad to normalize formatting.
-    # kiutils S-expression output differs from KiCad's native format, causing
-    # large diffs when the user edits and saves in KiCad.  Opening each file
-    # in eeschema and saving it normalizes the formatting.
-    normalize_via_kicad(saved_paths)
 
     # Component count summary
     totals = count_components(builders)
