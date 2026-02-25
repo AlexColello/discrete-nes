@@ -8,8 +8,9 @@ Checks for common issues that have caused ERC failures or visual problems:
 3. Dangling wire endpoints (not connected to any pin, wire, label, junction)
 4. Wires passing through component pins (unintended connections)
 5. T-junctions without explicit junction dots (visual issue)
-6. Netlist connectivity (hierarchy pin connections match expected topology)
-7. ERC via kicad-cli on the root schematic
+6. Component overlap (non-power parts placed on top of each other)
+7. Netlist connectivity (hierarchy pin connections match expected topology)
+8. ERC via kicad-cli on the root schematic
 
 Results are written to verify_output/ directory (gitignored).
 SVGs are exported to verify_output/svg/ for visual inspection.
@@ -482,6 +483,41 @@ def check_tjunctions_without_dots(data):
                             f"V wire ({x1},{y1})->({x2},{y2}) — no junction dot"
                         )
                         seen.add(key)
+
+    return issues
+
+
+def check_component_overlap(data):
+    """Check for non-power components placed too close together.
+
+    Two components whose centers are within a minimum clearance distance
+    are almost certainly overlapping visually.  This catches layout bugs
+    where LEDs, resistors, or other parts are placed on top of each other.
+    """
+    comps = data['components']
+    issues = []
+
+    # Skip power symbols (#PWR...) and connectors (Conn pins are close by design)
+    non_power = [
+        (ref, lib, cx, cy, angle)
+        for ref, lib, cx, cy, angle in comps
+        if not ref.startswith("#") and not lib.startswith("Conn")
+    ]
+
+    # Minimum center-to-center distance (mm).  Two small components
+    # (R_Small, LED_Small) with centers closer than this are overlapping.
+    MIN_DIST = 1.5
+
+    for i in range(len(non_power)):
+        ref_a, lib_a, ax, ay, _aa = non_power[i]
+        for j in range(i + 1, len(non_power)):
+            ref_b, lib_b, bx, by, _ab = non_power[j]
+            dist = math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
+            if dist < MIN_DIST:
+                issues.append(
+                    f"  {ref_a} ({lib_a}) and {ref_b} ({lib_b}) overlap: "
+                    f"centers ({ax},{ay}) and ({bx},{by}) dist={dist:.2f}mm"
+                )
 
     return issues
 
@@ -962,6 +998,11 @@ def main():
         stubs = check_wire_overlaps_pin_stub(data)
         if stubs:
             file_results.append(("Wire Overlaps Pin Stub", stubs, True))
+
+        # 7. Component overlap (error — parts on top of each other)
+        overlaps_comp = check_component_overlap(data)
+        if overlaps_comp:
+            file_results.append(("Component Overlap", overlaps_comp, True))
 
         if file_results:
             for category, issues, is_error in file_results:

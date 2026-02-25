@@ -786,14 +786,6 @@ def generate_address_decoder():
         # Hier label at end of wire
         b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output", justify="right")
 
-    # PWR_FLAG symbols on VCC and GND nets
-    pwr_flag_x = hl_out_x + 10 * GRID
-    pwr_flag_y = base_y
-    b.place_power("VCC", pwr_flag_x, pwr_flag_y)
-    b.place_power("PWR_FLAG", pwr_flag_x, pwr_flag_y)
-    b.place_power("GND", pwr_flag_x + 10 * GRID, pwr_flag_y)
-    b.place_power("PWR_FLAG", pwr_flag_x + 10 * GRID, pwr_flag_y)
-
     return b
 
 
@@ -1352,60 +1344,63 @@ def generate_root_sheet():
 
     # ================================================================
     # Connector pin positions (16-pin, flipped 180°, pins face RIGHT)
-    # Pins 1-14: signals, Pin 15: VCC, Pin 16: GND
+    # Pin 1: GND (bottom), Pins 2-15: signals, Pin 16: VCC (top)
     # ================================================================
     signal_names = ["A0", "A1", "A2",
                     "D0", "D1", "D2", "D3", "D4",
                     "D5", "D6", "D7",
                     "nCE", "nOE", "nWE"]
     conn_signal_pos = {}
-    for pin_num_int, sig in enumerate(signal_names, start=1):
+    for pin_num_int, sig in enumerate(signal_names, start=2):
         conn_signal_pos[sig] = conn_pins[str(pin_num_int)]
 
     # ================================================================
-    # Connector power pins (VCC at pin 15, GND at pin 16)
+    # Connector power pins (VCC at pin 16 = top, GND at pin 1 = bottom)
     # ================================================================
-    vcc_pos = conn_pins["15"]
-    gnd_pos = conn_pins["16"]
-    # Place power symbols at connector power pins (no PWR_FLAG here —
-    # sub-sheets already have PWR_FLAG; adding it here would cause ERC
-    # "power output to power output" errors on the shared VCC/GND nets)
+    vcc_pos = conn_pins["16"]
+    gnd_pos = conn_pins["1"]
+    # Power symbols + PWR_FLAG at connector power pins.
+    # PWR_FLAG marks these nets as externally driven (required for ERC).
     pwr_wire_len = snap(3 * GRID)
-    # VCC: wire from connector pin rightward, power symbol at end
-    b.add_wire(vcc_pos[0], vcc_pos[1], vcc_pos[0] + pwr_wire_len, vcc_pos[1])
-    b.place_power("VCC", vcc_pos[0] + pwr_wire_len, vcc_pos[1], angle=90)
-    # GND: wire from connector pin rightward, power symbol at end
-    b.add_wire(gnd_pos[0], gnd_pos[1], gnd_pos[0] + pwr_wire_len, gnd_pos[1])
-    b.place_power("GND", gnd_pos[0] + pwr_wire_len, gnd_pos[1], angle=90)
+    # VCC: wire from connector pin rightward, power symbol + PWR_FLAG at end
+    vcc_sym_x = snap(vcc_pos[0] + pwr_wire_len)
+    b.add_wire(vcc_pos[0], vcc_pos[1], vcc_sym_x, vcc_pos[1])
+    b.place_power("VCC", vcc_sym_x, vcc_pos[1], angle=90)
+    b.place_power("PWR_FLAG", vcc_sym_x, vcc_pos[1])
+    # GND: wire from connector pin rightward, power symbol + PWR_FLAG at end
+    gnd_sym_x = snap(gnd_pos[0] + pwr_wire_len)
+    b.add_wire(gnd_pos[0], gnd_pos[1], gnd_sym_x, gnd_pos[1])
+    b.place_power("GND", gnd_sym_x, gnd_pos[1], angle=90)
+    b.place_power("PWR_FLAG", gnd_sym_x, gnd_pos[1])
 
     # ================================================================
-    # LED fanout from connector — ALL 14 signal pins get LEDs + labels
+    # Connector signal labels (short stubs from each pin)
     # ================================================================
-    # Labels are used for connector → sheet pin connections to avoid
-    # horizontal wire overlaps (connector pin Y can coincide with
-    # sheet pin Y, causing wires at the same Y to merge nets).
     conn_pin_x = conn_signal_pos[signal_names[0]][0]
-    led_jct_base = snap(conn_pin_x + 3 * GRID)
-    led_drop = snap(3.5 * GRID)
-    led_group_offsets = [0, 0.5 * GRID, 4 * GRID, 4.5 * GRID]
-    led_jct_x_per_group = [snap(led_jct_base + off) for off in led_group_offsets]
+    label_x = snap(conn_pin_x + 2 * GRID)
 
-    for pin_idx, sig in enumerate(signal_names):
+    for sig in signal_names:
         cx, cy = conn_signal_pos[sig]
-        group = pin_idx % 4
-        jct_x = led_jct_x_per_group[group]
-
-        # Connector pin → LED junction (horizontal)
-        b.add_wire(cx, cy, jct_x, cy)
-        # LED drops below from junction
-        b.place_led_below(jct_x, cy, drop=led_drop)
-        # Continue from junction to label
-        label_x = snap(jct_x + GRID)
-        b.add_wire(jct_x, cy, label_x, cy)
+        b.add_wire(cx, cy, label_x, cy)
         b.add_label(sig, label_x, cy)
 
     # ================================================================
-    # Label-based connections: connector labels → sheet block pins
+    # LED bank — separate area below connector, labels tap signals
+    # ================================================================
+    # LEDs are placed in their own section to avoid T-junctions between
+    # connector horizontal wires and LED vertical drops.
+    led_bank_x = snap(conn_pin_x + 6 * GRID)
+    led_bank_y = snap(conn_signal_pos[signal_names[-1]][1] + 10 * GRID)
+    led_spacing_y = snap(3 * GRID)
+
+    for pin_idx, sig in enumerate(signal_names):
+        ly = snap(led_bank_y + pin_idx * led_spacing_y)
+        b.add_label(sig, led_bank_x, ly, justify="right")
+        led_in = b.place_led_indicator(led_bank_x + GRID, ly)
+        b.add_wire(led_bank_x, ly, led_in[0], led_in[1])
+
+    # ================================================================
+    # Labels on sheet block input pins (connector signals)
     # ================================================================
 
     # -- A0-A2 labels on Address Decoder LEFT pins --
@@ -1478,57 +1473,60 @@ def generate_root_sheet():
     b.add_wire(re_trunk_x, re_dst[1], re_dst[0], re_dst[1])
 
     # ================================================================
-    # Route E: Col2 RIGHT → Byte Col1 (WRITE_CLK_0-3)
+    # Route E: Col2 RIGHT → Byte Col1 (WRITE_CLK_0-3) — direct wires
     # ================================================================
-    # Direct wires for WRITE_CLK_0-3 (col2 RIGHT → byte_col1 LEFT).
-    # BUF_OE uses labels because its col2 RIGHT pin Y values coincide
-    # with SEL trunk branch Y values to roe_pp LEFT, causing H overlaps.
     route_e_base_x = snap(col2_x + col2_w + 2 * GRID)
-    wclk_route_x = [snap(route_e_base_x + i * GRID) for i in range(4)]
+    route_e_sp = GRID
+    wclk_route_x = [snap(route_e_base_x + i * route_e_sp) for i in range(4)]
 
     for i in range(4):
         sig = f"WRITE_CLK_{i}"
         src_x, src_y = wclk_pp[sig]
         dst_x, dst_y = byte_pp[i]["WRITE_CLK"]
         rx = wclk_route_x[i]
-
         b.add_wire(src_x, src_y, rx, src_y)
         if abs(src_y - dst_y) > 0.01:
             b.add_wire(rx, src_y, rx, dst_y)
         b.add_wire(rx, dst_y, dst_x, dst_y)
 
     # ================================================================
-    # Route E/F: Labels for BUF_OE_0-7 and WRITE_CLK_4-7
+    # Route F: Col2 RIGHT → Byte Col2 (WRITE_CLK_4-7) — direct wires
     # ================================================================
-    # BUF_OE_0-3: labels (roe_pp RIGHT pin Y overlaps with SEL→roe H wires)
+    # Route via transit Y above all blocks to avoid crossing hierarchy pins.
+    transit_y_base = snap(base_y - 3 * GRID)
+    route_f_gap1_x = [snap(route_e_base_x + (4 + i) * route_e_sp)
+                      for i in range(4)]
+    byte_gap_base_x = snap(byte_col1_x + byte_w + 2 * GRID)
+    byte_gap_sp = GRID
+    route_f_gap2_x = [snap(byte_gap_base_x + i * byte_gap_sp)
+                      for i in range(4)]
+
     for i in range(4):
+        byte_idx = 4 + i
+        w_transit_y = snap(transit_y_base - i * GRID)
+
+        sig = f"WRITE_CLK_{byte_idx}"
+        src_x, src_y = wclk_pp[sig]
+        dst_x, dst_y = byte_pp[byte_idx]["WRITE_CLK"]
+        g1x = route_f_gap1_x[i]
+        g2x = route_f_gap2_x[i]
+        b.add_wire(src_x, src_y, g1x, src_y)
+        b.add_wire(g1x, src_y, g1x, w_transit_y)
+        b.add_wire(g1x, w_transit_y, g2x, w_transit_y)
+        b.add_wire(g2x, w_transit_y, g2x, dst_y)
+        b.add_wire(g2x, dst_y, dst_x, dst_y)
+
+    # ================================================================
+    # BUF_OE_0-7: labels (roe RIGHT pin Y values systematically
+    # coincide with byte D-signal and WRITE_CLK pin Y values,
+    # making direct wires impractical without net merges)
+    # ================================================================
+    for i in range(8):
         sig = f"BUF_OE_{i}"
         src_x, src_y = roe_pp[sig]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
         b.add_label(sig, src_x + wire_stub, src_y)
         dst_x, dst_y = byte_pp[i]["BUF_OE"]
-        b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
-        b.add_label(sig, dst_x - wire_stub, dst_y, justify="right")
-
-    # WRITE_CLK_4-7: labels (cross past byte_col1 blocks)
-    for i in range(4):
-        byte_idx = 4 + i
-        sig = f"WRITE_CLK_{byte_idx}"
-        src_x, src_y = wclk_pp[sig]
-        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
-        b.add_label(sig, src_x + wire_stub, src_y)
-        dst_x, dst_y = byte_pp[byte_idx]["WRITE_CLK"]
-        b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
-        b.add_label(sig, dst_x - wire_stub, dst_y, justify="right")
-
-    # BUF_OE_4-7: labels (cross past byte_col1 blocks)
-    for i in range(4):
-        byte_idx = 4 + i
-        sig = f"BUF_OE_{byte_idx}"
-        src_x, src_y = roe_pp[sig]
-        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
-        b.add_label(sig, src_x + wire_stub, src_y)
-        dst_x, dst_y = byte_pp[byte_idx]["BUF_OE"]
         b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
         b.add_label(sig, dst_x - wire_stub, dst_y, justify="right")
 

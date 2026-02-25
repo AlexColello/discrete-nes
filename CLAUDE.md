@@ -139,8 +139,8 @@ Hard-won requirements for generating schematics with kiutils that pass KiCad 9 E
 - Don't mix local and global labels with the same name — use local labels in the root sheet for hierarchy pin connections
 
 **Power symbols:**
-- PWR_FLAG should be placed in sub-sheets at IC power pin positions (same point as VCC/GND symbols)
-- Standalone VCC + PWR_FLAG connected only by wire in the root sheet doesn't reliably connect
+- PWR_FLAG should be placed at the root sheet connector power pins (VCC + GND) — marks the connector as the power source
+- Do NOT place PWR_FLAG in sub-sheets — it propagates through global VCC/GND nets from the root
 - Power symbols placed at IC pin positions connect via overlapping pins (no wire needed)
 
 **Wire routing rules (critical for ERC-clean schematics):**
@@ -152,6 +152,51 @@ Hard-won requirements for generating schematics with kiutils that pass KiCad 9 E
 - **Avoid trunk/branch Y coincidence** — If components at the same Y positions feed different vertical trunks, offset one group (e.g., shift inverters by +GRID) so trunk segment endpoints don't share Y values with cross-trunk horizontal wires
 - **Wire through pin = unintended connection** — A wire passing through a component pin position (even NC pins) creates a connection in KiCad. Vertical trunks and horizontal branches must avoid ALL pin positions of components they pass near. Use `verify_schematics.py` to detect these
 - **NC pin positions matter** — The 74LVC1G04 NC pin (pin 1) has a real connection point at (center_x - 7.62, center_y - 2.54) in schematic space. Vertical trunks at this X will connect to the NC pin. Use half-grid trunk X offsets or different inverter Y offsets to avoid coincidence
+
+### Readable Schematic Layout Design
+
+Lessons learned from the RAM prototype root sheet about designing hierarchy sheets that are clear and readable when opened in KiCad.
+
+**Left-to-right signal flow:**
+- All hierarchy sheet blocks should have inputs on the LEFT edge and outputs on the RIGHT edge
+- `_add_sheet_block()` accepts a `right_pins` set — pins in this set appear on the RIGHT, all others on LEFT
+- Left and right pins must be indexed separately (separate counters for Y positioning) so a block with 3 left pins and 8 right pins doesn't waste space
+- This creates a clear left-to-right signal flow: connector → control blocks → byte sheets
+
+**Multi-column layout for control blocks:**
+- Group related blocks into columns: decoder + control logic in column 1, write_clk + read_oe in column 2
+- Align column tops so input-output pairs are at similar Y positions (e.g., Address Decoder SEL outputs face Write Clk Gen SEL inputs)
+- Leave an inter-column gap (15*GRID) for vertical trunk wires between columns
+
+**When to use labels vs direct wires:**
+- **Prefer direct wires** — make a best effort to connect everything with wires, even if perpendicular wires must cross each other. Wire crossings (perpendicular) are fine in KiCad; only parallel wire overlaps cause problems
+- **Labels should be restricted** to cases where direct wires are impractical:
+  - High-fanout signals (D0-D7: connector + 8 byte sheets = 9 connections each)
+  - Connector-to-column signals where Y-coincidence with other horizontal wires is unavoidable (A0-A2, nCE/nOE/nWE)
+  - Signals with systematic Y-coincidence at the destination (BUF_OE: source Y matches byte D-signal label stub Y)
+- **Y-coincidence hazard**: two horizontal wires at the same Y with overlapping X ranges silently merge nets. This is the main reason to fall back to labels when direct wires don't work
+
+**Vertical trunk routing between columns:**
+- Use `add_segmented_trunk()` for multi-destination signals (SEL0-7 fan out to both write_clk and read_oe)
+- Stagger trunk X positions: `sel_trunk_x[i] = base_x - i * GRID` so 8 parallel trunks don't overlap
+- Place single-destination trunks (WRITE_ACTIVE, READ_EN) at X positions BETWEEN the multi-destination trunks and the target column (not on the source side) to avoid horizontal overlap at shared Y values
+
+**PWR_FLAG placement:**
+- Place PWR_FLAG at the root sheet connector power pins (VCC + GND) — the connector is the power source for the entire design
+- Do NOT place PWR_FLAG in sub-sheets — the connector-level PWR_FLAG propagates through the hierarchy via global VCC/GND nets
+- Having PWR_FLAG in both root and sub-sheets causes "power output to power output" ERC errors
+
+**Connector design:**
+- Include VCC and GND pins on the connector (e.g., 16-pin connector: 14 signals + VCC + GND)
+- VCC at the top of the connector (highest pin number at angle=180), GND at the bottom (pin 1 at angle=180)
+- Signal pins in the middle, grouped logically (address, data, control)
+- Wire power pins to VCC/GND symbols with a short horizontal stub (3*GRID)
+
+**Connector LED bank:**
+- Connector signal LEDs should be in a separate bank area below the connector, NOT inline with signal wires
+- Connector pins get short wire stubs to labels; the LED bank uses matching labels to tap the same signal names
+- Each LED indicator is a horizontal chain: label → R_Small(90°) → LED_Small(180°) → GND
+- This eliminates T-junction risk from LED vertical drops crossing other signal wires
 
 **kiutils API notes:**
 - Wire objects use `item.points[0]` and `item.points[1]` (Position objects) — NOT `startPoint`/`endPoint`
