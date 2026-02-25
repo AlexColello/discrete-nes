@@ -9,8 +9,10 @@ Checks for common issues that have caused ERC failures or visual problems:
 4. Wires passing through component pins (unintended connections)
 5. T-junctions without explicit junction dots (visual issue)
 6. Component overlap (non-power parts placed on top of each other)
-7. Netlist connectivity (hierarchy pin connections match expected topology)
-8. ERC via kicad-cli on the root schematic
+7. Content drawn on top of hierarchical sheet blocks
+8. Content outside the page drawing border
+9. Netlist connectivity (hierarchy pin connections match expected topology)
+10. ERC via kicad-cli on the root schematic
 
 Results are written to verify_output/ directory (gitignored).
 SVGs are exported to verify_output/svg/ for visual inspection.
@@ -209,11 +211,30 @@ def parse_schematic(filepath):
     for nc in getattr(sch, 'noConnects', []):
         no_connects.add((snap(nc.position.X), snap(nc.position.Y)))
 
-    # -- Hierarchical sheet pins --
+    # -- Hierarchical sheet pins and bounding boxes --
     sheet_pins = set()
+    sheet_blocks = []  # [(name, x, y, w, h), ...]
     for sheet in getattr(sch, 'hierarchicalSheets', []):
         for pin in getattr(sheet, 'pins', []):
             sheet_pins.add((snap(pin.position.X), snap(pin.position.Y)))
+        sx = snap(sheet.position.X)
+        sy = snap(sheet.position.Y)
+        sw = snap(sheet.width)
+        sh = snap(sheet.height)
+        sname = sheet.sheetName.value if sheet.sheetName else "?"
+        sheet_blocks.append((sname, sx, sy, sw, sh))
+
+    # -- Page size --
+    page_w, page_h = 594.0, 420.0  # A2 landscape default
+    paper = getattr(sch, 'paper', None) or getattr(sch, 'page', None)
+    if paper:
+        size_str = getattr(paper, 'paperSize', None) or getattr(paper, 'size', '')
+        _page_sizes = {
+            'A4': (297, 210), 'A3': (420, 297), 'A2': (594, 420),
+            'A1': (841, 594), 'A0': (1189, 841),
+        }
+        if size_str in _page_sizes:
+            page_w, page_h = _page_sizes[size_str]
 
     return {
         'wires': wires,
@@ -224,6 +245,8 @@ def parse_schematic(filepath):
         'labels': labels,
         'no_connects': no_connects,
         'sheet_pins': sheet_pins,
+        'sheet_blocks': sheet_blocks,
+        'page_size': (page_w, page_h),
         'components': components,
     }
 
@@ -518,6 +541,97 @@ def check_component_overlap(data):
                     f"  {ref_a} ({lib_a}) and {ref_b} ({lib_b}) overlap: "
                     f"centers ({ax},{ay}) and ({bx},{by}) dist={dist:.2f}mm"
                 )
+
+    return issues
+
+
+def check_content_on_sheet_blocks(data):
+    """Check for wires or components drawn on top of sheet block areas.
+
+    Sheet blocks are rectangular regions representing hierarchical sub-sheets.
+    Wires, components, and labels should not be placed inside these regions
+    (except for the sheet's own pins, which sit on the edges).
+    """
+    sheet_blocks = data.get('sheet_blocks', [])
+    if not sheet_blocks:
+        return []
+
+    wires = data['wires']
+    comps = data['components']
+    issues = []
+
+    def _inside_block(px, py, bx, by, bw, bh):
+        """True if point (px, py) is strictly inside a sheet block."""
+        return (bx + TOLERANCE < px < bx + bw - TOLERANCE and
+                by + TOLERANCE < py < by + bh - TOLERANCE)
+
+    # Collect sheet pin positions (these are allowed on block edges)
+    sheet_pin_set = data.get('sheet_pins', set())
+
+    # Check component centers
+    for ref, lib_name, cx, cy, angle in comps:
+        if ref.startswith("#"):
+            continue  # power symbols can overlap
+        for sname, bx, by, bw, bh in sheet_blocks:
+            if _inside_block(cx, cy, bx, by, bw, bh):
+                issues.append(
+                    f"  {ref} ({lib_name}) at ({cx},{cy}) inside "
+                    f"sheet block \"{sname}\" [{bx},{by} {bw}x{bh}]"
+                )
+
+    # Check wire segments — flag if both endpoints inside the same block,
+    # or if a wire crosses through a block interior.
+    for w_idx, ((x1, y1), (x2, y2)) in enumerate(wires):
+        for sname, bx, by, bw, bh in sheet_blocks:
+            p1_in = _inside_block(x1, y1, bx, by, bw, bh)
+            p2_in = _inside_block(x2, y2, bx, by, bw, bh)
+            if p1_in or p2_in:
+                issues.append(
+                    f"  Wire #{w_idx} ({x1},{y1})->({x2},{y2}) "
+                    f"enters sheet block \"{sname}\" [{bx},{by} {bw}x{bh}]"
+                )
+
+    return issues
+
+
+def check_page_boundary(data):
+    """Check for wires or components outside the page drawing area.
+
+    The drawing area is inset from the page edges by a margin (typically
+    ~10mm).  Content outside this area is clipped in printouts and looks
+    wrong visually.
+    """
+    page_w, page_h = data.get('page_size', (594.0, 420.0))
+    margin = 10.0  # mm from each edge
+    border_tol = 0.5  # allow small rounding overruns
+    min_x, min_y = margin - border_tol, margin - border_tol
+    max_x = page_w - margin + border_tol
+    max_y = page_h - margin + border_tol
+
+    wires = data['wires']
+    comps = data['components']
+    issues = []
+
+    def _outside(px, py):
+        return px < min_x or px > max_x or py < min_y or py > max_y
+
+    # Check wire endpoints
+    for w_idx, ((x1, y1), (x2, y2)) in enumerate(wires):
+        if _outside(x1, y1) or _outside(x2, y2):
+            issues.append(
+                f"  Wire #{w_idx} ({x1},{y1})->({x2},{y2}) "
+                f"outside page border [{min_x},{min_y}]-[{max_x},{max_y}]"
+            )
+
+    # Check component centers
+    for ref, lib_name, cx, cy, angle in comps:
+        if ref.startswith("#"):
+            continue
+        if _outside(cx, cy):
+            issues.append(
+                f"  {ref} ({lib_name}) at ({cx},{cy}) "
+                f"outside page border [{min_x},{min_y}]-[{max_x},{max_y}]"
+            )
 
     return issues
 
@@ -1003,6 +1117,16 @@ def main():
         overlaps_comp = check_component_overlap(data)
         if overlaps_comp:
             file_results.append(("Component Overlap", overlaps_comp, True))
+
+        # 8. Content on top of sheet blocks
+        on_sheets = check_content_on_sheet_blocks(data)
+        if on_sheets:
+            file_results.append(("Content on Sheet Block", on_sheets, True))
+
+        # 9. Content outside page border
+        outside = check_page_boundary(data)
+        if outside:
+            file_results.append(("Outside Page Border", outside, True))
 
         if file_results:
             for category, issues, is_error in file_results:

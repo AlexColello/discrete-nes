@@ -192,11 +192,14 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - Signal pins in the middle, grouped logically (address, data, control)
 - Wire power pins to VCC/GND symbols with a short horizontal stub (3*GRID)
 
-**Connector LED bank:**
-- Connector signal LEDs should be in a separate bank area below the connector, NOT inline with signal wires
-- Connector pins get short wire stubs to labels; the LED bank uses matching labels to tap the same signal names
-- Each LED indicator is a horizontal chain: label → R_Small(90°) → LED_Small(180°) → GND
-- This eliminates T-junction risk from LED vertical drops crossing other signal wires
+**Connector + LED bank layout:**
+- Connector and LED bank are vertically centered with the sheet block ensemble (pre-compute `ensemble_center_y` before placing the connector)
+- Each connector pin is wired directly to its LED indicator via staggered turning columns
+- Sort signals by connector Y (ascending) so vertical routing wires don't cross
+- Use half-GRID (1.27mm) turn-column spacing to keep LED indicators well left of col1_x
+- Half-grid LED Y offset avoids coincidence with grid-aligned sheet-block pin Y values
+- Labels remain at connector pins for sheet-block net connections (matching labels on sheet block input pins)
+- Each LED indicator is a horizontal chain: R_Small(90°) → LED_Small(180°) → GND
 
 **kiutils API notes:**
 - Wire objects use `item.points[0]` and `item.points[1]` (Position objects) — NOT `startPoint`/`endPoint`

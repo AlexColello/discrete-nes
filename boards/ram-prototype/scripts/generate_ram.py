@@ -784,7 +784,7 @@ def generate_address_decoder():
         # LED branches below from junction on this wire
         b.place_led_below(led_jct_x, out_pin[1])
         # Hier label at end of wire
-        b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output", justify="right")
+        b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output", justify="left")
 
     return b
 
@@ -943,14 +943,14 @@ def generate_control_logic():
     b.add_wire(and1_out[0], and1_out[1], and1_led_x, and1_out[1])
     b.add_wire(and1_led_x, and1_out[1], out_label_x, and1_out[1])
     b.place_led_below(and1_led_x, and1_out[1])
-    b.add_hier_label("WRITE_ACTIVE", out_label_x, and1_out[1], shape="output", justify="right")
+    b.add_hier_label("WRITE_ACTIVE", out_label_x, and1_out[1], shape="output", justify="left")
 
     # -- AND3 output → LED T-junction → hier label READ_EN --
     and3_led_x = snap(and3_out[0] + 2 * GRID)
     b.add_wire(and3_out[0], and3_out[1], and3_led_x, and3_out[1])
     b.add_wire(and3_led_x, and3_out[1], out_label_x, and3_out[1])
     b.place_led_below(and3_led_x, and3_out[1])
-    b.add_hier_label("READ_EN", out_label_x, and3_out[1], shape="output", justify="right")
+    b.add_hier_label("READ_EN", out_label_x, and3_out[1], shape="output", justify="left")
 
     return b
 
@@ -1011,7 +1011,7 @@ def _generate_nand_bank(title, enable_signal, output_prefix):
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
         b.place_led_below(led_jct_x, out_pin[1])
-        b.add_hier_label(out_net, hl_out_x, out_pin[1], shape="output", justify="right")
+        b.add_hier_label(out_net, hl_out_x, out_pin[1], shape="output", justify="left")
 
     return b
 
@@ -1164,18 +1164,26 @@ def generate_root_sheet():
     b = SchematicBuilder(title="8-Byte Discrete RAM", page_size="A2")
     base_x, base_y = 25.4, 25.4
 
-    # -- External connector (flipped 180° so pins face RIGHT) --
-    conn_x = base_x
-    conn_y = base_y + 5 * GRID
-    _, conn_pins = b.place_symbol("Conn_01x16", conn_x, conn_y,
-                                  ref_prefix="J", value="SRAM_Bus", angle=180)
-
     # -- Layout constants --
     sheet_gap = 5 * GRID
     wire_stub = 5.08
 
     def _sheet_height(num_pins):
         return snap(num_pins * 2.54 + 5.08)
+
+    # Pre-compute the vertical extent of sheet blocks so we can center
+    # the connector + LED bank ensemble with the sheet block columns.
+    byte_h_pre = _sheet_height(10)  # 30.48 (same as byte_h computed later)
+    sheet_bottom_y = snap(base_y + 3 * (byte_h_pre + sheet_gap) + byte_h_pre)
+    ensemble_center_y = snap((base_y + sheet_bottom_y) / 2)
+
+    # -- External connector centered vertically with sheet blocks --
+    # The pin midpoint is ~1.27mm above the component center for
+    # Conn_01x16 at 180°, so we offset to align the pin midpoint.
+    conn_x = base_x
+    conn_y = snap(ensemble_center_y + 1.27)
+    _, conn_pins = b.place_symbol("Conn_01x16", conn_x, conn_y,
+                                  ref_prefix="J", value="SRAM_Bus", angle=180)
 
     def _pin_y(sy, pin_idx):
         return snap(sy + 2.54 + pin_idx * 2.54)
@@ -1374,30 +1382,59 @@ def generate_root_sheet():
     b.place_power("PWR_FLAG", gnd_sym_x, gnd_pos[1])
 
     # ================================================================
-    # Connector signal labels (short stubs from each pin)
+    # Connector signal wires + LED indicators (direct wires)
     # ================================================================
+    # The LED bank is centered at the same vertical midpoint as the
+    # connector.  Signals are ordered by connector Y (top to bottom) so
+    # vertical routing wires don't cross.  Half-GRID turn-column spacing
+    # keeps the LED indicators well left of col1_x.
     conn_pin_x = conn_signal_pos[signal_names[0]][0]
+
+    # Sort signals by connector Y (ascending = top to bottom)
+    led_order = sorted(signal_names, key=lambda s: conn_signal_pos[s][1])
+
+    # LED bank centered with connector pin midpoint.
+    # Half-grid Y offset avoids coincidence with grid-aligned sheet-block
+    # pin Y values, preventing horizontal wire overlaps.
+    min_conn_pin_y = min(conn_pins[str(i)][1] for i in range(1, 17))
+    max_conn_pin_y = max(conn_pins[str(i)][1] for i in range(1, 17))
+    conn_pin_mid_y = snap((min_conn_pin_y + max_conn_pin_y) / 2)
+    n_signals = len(signal_names)
+    led_spacing_y = snap(3 * GRID)
+    led_span = (n_signals - 1) * led_spacing_y
+    led_bank_y = snap(conn_pin_mid_y - led_span / 2 + GRID / 2)
+
+    # Turning column X positions — staggered right of power wire endpoints.
+    # Power wires extend to conn_pin_x + 3*GRID; start columns beyond that.
+    # Use half-GRID spacing so LED indicators fit well left of col1_x.
+    turn_base_x = snap(conn_pin_x + 4 * GRID)
+    turn_spacing = snap(GRID / 2)
+
+    # LED indicator X: beyond the last turning column + gap.
+    # LED chain extends 5*GRID rightward from led_ind_x (cathode + GND).
+    led_ind_x = snap(turn_base_x + (n_signals - 1) * turn_spacing + 3 * GRID)
+
+    # Label X: short stub from connector pin, for sheet-block connections
     label_x = snap(conn_pin_x + 2 * GRID)
 
-    for sig in signal_names:
+    for idx, sig in enumerate(led_order):
         cx, cy = conn_signal_pos[sig]
+        ly = snap(led_bank_y + idx * led_spacing_y)
+        tx = snap(turn_base_x + idx * turn_spacing)
+
+        # Connector pin → label (for sheet-block net connections)
         b.add_wire(cx, cy, label_x, cy)
         b.add_label(sig, label_x, cy)
 
-    # ================================================================
-    # LED bank — separate area below connector, labels tap signals
-    # ================================================================
-    # LEDs are placed in their own section to avoid T-junctions between
-    # connector horizontal wires and LED vertical drops.
-    led_bank_x = snap(conn_pin_x + 6 * GRID)
-    led_bank_y = snap(conn_signal_pos[signal_names[-1]][1] + 10 * GRID)
-    led_spacing_y = snap(3 * GRID)
+        # Label → turning column (continuing horizontal at connector Y)
+        b.add_wire(label_x, cy, tx, cy)
 
-    for pin_idx, sig in enumerate(signal_names):
-        ly = snap(led_bank_y + pin_idx * led_spacing_y)
-        b.add_label(sig, led_bank_x, ly, justify="right")
-        led_in = b.place_led_indicator(led_bank_x + GRID, ly)
-        b.add_wire(led_bank_x, ly, led_in[0], led_in[1])
+        # Vertical from connector Y to LED Y
+        b.add_wire(tx, cy, tx, ly)
+
+        # Horizontal from turning column to LED indicator input
+        led_in = b.place_led_indicator(led_ind_x, ly)
+        b.add_wire(tx, ly, led_in[0], led_in[1])
 
     # ================================================================
     # Labels on sheet block input pins (connector signals)
@@ -1493,7 +1530,9 @@ def generate_root_sheet():
     # Route F: Col2 RIGHT → Byte Col2 (WRITE_CLK_4-7) — direct wires
     # ================================================================
     # Route via transit Y above all blocks to avoid crossing hierarchy pins.
-    transit_y_base = snap(base_y - 3 * GRID)
+    # Use base_y - 1*GRID so the lowest transit wire stays inside the
+    # A2 page border (~10mm from the top edge).
+    transit_y_base = snap(base_y - 1 * GRID)
     route_f_gap1_x = [snap(route_e_base_x + (4 + i) * route_e_sp)
                       for i in range(4)]
     byte_gap_base_x = snap(byte_col1_x + byte_w + 2 * GRID)
