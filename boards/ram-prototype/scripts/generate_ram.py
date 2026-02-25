@@ -1262,7 +1262,7 @@ def generate_root_sheet():
     # ================================================================
     # 2-Column layout positions
     # ================================================================
-    col1_x = snap(base_x + 25 * GRID)
+    col1_x = snap(base_x + 30 * GRID)
     col1_w = snap(28 * GRID)
     inter_col_gap = snap(15 * GRID)
     col2_x = snap(col1_x + col1_w + inter_col_gap)
@@ -1354,10 +1354,9 @@ def generate_root_sheet():
     # Connector pin positions (16-pin, flipped 180°, pins face RIGHT)
     # Pin 1: GND (bottom), Pins 2-15: signals, Pin 16: VCC (top)
     # ================================================================
-    signal_names = ["A0", "A1", "A2",
-                    "D0", "D1", "D2", "D3", "D4",
-                    "D5", "D6", "D7",
-                    "nCE", "nOE", "nWE"]
+    signal_names = ["D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0",
+                    "nWE", "nOE", "nCE",
+                    "A2", "A1", "A0"]
     conn_signal_pos = {}
     for pin_num_int, sig in enumerate(signal_names, start=2):
         conn_signal_pos[sig] = conn_pins[str(pin_num_int)]
@@ -1382,76 +1381,95 @@ def generate_root_sheet():
     b.place_power("PWR_FLAG", gnd_sym_x, gnd_pos[1])
 
     # ================================================================
-    # Connector signal wires + LED indicators (direct wires)
+    # Connector signal wires + LED indicators + direct wiring
     # ================================================================
-    # The LED bank is centered at the same vertical midpoint as the
-    # connector.  Signals are ordered by connector Y (top to bottom) so
-    # vertical routing wires don't cross.  Half-GRID turn-column spacing
-    # keeps the LED indicators well left of col1_x.
+    # Signals fan out from the connector into horizontal runs at evenly
+    # spaced Y positions.  Each run has an LED dropping below via
+    # place_led_below().  D signals continue to labels (high fanout).
+    # A0-A2 and nCE/nOE/nWE are direct-wired to their sheet block pins.
     conn_pin_x = conn_signal_pos[signal_names[0]][0]
 
     # Sort signals by connector Y (ascending = top to bottom)
     led_order = sorted(signal_names, key=lambda s: conn_signal_pos[s][1])
+    n_signals = len(led_order)
 
-    # LED bank centered with connector pin midpoint.
-    # Half-grid Y offset avoids coincidence with grid-aligned sheet-block
-    # pin Y values, preventing horizontal wire overlaps.
+    # Fan-out Y positions: 6*GRID (15.24mm) spacing gives 5.08mm clearance
+    # above the LED GND bottom (drop=2*GRID → LED chain occupies ~10.16mm).
+    fan_spacing = snap(6 * GRID)
+    fan_span = (n_signals - 1) * fan_spacing
+    # Center the fan-out vertically with the connector pin midpoint
     min_conn_pin_y = min(conn_pins[str(i)][1] for i in range(1, 17))
     max_conn_pin_y = max(conn_pins[str(i)][1] for i in range(1, 17))
     conn_pin_mid_y = snap((min_conn_pin_y + max_conn_pin_y) / 2)
-    n_signals = len(signal_names)
-    led_spacing_y = snap(3 * GRID)
-    led_span = (n_signals - 1) * led_spacing_y
-    led_bank_y = snap(conn_pin_mid_y - led_span / 2 + GRID / 2)
+    # Half-grid Y offset avoids coincidence with grid-aligned connector
+    # pin Y values, preventing horizontal wire overlaps between
+    # connector-to-turning-column wires and fan-out horizontal wires.
+    fan_start_y = snap(conn_pin_mid_y - fan_span / 2)
+    # Ensure half-grid: with even fan spacing (6*GRID) the raw value is
+    # already half-grid; with odd (5*GRID) it needs a GRID/2 nudge.
+    grid_units = fan_start_y / GRID
+    if abs(grid_units - round(grid_units)) < 0.01:
+        fan_start_y = snap(fan_start_y + GRID / 2)
+    # Ensure within A2 page border (top edge at ~9.5mm)
+    page_min_y = snap(5 * GRID)
+    while fan_start_y < page_min_y:
+        fan_start_y = snap(fan_start_y + GRID)
 
     # Turning column X positions — staggered right of power wire endpoints.
     # Power wires extend to conn_pin_x + 3*GRID; start columns beyond that.
-    # Use half-GRID spacing so LED indicators fit well left of col1_x.
     turn_base_x = snap(conn_pin_x + 4 * GRID)
     turn_spacing = snap(GRID / 2)
 
-    # LED indicator X: beyond the last turning column + gap.
-    # LED chain extends 5*GRID rightward from led_ind_x (cathode + GND).
-    led_ind_x = snap(turn_base_x + (n_signals - 1) * turn_spacing + 3 * GRID)
+    # LED junction X: past the last turning column + gap
+    led_jct_x = snap(turn_base_x + (n_signals - 1) * turn_spacing + 3 * GRID)
 
-    # Label X: short stub from connector pin, for sheet-block connections
-    label_x = snap(conn_pin_x + 2 * GRID)
+    # Label X: past the LED horizontal extent (R + LED + GND ≈ 6*GRID)
+    label_x = snap(led_jct_x + 6 * GRID)
+
+    # Direct-wire destination map for non-D signals
+    direct_wire_dest = {
+        "A0": addr_pp["A0"], "A1": addr_pp["A1"], "A2": addr_pp["A2"],
+        "nCE": ctrl_pp["nCE"], "nOE": ctrl_pp["nOE"], "nWE": ctrl_pp["nWE"],
+    }
+
+    # Approach turning columns — left of col1_x, one per direct signal.
+    # Ordered so that signals with increasing fan-out Y get approach columns
+    # closer to col1_x, preventing vertical wire crossings.
+    direct_signals_order = ["A0", "A1", "A2", "nCE", "nOE", "nWE"]
+    direct_turn = {}
+    for i, sig in enumerate(direct_signals_order):
+        direct_turn[sig] = snap(col1_x - (6 - i) * GRID)
 
     for idx, sig in enumerate(led_order):
         cx, cy = conn_signal_pos[sig]
-        ly = snap(led_bank_y + idx * led_spacing_y)
+        ty = snap(fan_start_y + idx * fan_spacing)
         tx = snap(turn_base_x + idx * turn_spacing)
 
-        # Connector pin → label (for sheet-block net connections)
-        b.add_wire(cx, cy, label_x, cy)
-        b.add_label(sig, label_x, cy)
+        # 1. Horizontal from connector pin to turning column
+        b.add_wire(cx, cy, tx, cy)
 
-        # Label → turning column (continuing horizontal at connector Y)
-        b.add_wire(label_x, cy, tx, cy)
+        # 2. Vertical from connector Y to fan-out target Y
+        b.add_wire(tx, cy, tx, ty)
 
-        # Vertical from connector Y to LED Y
-        b.add_wire(tx, cy, tx, ly)
+        # 3. Horizontal to LED junction + LED below
+        b.add_wire(tx, ty, led_jct_x, ty)
+        b.place_led_below(led_jct_x, ty, drop=2 * GRID)
 
-        # Horizontal from turning column to LED indicator input
-        led_in = b.place_led_indicator(led_ind_x, ly)
-        b.add_wire(tx, ly, led_in[0], led_in[1])
+        if sig in direct_wire_dest:
+            # Direct wire: LED junction → approach column → destination pin
+            dtx = direct_turn[sig]
+            dest_px, dest_py = direct_wire_dest[sig]
+            b.add_wire(led_jct_x, ty, dtx, ty)          # horizontal to approach col
+            b.add_wire(dtx, ty, dtx, dest_py)            # vertical to pin Y
+            b.add_wire(dtx, dest_py, dest_px, dest_py)   # horizontal into pin
+        else:
+            # D signal: LED junction → label (high fanout to 8 byte sheets)
+            b.add_wire(led_jct_x, ty, label_x, ty)
+            b.add_label(sig, label_x, ty)
 
     # ================================================================
     # Labels on sheet block input pins (connector signals)
     # ================================================================
-
-    # -- A0-A2 labels on Address Decoder LEFT pins --
-    for i in range(3):
-        sig = f"A{i}"
-        px, py = addr_pp[sig]
-        b.add_wire(px, py, px - wire_stub, py)
-        b.add_label(sig, px - wire_stub, py, justify="right")
-
-    # -- nCE/nOE/nWE labels on Control Logic LEFT pins --
-    for sig in ["nCE", "nOE", "nWE"]:
-        px, py = ctrl_pp[sig]
-        b.add_wire(px, py, px - wire_stub, py)
-        b.add_label(sig, px - wire_stub, py, justify="right")
 
     # -- D0-D7 labels on byte sheet pins (LEFT side) --
     for byte_idx in range(8):
