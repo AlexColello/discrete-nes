@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Keeping This File Current
+
+**This is the most important task.** Update CLAUDE.md whenever you:
+- Discover something unexpected (a KiCad quirk, a kiutils gotcha, a routing rule violation)
+- Learn a new user preference or workflow pattern
+- Fix a bug whose root cause should be documented so it never recurs
+- Find that existing documentation is wrong, incomplete, or misleading
+
+Don't wait — update immediately when the insight is fresh. A lesson not recorded here will be relearned painfully in a future session. This file is the institutional memory for the entire project across all boards (RAM, CPU, PPU, etc.), so every hard-won insight belongs here.
+
 ## Project Overview
 
 **Discrete NES** - A discrete logic NES implementation where EVERY gate output and EVERY memory bit has a visible LED indicator. Built with TI Little Logic (SN74LVC1G) in DSBGA packages — the bare silicon die is visible on top of each IC, creating a sea of visible silicon interspersed with glowing LEDs.
@@ -69,21 +79,25 @@ venv\Scripts\activate         # Windows
 pip install -r requirements.txt
 ```
 
-### Generate RAM Prototype
+### Generate & Verify (mandatory workflow)
+
+Every board has a generate script and a verify script. **Always run both.** This applies to the RAM prototype now and to every future board (CPU, PPU, etc.).
 
 ```bash
 cd boards/ram-prototype
 python scripts/generate_ram.py
-# Then ALWAYS run verification:
 python scripts/verify_schematics.py
 ```
 
-**IMPORTANT:** After ANY change to `generate_ram.py`, you MUST:
-1. Regenerate: `python scripts/generate_ram.py`
+**IMPORTANT:** After ANY change to a generate script, you MUST:
+1. Regenerate: `python scripts/generate_*.py`
 2. Verify: `python scripts/verify_schematics.py`
 3. Fix any errors before considering the change complete
+4. Target: **0 errors**. Warnings (lib_symbol_mismatch, T-junctions) are acceptable
 
-The verification script checks for: wire overlaps (net merges), diagonal wires, dangling endpoints, wires passing through component pins, T-junctions without dots, and runs kicad-cli ERC. Output goes to `verify_output/` (gitignored).
+The verification script catches bugs that are invisible in KiCad's GUI and that ERC alone misses — especially wire overlaps (silent net merges) and wire-through-pin (valid but unintended connections). See "Verification Script Architecture" section below for details on what each check does and how to adapt the script for new boards.
+
+Output goes to `verify_output/` (gitignored), including SVGs for visual inspection.
 
 ## Technology Stack & Research Findings
 
@@ -153,6 +167,26 @@ Hard-won requirements for generating schematics with kiutils that pass KiCad 9 E
 - **Wire through pin = unintended connection** — A wire passing through a component pin position (even NC pins) creates a connection in KiCad. Vertical trunks and horizontal branches must avoid ALL pin positions of components they pass near. Use `verify_schematics.py` to detect these
 - **NC pin positions matter** — The 74LVC1G04 NC pin (pin 1) has a real connection point at (center_x - 7.62, center_y - 2.54) in schematic space. Vertical trunks at this X will connect to the NC pin. Use half-grid trunk X offsets or different inverter Y offsets to avoid coincidence
 
+**Half-grid Y offset arithmetic (important for fan-out routing):**
+
+When routing N signals from a connector to evenly-spaced fan-out Y positions, the fan-out Y values must be at **half-grid** (odd multiples of 1.27mm) so they never coincide with on-grid connector pin Y values. The naive `+ GRID/2` offset is fragile — whether it produces half-grid depends on the parity of the fan spacing:
+
+- With **odd** multiplier spacing (e.g., 5\*GRID): `fan_span/2` is half-grid, so `center - span/2` is on-grid, and `+ GRID/2` correctly shifts to half-grid
+- With **even** multiplier spacing (e.g., 6\*GRID): `fan_span/2` is on-grid, so `center - span/2` is already half-grid, and `+ GRID/2` **incorrectly** shifts back to on-grid
+
+**Robust pattern** — compute raw, then dynamically ensure half-grid and page bounds:
+```python
+fan_start_y = snap(conn_pin_mid_y - fan_span / 2)
+grid_units = fan_start_y / GRID
+if abs(grid_units - round(grid_units)) < 0.01:  # on-grid?
+    fan_start_y = snap(fan_start_y + GRID / 2)   # nudge to half-grid
+while fan_start_y < page_min_y:                   # page border clamp
+    fan_start_y = snap(fan_start_y + GRID)        # preserves half-grid
+```
+Adding whole `GRID` increments preserves the half-grid property (GRID = 2 half-grids).
+
+**Why this matters:** A 14-signal fan-out at 6\*GRID spacing spans ~198mm, much larger than the connector pin range (~38mm). The fan-out Y values will sweep through the connector Y range ~5 times. If they're on-grid, overlaps with connector horizontal wires are inevitable. If half-grid, they're structurally impossible.
+
 ### Readable Schematic Layout Design
 
 Lessons learned from the RAM prototype root sheet about designing hierarchy sheets that are clear and readable when opened in KiCad.
@@ -172,8 +206,8 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - **Prefer direct wires** — make a best effort to connect everything with wires, even if perpendicular wires must cross each other. Wire crossings (perpendicular) are fine in KiCad; only parallel wire overlaps cause problems
 - **Labels should be restricted** to cases where direct wires are impractical:
   - High-fanout signals (D0-D7: connector + 8 byte sheets = 9 connections each)
-  - Connector-to-column signals where Y-coincidence with other horizontal wires is unavoidable (A0-A2, nCE/nOE/nWE)
   - Signals with systematic Y-coincidence at the destination (BUF_OE: source Y matches byte D-signal label stub Y)
+- **Direct-wire "approach column" pattern** — for connector-to-block signals (A0-A2, nCE/nOE/nWE), route from the connector LED fan-out through "approach turning columns" near the destination block. Each signal gets a unique approach column X (staggered left of col1_x). Wire structure: fan-out horizontal → approach column vertical → destination pin horizontal. Signals are ordered so that increasing fan-out Y gets approach columns closer to the target, preventing vertical wire crossings
 - **Y-coincidence hazard**: two horizontal wires at the same Y with overlapping X ranges silently merge nets. This is the main reason to fall back to labels when direct wires don't work
 
 **Vertical trunk routing between columns:**
@@ -197,8 +231,10 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - Each connector pin is wired directly to its LED indicator via staggered turning columns
 - Sort signals by connector Y (ascending) so vertical routing wires don't cross
 - Use half-GRID (1.27mm) turn-column spacing to keep LED indicators well left of col1_x
-- Half-grid LED Y offset avoids coincidence with grid-aligned sheet-block pin Y values
-- Labels remain at connector pins for sheet-block net connections (matching labels on sheet block input pins)
+- Fan-out Y must be at half-grid positions — see "Half-grid Y offset arithmetic" above
+- Group connector pins by destination: signals that direct-wire to nearby blocks (A0-A2, nCE/nOE/nWE) at the top (lower pin Y), high-fanout label signals (D0-D7) at the bottom. This puts direct-wire signals first in the fan-out order, matching their block positions
+- LED spacing: 6\*GRID (15.24mm) between fan-out Y positions gives 5.08mm clearance above each LED chain (drop=2\*GRID occupies ~10.16mm)
+- Direct-wired signals continue past the LED junction to approach columns; label signals continue to labels. Both share the same fan-out infrastructure
 - Each LED indicator is a horizontal chain: R_Small(90°) → LED_Small(180°) → GND
 
 **kiutils API notes:**
@@ -210,6 +246,39 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 **Known limitations:**
 - `lib_symbol_mismatch` warnings are a kiutils serialization artifact — harmless, fix with "Update symbols from library" in KiCad
 - Use `round(v, 2)` on all coordinates to eliminate floating-point noise (e.g., `83.82000000000001`)
+
+### Verification Script Architecture
+
+`verify_schematics.py` is the safety net that catches wire routing bugs before they become ERC failures. **Every board should have an equivalent script.** The RAM prototype script (`boards/ram-prototype/scripts/verify_schematics.py`) is the reference implementation.
+
+**General-purpose checks (reusable for any board):**
+1. **Diagonal wires** — KiCad doesn't connect them; all routing must be orthogonal
+2. **Wire overlaps (NET MERGE)** — same-axis wires with overlapping ranges silently merge nets. This is the #1 cause of hard-to-debug ERC failures
+3. **Dangling wire endpoints** — endpoints not touching any pin, wire, junction, or label
+4. **Wire through pin** — wire interior passing through a component pin (unintended connection)
+5. **T-junctions without dots** — warning only, but looks wrong in the GUI
+6. **Wire overlaps pin stub** — wire doubling a pin's built-in stub line
+7. **Component overlap** — non-power parts placed on top of each other
+8. **Content on sheet blocks** — wires/components inside hierarchy sheet block areas
+9. **Page boundary** — content outside the drawing border
+10. **ERC via kicad-cli** — full hierarchy + per-sub-sheet standalone (filtering expected standalone artifacts)
+
+**Board-specific checks (must be customized per board):**
+- **Netlist connectivity** — uses union-find to build nets from wire/label/junction connectivity, then verifies expected connections (e.g., "Address Decoder SEL0 connected to Write Clk Gen SEL0") and signal isolation (e.g., "A0 not merged with A1"). The expected-connections list is the main board-specific part
+- **SCHEMATIC_FILES list** — which .kicad_sch files to check
+- **Standalone ERC artifact filtering** — `_is_standalone_artifact()` filters out expected errors when running ERC on sub-sheets without their parent hierarchy
+
+**Process for new boards:**
+1. Copy `verify_schematics.py` as a starting point
+2. Update SCHEMATIC_FILES for the new board's sheets
+3. Rewrite `check_netlist()` with the new board's expected connections and isolation pairs
+4. General checks (1-9) work as-is — they parse any .kicad_sch file
+
+**What the script catches that ERC alone misses:**
+- Wire overlaps (KiCad silently merges nets — no ERC error, just wrong connectivity)
+- Wire-through-pin (creates a valid but unintended connection — no ERC error)
+- Page boundary violations (cosmetic but important for printability)
+- Net isolation (ERC checks that pins are driven, but doesn't know which signals should be separate)
 
 ### Logic Family - Why TI Little Logic (SN74LVC1G) in DSBGA?
 
