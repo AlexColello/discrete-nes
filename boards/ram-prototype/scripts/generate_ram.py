@@ -1607,8 +1607,17 @@ def generate_root_sheet():
 
     # Turning column X positions — staggered right of power wire endpoints.
     # Power wires extend to conn_pin_x + 3*GRID; start columns beyond that.
+    # Inverted-V assignment: edge signals get innermost columns (closest to
+    # connector), center signals get outermost columns.  Within the top half
+    # ranks increase with index, within the bottom half they decrease — so
+    # each signal's horizontal stub is shorter than the next inward signal's,
+    # eliminating perpendicular wire crossings entirely.
     turn_base_x = snap(conn_pin_x + 4 * GRID)
     turn_spacing = snap(GRID / 2)
+    center_idx = (n_signals - 1) / 2
+    v_order = sorted(range(n_signals),
+                     key=lambda i: (-abs(i - center_idx), i))
+    v_rank = {idx: rank for rank, idx in enumerate(v_order)}
 
     # LED junction X: past the last turning column + gap
     led_jct_x = snap(turn_base_x + (n_signals - 1) * turn_spacing + 3 * GRID)
@@ -1633,7 +1642,7 @@ def generate_root_sheet():
     for idx, sig in enumerate(led_order):
         cx, cy = conn_signal_pos[sig]
         ty = snap(fan_start_y + idx * fan_spacing)
-        tx = snap(turn_base_x + idx * turn_spacing)
+        tx = snap(turn_base_x + v_rank[idx] * turn_spacing)
 
         # 1. Horizontal from connector pin to turning column
         b.add_wire(cx, cy, tx, cy)

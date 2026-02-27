@@ -230,6 +230,7 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - Connector and LED bank are vertically centered with the sheet block ensemble (pre-compute `ensemble_center_y` before placing the connector)
 - Each connector pin is wired directly to its LED indicator via staggered turning columns
 - Sort signals by connector Y (ascending) so vertical routing wires don't cross
+- **Inverted-V (Λ) turning column assignment:** assign turn-column X based on distance from center — edge signals (top/bottom of connector) get innermost columns (closest to connector), center signals get outermost. Sort by `(-abs(i - center), i)`. This creates zero perpendicular crossings because within each half, ranks increase/decrease monotonically with index, so no horizontal stub can reach another signal's vertical. Never use monotonic (diagonal staircase) or non-flipped V (many crossings)
 - Use half-GRID (1.27mm) turn-column spacing to keep LED indicators well left of col1_x
 - Fan-out Y must be at half-grid positions — see "Half-grid Y offset arithmetic" above
 - Group connector pins by destination: signals that direct-wire to nearby blocks (A0-A2, nCE/nOE/nWE) at the top (lower pin Y), high-fanout label signals (D0-D7) at the bottom. This puts direct-wire signals first in the fan-out order, matching their block positions
