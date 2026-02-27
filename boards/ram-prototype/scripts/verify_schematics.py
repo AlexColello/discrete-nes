@@ -11,8 +11,9 @@ Checks for common issues that have caused ERC failures or visual problems:
 6. Component overlap (non-power parts placed on top of each other)
 7. Content drawn on top of hierarchical sheet blocks
 8. Content outside the page drawing border
-9. Netlist connectivity (hierarchy pin connections match expected topology)
-10. ERC via kicad-cli on the root schematic
+9. Power symbol orientation (VCC pointing up, GND pointing down)
+10. Netlist connectivity (hierarchy pin connections match expected topology)
+11. ERC via kicad-cli on the root schematic
 
 Results are written to verify_output/ directory (gitignored).
 SVGs are exported to verify_output/svg/ for visual inspection.
@@ -92,6 +93,96 @@ def _extract_lib_pins(lib_sym):
     return pins
 
 
+def _compute_lib_bbox(lib_sym):
+    """Compute bounding box of a library symbol in library space (Y-up).
+
+    Returns (min_x, min_y, max_x, max_y) or None if no geometry found.
+    Includes graphical items (polylines, rectangles, circles, arcs) and
+    pin tip/body-end positions.
+    """
+    all_x = []
+    all_y = []
+
+    # Iterate sub-symbols (try 'symbols' first, then 'units')
+    sub_syms = getattr(lib_sym, 'symbols', []) or []
+    if not sub_syms:
+        sub_syms = getattr(lib_sym, 'units', []) or []
+
+    for sub_sym in sub_syms:
+        # Graphical items
+        for item in getattr(sub_sym, 'graphicItems', []):
+            cls_name = type(item).__name__
+            if cls_name == 'SyPolyLine':
+                for pt in getattr(item, 'points', []):
+                    all_x.append(pt.X)
+                    all_y.append(pt.Y)
+            elif cls_name == 'SyRect':
+                all_x.extend([item.start.X, item.end.X])
+                all_y.extend([item.start.Y, item.end.Y])
+            elif cls_name == 'SyCircle':
+                r = getattr(item, 'radius', 0) or 0
+                all_x.extend([item.center.X - r, item.center.X + r])
+                all_y.extend([item.center.Y - r, item.center.Y + r])
+            elif cls_name == 'SyArc':
+                for attr in ('start', 'mid', 'end'):
+                    pt = getattr(item, attr, None)
+                    if pt:
+                        all_x.append(pt.X)
+                        all_y.append(pt.Y)
+
+        # Pins: include both the tip and the body end of each pin
+        for pin in getattr(sub_sym, 'pins', []):
+            px, py = pin.position.X, pin.position.Y
+            pa = getattr(pin.position, 'angle', 0) or 0
+            pl = getattr(pin, 'length', 2.54) or 2.54
+            # Pin tip (connection point)
+            all_x.append(px)
+            all_y.append(py)
+            # Pin body end: tip + (tip→body direction) * length
+            # Pin angle is direction from tip toward IC body
+            rad = math.radians(pa)
+            all_x.append(px + math.cos(rad) * pl)
+            all_y.append(py + math.sin(rad) * pl)
+
+    if not all_x:
+        return None
+
+    return (min(all_x), min(all_y), max(all_x), max(all_y))
+
+
+def _lib_bbox_to_schematic(lib_bbox, cx, cy, angle):
+    """Transform a library-space bounding box to schematic-space.
+
+    lib_bbox: (min_x, min_y, max_x, max_y) in library coords (Y-up)
+    cx, cy: component center in schematic space
+    angle: component rotation in degrees (CW in schematic Y-down space)
+
+    Returns (min_x, min_y, max_x, max_y) in schematic coords.
+    """
+    lmin_x, lmin_y, lmax_x, lmax_y = lib_bbox
+    corners = [
+        (lmin_x, lmin_y), (lmax_x, lmin_y),
+        (lmax_x, lmax_y), (lmin_x, lmax_y),
+    ]
+
+    rad = math.radians(angle)
+    cos_a = round(math.cos(rad), 10)
+    sin_a = round(math.sin(rad), 10)
+
+    sx_list = []
+    sy_list = []
+    for lx, ly in corners:
+        # Library Y-up → schematic Y-down: negate Y
+        bx, by = lx, -ly
+        # Rotate (same transform as _pin_schematic_offset)
+        dx = snap(cos_a * bx + sin_a * by)
+        dy = snap(-sin_a * bx + cos_a * by)
+        sx_list.append(cx + dx)
+        sy_list.append(cy + dy)
+
+    return (min(sx_list), min(sy_list), max(sx_list), max(sy_list))
+
+
 def _pin_schematic_offset(lib_x, lib_y, angle_deg):
     """Convert library pin position to schematic offset (dx, dy).
 
@@ -133,10 +224,17 @@ def parse_schematic(filepath):
                 p2 = (snap(pts[1].X), snap(pts[1].Y))
                 wires.append((p1, p2))
 
-    # -- Library symbol pin map --
+    # -- Library symbol pin map and bounding boxes --
     lib_pin_map = {}  # lib_id -> [(pin_num, lib_x, lib_y, pin_angle, pin_length)]
+    lib_bboxes = {}   # lib_name -> (min_x, min_y, max_x, max_y) in library space
     for lib_sym in sch.libSymbols:
         lib_pin_map[lib_sym.libId] = _extract_lib_pins(lib_sym)
+        bbox = _compute_lib_bbox(lib_sym)
+        if bbox:
+            lib_bboxes[lib_sym.libId] = bbox
+            # Also key by short name for component lookup
+            short = lib_sym.libId.split(":")[-1] if ":" in lib_sym.libId else lib_sym.libId
+            lib_bboxes[short] = bbox
 
     # -- Component instances and pin positions --
     pins = {}          # (x,y) -> (ref, pin_num, pin_type_or_name)
@@ -248,6 +346,7 @@ def parse_schematic(filepath):
         'sheet_blocks': sheet_blocks,
         'page_size': (page_w, page_h),
         'components': components,
+        'lib_bboxes': lib_bboxes,
     }
 
 
@@ -595,14 +694,19 @@ def check_content_on_sheet_blocks(data):
 
 
 def check_page_boundary(data):
-    """Check for wires or components outside the page drawing area.
+    """Check for wires or component bounding boxes outside the page drawing area.
 
     The drawing area is inset from the page edges by a margin (typically
     ~10mm).  Content outside this area is clipped in printouts and looks
     wrong visually.
+
+    Component bounding boxes are computed from their library symbol
+    graphical data (polylines, rectangles, circles, arcs, pins) and
+    transformed into schematic space using each instance's position and
+    rotation.
     """
     page_w, page_h = data.get('page_size', (594.0, 420.0))
-    margin = 10.0  # mm from each edge
+    margin = 12.5  # mm from each edge (KiCad drawing border)
     border_tol = 0.5  # allow small rounding overruns
     min_x, min_y = margin - border_tol, margin - border_tol
     max_x = page_w - margin + border_tol
@@ -610,6 +714,7 @@ def check_page_boundary(data):
 
     wires = data['wires']
     comps = data['components']
+    lib_bboxes = data.get('lib_bboxes', {})
     issues = []
 
     def _outside(px, py):
@@ -623,15 +728,30 @@ def check_page_boundary(data):
                 f"outside page border [{min_x},{min_y}]-[{max_x},{max_y}]"
             )
 
-    # Check component centers
+    # Check component bounding boxes
     for ref, lib_name, cx, cy, angle in comps:
         if ref.startswith("#"):
             continue
-        if _outside(cx, cy):
-            issues.append(
-                f"  {ref} ({lib_name}) at ({cx},{cy}) "
-                f"outside page border [{min_x},{min_y}]-[{max_x},{max_y}]"
-            )
+
+        lib_bbox = lib_bboxes.get(lib_name)
+        if lib_bbox:
+            smin_x, smin_y, smax_x, smax_y = _lib_bbox_to_schematic(
+                lib_bbox, cx, cy, angle)
+            if (smin_x < min_x or smax_x > max_x or
+                    smin_y < min_y or smax_y > max_y):
+                issues.append(
+                    f"  {ref} ({lib_name}) bbox "
+                    f"[{smin_x:.2f},{smin_y:.2f}]-[{smax_x:.2f},{smax_y:.2f}] "
+                    f"extends outside page border "
+                    f"[{min_x},{min_y}]-[{max_x},{max_y}]"
+                )
+        else:
+            # Fallback to center point check if no bbox available
+            if _outside(cx, cy):
+                issues.append(
+                    f"  {ref} ({lib_name}) at ({cx},{cy}) "
+                    f"outside page border [{min_x},{min_y}]-[{max_x},{max_y}]"
+                )
 
     return issues
 
@@ -697,6 +817,29 @@ def check_wire_overlaps_pin_stub(data):
                     )
                     seen.add(key)
 
+    return issues
+
+
+def check_power_orientation(data):
+    """Check that VCC symbols point up (angle=0) and GND symbols point down (angle=0).
+
+    In KiCad's power library:
+    - VCC at angle=0: bar + text above pin → pointing UP (correct)
+    - GND at angle=0: bars below pin → pointing DOWN (correct)
+    - Any other angle means the symbol is rotated sideways or inverted.
+    """
+    issues = []
+    for ref, lib_name, cx, cy, angle in data['components']:
+        if lib_name == "VCC" and abs(angle) > TOLERANCE:
+            issues.append(
+                f"  {ref} (VCC) at ({cx},{cy}) has angle={angle} "
+                f"— should be 0 (pointing up)"
+            )
+        elif lib_name == "GND" and abs(angle) > TOLERANCE:
+            issues.append(
+                f"  {ref} (GND) at ({cx},{cy}) has angle={angle} "
+                f"— should be 0 (pointing down)"
+            )
     return issues
 
 
@@ -1127,6 +1270,11 @@ def main():
         outside = check_page_boundary(data)
         if outside:
             file_results.append(("Outside Page Border", outside, True))
+
+        # 10. Power symbol orientation (VCC up, GND down)
+        power_orient = check_power_orientation(data)
+        if power_orient:
+            file_results.append(("Power Orientation", power_orient, True))
 
         if file_results:
             for category, issues, is_error in file_results:

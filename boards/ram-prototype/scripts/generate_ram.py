@@ -55,7 +55,7 @@ BOARD_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 # Schematic grid (KiCad default = 1.27 mm, we use 2.54 multiples)
 GRID = 2.54
 SYM_SPACING_Y = 10 * GRID    # vertical spacing between symbol rows (gates)
-DFF_SPACING_Y = 14 * GRID    # vertical spacing between DFF rows in byte sheet
+DFF_SPACING_Y = 13 * GRID    # vertical spacing between DFF rows in byte sheet
 LED_GAP_X = 3 * GRID         # gap from output pin to LED chain center
 PWR_WIRE_LEN = GRID          # power symbol offset from pin
 LABEL_STUB = GRID             # wire stub length for labels
@@ -1043,7 +1043,7 @@ def generate_byte_sheet():
       - BUF_OE: vertical trunk wire with horizontal branches to each buffer /OE
     """
     b = SchematicBuilder(title="Memory Byte", page_size="A3")
-    base_x, base_y = 25.4, 30.48  # extra top margin for trunk headers
+    base_x, base_y = 25.4, 30.48  # top margin for trunk headers
 
     dff_x = base_x + 18 * GRID
     buf_x = base_x + 52 * GRID
@@ -1372,12 +1372,12 @@ def generate_root_sheet():
     # VCC: wire from connector pin rightward, power symbol + PWR_FLAG at end
     vcc_sym_x = snap(vcc_pos[0] + pwr_wire_len)
     b.add_wire(vcc_pos[0], vcc_pos[1], vcc_sym_x, vcc_pos[1])
-    b.place_power("VCC", vcc_sym_x, vcc_pos[1], angle=90)
+    b.place_power("VCC", vcc_sym_x, vcc_pos[1])
     b.place_power("PWR_FLAG", vcc_sym_x, vcc_pos[1])
     # GND: wire from connector pin rightward, power symbol + PWR_FLAG at end
     gnd_sym_x = snap(gnd_pos[0] + pwr_wire_len)
     b.add_wire(gnd_pos[0], gnd_pos[1], gnd_sym_x, gnd_pos[1])
-    b.place_power("GND", gnd_sym_x, gnd_pos[1], angle=90)
+    b.place_power("GND", gnd_sym_x, gnd_pos[1])
     b.place_power("PWR_FLAG", gnd_sym_x, gnd_pos[1])
 
     # ================================================================
