@@ -7,19 +7,17 @@ in a grouped layout matching the schematic hierarchy. No trace routing --
 that will be done manually in KiCad.
 
 Layout:
-  +----------------------------------------------------------+
-  | CONNECTOR | ADDR DECODER | CTRL LOGIC | WRITE CLK| READ OE|
-  |  1x16     | 3 INV+8 AND3 | 3 INV+3AND | 8 NAND   | 8 NAND |
-  |  +14 LEDs | +19 LEDs     | +6 LEDs    | +8 LEDs  | +8 LEDs|
-  +----------------------------------------------------------+
-  | BYTE 0    | BYTE 1       | BYTE 2     | BYTE 3            |
-  | 16 ICs    | 16 ICs       | 16 ICs     | 16 ICs            |
-  | +10 LEDs  | +10 LEDs     | +10 LEDs   | +10 LEDs          |
-  +----------------------------------------------------------+
-  | BYTE 4    | BYTE 5       | BYTE 6     | BYTE 7            |
-  | 16 ICs    | 16 ICs       | 16 ICs     | 16 ICs            |
-  | +10 LEDs  | +10 LEDs     | +10 LEDs   | +10 LEDs          |
-  +----------------------------------------------------------+
+  +------+-----------+-----------+-----------+
+  |      | ADDR DEC  | BYTE 0    | BYTE 4    |
+  |      |           | BYTE 1    | BYTE 5    |
+  | CONN +-----------+ BYTE 2    | BYTE 6    |
+  |      | CTRL LOGIC| BYTE 3    | BYTE 7    |
+  +------+-----------+-----------+-----------+
+                     | WRITE CLK | READ OE   |
+                     +-----------+-----------+
+
+  Each byte is a line of 8 bits (8 DFFs + 8 buffers in 8 columns).
+  Bytes sorted by address: top-left going down first, then right.
 
 Each IC is paired with its LED+R in a horizontal cell:
   [IC] → [R] → [LED]
@@ -297,15 +295,11 @@ def main():
     # Step 5: Place components
     print("\n[5/6] Placing components...")
 
-    # Define group layout order and positions
-    # Row 0: connector, addr_decoder, control_logic, write_clk_gen, read_oe_gen
-    # Row 1: byte_0, byte_1, byte_2, byte_3
-    # Row 2: byte_4, byte_5, byte_6, byte_7
-
-    group_order_row0 = ["root", "addr_decoder", "control_logic",
-                        "write_clk_gen", "read_oe_gen"]
-    group_order_row1 = ["byte_0", "byte_1", "byte_2", "byte_3"]
-    group_order_row2 = ["byte_4", "byte_5", "byte_6", "byte_7"]
+    # Layout:
+    #   Column 0: Connector (root) on the left
+    #   Column 1: addr_decoder (top) + control_logic (bottom)
+    #   Columns 2+: RAM bytes in 4-col x 2-row grid
+    #   Below RAM: write_clk_gen + read_oe_gen
 
     # Pre-compute layouts for each group
     group_layouts = {}
@@ -315,7 +309,7 @@ def main():
         if name == "root":
             max_cols = 3  # Connector + root LEDs
         elif name.startswith("byte"):
-            max_cols = 4  # 8 DFFs + 8 buffers in 4 cols
+            max_cols = 8  # 8 bits per line (DFFs row + buffers row)
         elif name == "addr_decoder":
             max_cols = 4  # 3 INV + 8 AND3
         else:
@@ -326,74 +320,131 @@ def main():
 
         # Add connector and other non-IC components
         if others:
-            # Place connector offset to the left to avoid overlap with ICs
-            conn_offset_x = -8.0  # keep connector well left of IC grid
-            row_offset = len(placements) // max_cols + 2 if placements else 0
-            for i, comp in enumerate(others):
-                placements.append((comp, conn_offset_x, row_offset * IC_CELL_H + i * CONN_PIN_PITCH))
+            if name == "root":
+                # Root group: connector on the left, bus LEDs aligned to
+                # their matching connector pin Y positions.
+                # PinHeader_1x16 pad Y: pin N at (N-1)*2.54mm
+                conn_x = 0.0
+                r_x = 8.0    # R offset right of connector
+                led_x = 10.0  # LED offset right of connector
+
+                # Find connector pin-to-net mapping (excluding power nets)
+                j1 = others[0]  # J1 is the only non-R/D/U in root
+                pin_y_by_net = {}
+                for pin_num, net_name in j1["pins"].items():
+                    if net_name not in ("GND", "VCC"):
+                        pin_y_by_net[net_name] = (int(pin_num) - 1) * CONN_PIN_PITCH
+
+                # Clear standalone placements and rebuild aligned to pins
+                placements = []
+
+                # Place connector
+                placements.append((j1, conn_x, 0.0))
+
+                # Place each R+LED pair at its matching connector pin Y
+                for r_comp, led_comp in standalone:
+                    # R has the signal net that matches a connector pin
+                    r_nets = set(r_comp["pins"].values())
+                    matched_y = None
+                    for net_name in r_nets:
+                        if net_name in pin_y_by_net:
+                            matched_y = pin_y_by_net[net_name]
+                            break
+
+                    if matched_y is not None:
+                        placements.append((r_comp, r_x, matched_y))
+                        if led_comp:
+                            placements.append((led_comp, led_x, matched_y))
+                    else:
+                        # Fallback (shouldn't happen for bus indicator LEDs)
+                        placements.append((r_comp, r_x, 0.0))
+                        if led_comp:
+                            placements.append((led_comp, led_x, 0.0))
+            else:
+                for i, comp in enumerate(others):
+                    placements.append((comp, 0.0, i * CONN_PIN_PITCH))
 
         group_layouts[name] = placements
         group_sizes[name] = compute_group_size(placements)
 
-    # Compute absolute positions for each group
+    # --- Compute absolute positions ---
     total_placed = 0
-    cursor_x = BOARD_MARGIN
-    cursor_y = BOARD_MARGIN
 
-    # Row 0
-    row0_max_h = 0
-    for name in group_order_row0:
-        if name not in group_layouts:
-            continue
-        layout = group_layouts[name]
-        w, h = group_sizes[name]
-        row0_max_h = max(row0_max_h, h)
+    # Column 0: Connector (root group) on the far left
+    col0_x = BOARD_MARGIN
+    col0_y = BOARD_MARGIN
+    root_w, root_h = group_sizes.get("root", (0, 0))
 
-        for comp, rel_x, rel_y in layout:
-            abs_x = cursor_x + rel_x
-            abs_y = cursor_y + rel_y
-            _place_component(pcb, comp, abs_x, abs_y, netlist_data)
+    # Column 1: addr_decoder stacked above control_logic
+    col1_x = col0_x + root_w + GROUP_GAP_X
+    col1_y = BOARD_MARGIN
+    dec_w, dec_h = group_sizes.get("addr_decoder", (0, 0))
+    ctrl_w, ctrl_h = group_sizes.get("control_logic", (0, 0))
+    col1_w = max(dec_w, ctrl_w)
+
+    # Column 2+: RAM bytes in 2-col × 4-row grid (column-major: down first)
+    #   Col 0: byte_0, byte_1, byte_2, byte_3
+    #   Col 1: byte_4, byte_5, byte_6, byte_7
+    ram_x = col1_x + col1_w + GROUP_GAP_X
+    ram_y = BOARD_MARGIN
+
+    byte_col0 = ["byte_0", "byte_1", "byte_2", "byte_3"]
+    byte_col1 = ["byte_4", "byte_5", "byte_6", "byte_7"]
+    all_bytes = byte_col0 + byte_col1
+
+    # Compute byte grid dimensions
+    byte_col_w = max((group_sizes.get(b, (0, 0))[0] for b in all_bytes), default=0)
+    byte_row_h = max((group_sizes.get(b, (0, 0))[1] for b in all_bytes), default=0)
+
+    # Total RAM area height
+    ram_total_h = 4 * byte_row_h + 3 * GROUP_GAP_Y
+
+    # Vertically center connector and decode/ctrl column with RAM area
+    col0_y = BOARD_MARGIN + max(0, (ram_total_h - root_h) / 2)
+    # Stack decoder + ctrl to fill the height next to RAM
+    col1_y = BOARD_MARGIN
+
+    # Place connector (root)
+    if "root" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["root"]:
+            _place_component(pcb, comp, col0_x + rel_x, col0_y + rel_y, netlist_data)
             total_placed += 1
 
-        cursor_x += w + GROUP_GAP_X
-
-    # Row 1
-    cursor_x = BOARD_MARGIN
-    cursor_y += row0_max_h + GROUP_GAP_Y
-    row1_max_h = 0
-    for name in group_order_row1:
-        if name not in group_layouts:
-            continue
-        layout = group_layouts[name]
-        w, h = group_sizes[name]
-        row1_max_h = max(row1_max_h, h)
-
-        for comp, rel_x, rel_y in layout:
-            abs_x = cursor_x + rel_x
-            abs_y = cursor_y + rel_y
-            _place_component(pcb, comp, abs_x, abs_y, netlist_data)
+    # Place addr_decoder (top of column 1)
+    if "addr_decoder" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["addr_decoder"]:
+            _place_component(pcb, comp, col1_x + rel_x, col1_y + rel_y, netlist_data)
             total_placed += 1
 
-        cursor_x += w + GROUP_GAP_X
-
-    # Row 2
-    cursor_x = BOARD_MARGIN
-    cursor_y += row1_max_h + GROUP_GAP_Y
-    row2_max_h = 0
-    for name in group_order_row2:
-        if name not in group_layouts:
-            continue
-        layout = group_layouts[name]
-        w, h = group_sizes[name]
-        row2_max_h = max(row2_max_h, h)
-
-        for comp, rel_x, rel_y in layout:
-            abs_x = cursor_x + rel_x
-            abs_y = cursor_y + rel_y
-            _place_component(pcb, comp, abs_x, abs_y, netlist_data)
+    # Place control_logic (below addr_decoder in column 1)
+    ctrl_y = col1_y + dec_h + GROUP_GAP_Y
+    if "control_logic" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["control_logic"]:
+            _place_component(pcb, comp, col1_x + rel_x, ctrl_y + rel_y, netlist_data)
             total_placed += 1
 
-        cursor_x += w + GROUP_GAP_X
+    # Place RAM bytes: column-major (down first, then right)
+    for col_idx, byte_col in enumerate([byte_col0, byte_col1]):
+        bx = ram_x + col_idx * (byte_col_w + GROUP_GAP_X)
+        for row_idx, name in enumerate(byte_col):
+            if name not in group_layouts:
+                continue
+            by = ram_y + row_idx * (byte_row_h + GROUP_GAP_Y)
+            for comp, rel_x, rel_y in group_layouts[name]:
+                _place_component(pcb, comp, bx + rel_x, by + rel_y, netlist_data)
+                total_placed += 1
+
+    # Place control logic below RAM: write_clk_gen + read_oe_gen
+    ctrl_row_y = ram_y + ram_total_h + GROUP_GAP_Y
+    ctrl_row_x = ram_x
+    for name in ["write_clk_gen", "read_oe_gen"]:
+        if name not in group_layouts:
+            continue
+        w, h = group_sizes[name]
+        for comp, rel_x, rel_y in group_layouts[name]:
+            _place_component(pcb, comp, ctrl_row_x + rel_x, ctrl_row_y + rel_y, netlist_data)
+            total_placed += 1
+        ctrl_row_x += w + GROUP_GAP_X
 
     print(f"  Total components placed: {total_placed}")
 

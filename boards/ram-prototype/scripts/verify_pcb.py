@@ -9,6 +9,7 @@ Runs three DRC passes:
 
 Plus board-specific checks:
 - Board outline present and reasonable size
+- All components within board outline
 - All netlist components placed
 - Power planes defined (GND on In1.Cu, VCC on In2.Cu)
 
@@ -149,6 +150,50 @@ def check_power_planes(board):
     return issues
 
 
+def check_components_inside_outline(board):
+    """Check that all components are placed within the board outline."""
+    issues = []
+
+    # Extract board outline bounding box from Edge.Cuts
+    xs, ys = [], []
+    for item in board.graphicItems:
+        layer = getattr(item, 'layer', None)
+        if layer != "Edge.Cuts":
+            continue
+        start = getattr(item, 'start', None)
+        end = getattr(item, 'end', None)
+        if start:
+            xs.append(start.X)
+            ys.append(start.Y)
+        if end:
+            xs.append(end.X)
+            ys.append(end.Y)
+
+    if not xs or not ys:
+        # No outline to check against (check_board_outline will catch this)
+        return issues
+
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    outside = []
+    for fp in board.footprints:
+        x, y = fp.position.X, fp.position.Y
+        if x < min_x or x > max_x or y < min_y or y > max_y:
+            ref = "?"
+            if "Reference" in fp.properties:
+                ref = fp.properties["Reference"]
+            outside.append(f"{ref} at ({x:.1f}, {y:.1f})")
+
+    if outside:
+        for desc in outside:
+            issues.append(f"  Component outside board outline: {desc}")
+    else:
+        print(f"  All components within board outline")
+
+    return issues
+
+
 def check_4layer_stackup(board):
     """Check that the board has 4 copper layers configured."""
     issues = []
@@ -210,6 +255,12 @@ def main():
         for issue in comp_issues:
             print(issue)
         total_errors += len(comp_issues)
+
+    inside_issues = check_components_inside_outline(board)
+    if inside_issues:
+        for issue in inside_issues:
+            print(issue)
+        total_errors += len(inside_issues)
 
     power_issues = check_power_planes(board)
     if power_issues:
