@@ -97,6 +97,51 @@ def snap(v):
 # Library symbol loading -- each .kicad_sch embeds its own copy
 # --------------------------------------------------------------
 
+def _block_has_hide(text, keyword):
+    """Check if a (keyword ...) s-expression block contains (hide yes).
+
+    Finds the block starting with ``(keyword`` in *text*, extracts it by
+    matching parentheses, and returns True if ``(hide yes)`` appears inside.
+    """
+    start = text.find(f"({keyword}")
+    if start == -1:
+        return False
+    # Walk forward from '(' matching parens to find the block end
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                block = text[start:i + 1]
+                return "(hide yes)" in block
+    return False
+
+
+def _parse_pin_hide_flags(lib_path, wanted):
+    """Parse raw .kicad_sym text to detect (pin_numbers (hide yes)) and
+    (pin_names ... (hide yes)) directives that kiutils doesn't read.
+
+    Returns {sym_name: (hide_pin_numbers: bool, hide_pin_names: bool)}.
+    """
+    text = open(lib_path, "r", encoding="utf-8").read()
+    result = {}
+    for sym_name in wanted:
+        # Match the top-level symbol block header (one-tab indent)
+        pat = re.compile(r'^\t\(symbol "' + re.escape(sym_name) + r'"', re.MULTILINE)
+        m = pat.search(text)
+        if not m:
+            continue
+        # Grab enough of the block header to find pin_numbers/pin_names
+        # (they appear right after the symbol name, before properties)
+        block = text[m.start():m.start() + 500]
+        hide_numbers = _block_has_hide(block, "pin_numbers")
+        hide_names = _block_has_hide(block, "pin_names")
+        result[sym_name] = (hide_numbers, hide_names)
+    return result
+
+
 def load_lib_symbols():
     """Load symbol definitions from KiCad stock libraries."""
     symbols = {}
@@ -118,9 +163,16 @@ def load_lib_symbols():
                 f"KiCad stock library not found: {lib_path}\n"
                 "Install KiCad 9.0 or adjust kicad_sym_dir path."
             )
+        # Parse raw file for pin hide flags that kiutils doesn't read
+        hide_flags = _parse_pin_hide_flags(lib_path, wanted)
         lib = SymbolLib.from_file(lib_path)
         for sym in lib.symbols:
             if sym.libId in wanted:
+                hn, hname = hide_flags.get(sym.libId, (False, False))
+                if hn:
+                    sym.hidePinNumbers = True
+                if hname:
+                    sym.pinNamesHide = True
                 symbols[sym.libId] = sym
 
     return symbols
@@ -362,9 +414,8 @@ class SchematicBuilder:
         lib_prefix = SYMBOL_LIB_MAP.get(sym_name, "")
         if lib_prefix:
             sym_copy.libId = f"{lib_prefix}:{sym_name}"
-        # Hide pin names on LED symbols (they show "K" and "A" text on schematic)
-        if sym_name in ("LED_Small",):
-            sym_copy.pinNamesHide = True
+        # pin_numbers/pin_names (hide yes) flags are now parsed from the raw
+        # library files in load_lib_symbols() and already set on the symbol.
         self.sch.libSymbols.append(sym_copy)
         self._embedded_symbols.add(sym_name)
 
@@ -395,42 +446,60 @@ class SchematicBuilder:
         sym.onBoard = True
         sym.uuid = uid()
 
-        # Properties: Reference, Value, Footprint, Datasheet
+        # Properties: copy positions + effects from library symbol defaults,
+        # transforming positions from library space to schematic space.
+        # This matches what KiCad does when you place a component manually.
         all_syms = get_lib_symbols()
         lib_sym = all_syms[lib_name]
-        fp_val = ""
-        ds_val = ""
-        for p in lib_sym.properties:
-            if p.key == "Footprint":
-                fp_val = p.value
-            elif p.key == "Datasheet":
-                ds_val = p.value
 
-        # Hide reference for power symbols (#PWR, #FLG) and passive LED chain
-        # components (R, D) to reduce clutter — their sequential numbers aren't
-        # helpful.  IC refs (U##) and connector (J##) remain visible.
-        hide_ref = ref_prefix.startswith("#") or ref_prefix in ("R", "D")
+        # Library-only metadata — not copied to instances
+        _skip_keys = {"ki_keywords", "ki_fp_filters"}
+        # Properties hidden by KiCad convention in instances
+        _hide_keys = {"Footprint", "Datasheet", "Description", "Sim.Pins"}
+        # Text value overrides
+        _overrides = {"Reference": ref, "Value": value}
 
-        sym.properties = [
-            Property(key="Reference", value=ref, id=0,
-                     position=Position(X=x, Y=y - 5 * GRID, angle=0),
-                     effects=Effects(font=Font(width=1.27, height=1.27), hide=hide_ref)),
-            Property(key="Value", value=value, id=1,
-                     position=Position(X=x, Y=y + 2 * GRID, angle=0),
-                     effects=Effects(font=Font(width=1.27, height=1.27), hide=True)),
-            Property(key="Footprint", value=fp_val, id=2,
-                     position=Position(X=x, Y=y + 3 * GRID, angle=0),
-                     effects=Effects(font=Font(width=1.27, height=1.27), hide=True)),
-            Property(key="Datasheet", value=ds_val, id=3,
-                     position=Position(X=x, Y=y + 4 * GRID, angle=0),
-                     effects=Effects(font=Font(width=1.27, height=1.27), hide=True)),
-        ]
+        rad = math.radians(angle)
+        cos_a = round(math.cos(rad), 10)
+        sin_a = round(math.sin(rad), 10)
+
+        sym.properties = []
+        for lib_prop in lib_sym.properties:
+            if lib_prop.key in _skip_keys:
+                continue
+
+            prop_value = _overrides.get(lib_prop.key, lib_prop.value)
+
+            # Transform library position to schematic position
+            lx = lib_prop.position.X if lib_prop.position else 0
+            ly = lib_prop.position.Y if lib_prop.position else 0
+            prop_text_angle = (lib_prop.position.angle or 0) if lib_prop.position else 0
+            bx, by = lx, -ly  # library Y-up → schematic Y-down
+            dx = snap(cos_a * bx + sin_a * by)
+            dy = snap(-sin_a * bx + cos_a * by)
+
+            # Copy effects from library
+            effects = copy.deepcopy(lib_prop.effects) if lib_prop.effects else Effects()
+            if lib_prop.key == "Reference" and ref_prefix.startswith("#"):
+                effects.hide = True
+            elif lib_prop.key in _hide_keys:
+                effects.hide = True
+
+            sym.properties.append(Property(
+                key=lib_prop.key, value=prop_value,
+                id=len(sym.properties),
+                position=Position(X=snap(x + dx), Y=snap(y + dy),
+                                  angle=prop_text_angle),
+                effects=effects,
+            ))
+
         if extra_props:
             for k, v in extra_props.items():
                 sym.properties.append(
                     Property(key=k, value=v, id=len(sym.properties),
                              position=Position(X=x, Y=y, angle=0),
-                             effects=Effects(font=Font(width=1.27, height=1.27), hide=True))
+                             effects=Effects(font=Font(width=1.27, height=1.27),
+                                             hide=True))
                 )
 
         if mirror:
@@ -1203,18 +1272,16 @@ def generate_root_sheet():
         sheet.position = Position(X=sx, Y=sy)
         sheet.width = sw
         sheet.height = sh
-        sheet.stroke = Stroke(width=0.1)
+        sheet.stroke = Stroke()
         sheet.fill = fill_color
         sheet.uuid = uid()
         sheet.sheetName = Property(
             key="Sheet name", value=name, id=0,
             position=Position(X=sx, Y=sy - 1.27, angle=0),
-            effects=Effects(font=Font(width=1.27, height=1.27)),
         )
         sheet.fileName = Property(
             key="Sheet file", value=filename, id=1,
             position=Position(X=sx + sw, Y=sy + sh + 1.27, angle=0),
-            effects=Effects(font=Font(width=1.27, height=1.27)),
         )
         # Count left and right pins separately for Y positioning
         left_pins_list = [(pn, pt) for pn, pt in pins if pn not in right_pins]
