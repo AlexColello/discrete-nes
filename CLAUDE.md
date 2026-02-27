@@ -43,19 +43,26 @@ discrete-nes/
 │   │   ├── sym-lib-table   # Symbol library table (copy to projects)
 │   │   └── fp-lib-table    # Footprint library table (copy to projects)
 │   └── python/
-│       ├── kicad_gen/      # Schematic and PCB generation utilities
-│       │   ├── common.py   # Part lookup, LED resistor calc, DSBGA constants
-│       │   ├── schematic.py # Schematic generation with kiutils
-│       │   └── pcb.py      # PCB layout generation with kiutils
+│       ├── kicad_gen/      # Shared schematic/PCB generation library
+│       │   ├── __init__.py # Re-exports: SchematicBuilder, snap, uid, GRID, etc.
+│       │   ├── common.py   # Constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP), snap(), uid()
+│       │   ├── symbols.py  # Library loading, raw text extraction, pin offset discovery
+│       │   ├── schematic.py # SchematicBuilder class (place, wire, LED, labels, save)
+│       │   ├── verify.py   # parse_schematic, 11 general checks, run_erc, UnionFind
+│       │   └── pcb.py      # PCB layout generation with kiutils (stub)
 │       └── hdl_parser/     # Verilog to discrete gates conversion
 │           └── verilog_to_gates.py
 ├── boards/
 │   ├── ram-prototype/      # First board - 8 byte RAM prototype
-│   │   ├── scripts/        # Generation scripts for this board
+│   │   ├── scripts/        # Board-specific generate + verify scripts
 │   │   └── docs/           # Board-specific documentation
 │   ├── cpu-2a03/           # CPU board (future)
 │   ├── ppu-2c02/           # PPU board (future)
 │   └── interconnect/       # Board interconnections (future)
+├── .claude/
+│   ├── hooks/
+│   │   └── auto-verify.sh  # PostToolUse hook: auto-runs verify after generate
+│   └── settings.json       # Hook configuration
 ├── reference/              # Documentation (NO submodules)
 │   ├── README.md           # How to access MiSTer NES core
 │   └── docs/               # NES architecture documentation
@@ -95,6 +102,8 @@ python scripts/verify_schematics.py
 3. Fix any errors before considering the change complete
 4. Target: **0 errors, 0 warnings**. Both errors and warnings cause verification failure
 
+**Auto-verify hook:** A PostToolUse hook (`.claude/hooks/auto-verify.sh`) automatically runs `verify_schematics.py --no-erc` after any Bash command that executes a `generate_*.py` script. This catches wire overlap / wire-through-pin bugs immediately without needing to remember to run verify manually.
+
 The verification script catches bugs that are invisible in KiCad's GUI and that ERC alone misses — especially wire overlaps (silent net merges) and wire-through-pin (valid but unintended connections). See "Verification Script Architecture" section below for details on what each check does and how to adapt the script for new boards.
 
 Output goes to `verify_output/` (gitignored), including SVGs for visual inspection.
@@ -133,7 +142,7 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 
 ### kiutils + KiCad 9 ERC Lessons
 
-Hard-won requirements for generating schematics with kiutils that pass KiCad 9 ERC. See `boards/ram-prototype/scripts/generate_ram.py` for working implementation.
+Hard-won requirements for generating schematics with kiutils that pass KiCad 9 ERC. The shared `SchematicBuilder` in `shared/python/kicad_gen/schematic.py` implements all of these; board scripts (e.g., `boards/ram-prototype/scripts/generate_ram.py`) import it.
 
 **Format requirements:**
 - Set `sch.version = 20250114` (KiCad 9 format) — the kiutils default (20211014, KiCad 6) causes `wire_dangling` on every wire-to-pin connection
@@ -159,7 +168,7 @@ Hard-won requirements for generating schematics with kiutils that pass KiCad 9 E
 
 **Wire routing rules (critical for ERC-clean schematics):**
 - **Orthogonal wires only** — KiCad doesn't connect diagonal wires. Route as L-shapes (horizontal then vertical)
-- **Segmented trunks required** — A single long vertical wire with junctions doesn't reliably connect T-branches in KiCad 9. Split vertical bus/trunk wires into separate segments between each branch point. Use `add_segmented_trunk()` helper in `generate_ram.py`
+- **Segmented trunks required** — A single long vertical wire with junctions doesn't reliably connect T-branches in KiCad 9. Split vertical bus/trunk wires into separate segments between each branch point. Use `SchematicBuilder.add_segmented_trunk()` from `kicad_gen`
 - **Split wires at LED junction points** — When `place_led_below()` adds a junction on a main wire, the main wire MUST be split into two segments at that junction X coordinate
 - **Wire overlap = net merge** — Two wires sharing any segment (same Y, overlapping X range) silently merge their nets. Always verify horizontal wires at the same Y don't overlap
 - **T-connections from wire endpoints** — A wire endpoint landing on the middle of another wire creates a connection (even without a junction dot). When routing horizontal branch wires that cross vertical trunks, verify the crossing Y doesn't match any trunk segment endpoint Y
@@ -245,35 +254,39 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - Pin library coordinates use Y-up; apply Y negation + rotation for schematic space
 
 **Known limitations:**
-- Embedded lib_symbols are post-processed to match library files exactly (kiutils drops `exclude_from_sim`, property/pin `hide` flags) — see `_fix_lib_symbols()` in `generate_ram.py`
+- Embedded lib_symbols are post-processed to match library files exactly (kiutils drops `exclude_from_sim`, property/pin `hide` flags) — see `SchematicBuilder._fix_lib_symbols()` in `shared/python/kicad_gen/schematic.py`
 - Use `round(v, 2)` on all coordinates to eliminate floating-point noise (e.g., `83.82000000000001`)
 
 ### Verification Script Architecture
 
-`verify_schematics.py` is the safety net that catches wire routing bugs before they become ERC failures. **Every board should have an equivalent script.** The RAM prototype script (`boards/ram-prototype/scripts/verify_schematics.py`) is the reference implementation.
+Verification has two layers: **shared general-purpose checks** in `shared/python/kicad_gen/verify.py` and **board-specific scripts** (e.g., `boards/ram-prototype/scripts/verify_schematics.py`). The shared module is the reusable engine; board scripts import it and add board-specific netlist checks.
 
-**General-purpose checks (reusable for any board):**
+**General-purpose checks (in `kicad_gen.verify`, reusable for any board):**
 1. **Diagonal wires** — KiCad doesn't connect them; all routing must be orthogonal
 2. **Wire overlaps (NET MERGE)** — same-axis wires with overlapping ranges silently merge nets. This is the #1 cause of hard-to-debug ERC failures
 3. **Dangling wire endpoints** — endpoints not touching any pin, wire, junction, or label
 4. **Wire through pin** — wire interior passing through a component pin (unintended connection)
-5. **T-junctions without dots** — warning only, but looks wrong in the GUI
-6. **Wire overlaps pin stub** — wire doubling a pin's built-in stub line
-7. **Component overlap** — non-power parts placed on top of each other
-8. **Content on sheet blocks** — wires/components inside hierarchy sheet block areas
-9. **Page boundary** — content outside the drawing border
-10. **ERC via kicad-cli** — full hierarchy + per-sub-sheet standalone (filtering expected standalone artifacts)
+5. **Wire through body** — wire passing through a component's bounding box
+6. **T-junctions without dots** — warning only, but looks wrong in the GUI
+7. **Wire overlaps pin stub** — wire doubling a pin's built-in stub line
+8. **Component overlap** — non-power parts placed on top of each other
+9. **Content on sheet blocks** — wires/components inside hierarchy sheet block areas
+10. **Page boundary** — content outside the drawing border
+11. **Power orientation** — power symbols facing wrong direction
+- **ERC via kicad-cli** — `run_erc()` handles full hierarchy + per-sub-sheet standalone (filtering expected standalone artifacts via `_is_standalone_artifact()`)
+- **`run_all_checks(filepath, data)`** — convenience function that runs all 11 checks and returns `[(category, issues, is_error), ...]`
+- **`UnionFind`** class — exported for board-specific netlist connectivity checks
 
 **Board-specific checks (must be customized per board):**
-- **Netlist connectivity** — uses union-find to build nets from wire/label/junction connectivity, then verifies expected connections (e.g., "Address Decoder SEL0 connected to Write Clk Gen SEL0") and signal isolation (e.g., "A0 not merged with A1"). The expected-connections list is the main board-specific part
+- **Netlist connectivity** — uses `UnionFind` from `kicad_gen.verify` to build nets from wire/label/junction connectivity, then verifies expected connections (e.g., "Address Decoder SEL0 connected to Write Clk Gen SEL0") and signal isolation (e.g., "A0 not merged with A1"). The expected-connections list is the main board-specific part
 - **SCHEMATIC_FILES list** — which .kicad_sch files to check
-- **Standalone ERC artifact filtering** — `_is_standalone_artifact()` filters out expected errors when running ERC on sub-sheets without their parent hierarchy
 
 **Process for new boards:**
-1. Copy `verify_schematics.py` as a starting point
-2. Update SCHEMATIC_FILES for the new board's sheets
-3. Rewrite `check_netlist()` with the new board's expected connections and isolation pairs
-4. General checks (1-9) work as-is — they parse any .kicad_sch file
+1. Create a new `verify_schematics.py` that imports from `kicad_gen.verify` (see `boards/ram-prototype/scripts/verify_schematics.py` as a template — it's only ~340 lines thanks to shared imports)
+2. Define `SCHEMATIC_FILES` for the new board's sheets
+3. Write `check_netlist()` with the new board's expected connections and isolation pairs
+4. Call `run_all_checks(filepath, data)` for general checks — they work on any .kicad_sch file
+5. Call `run_erc()` for kicad-cli ERC
 
 **What the script catches that ERC alone misses:**
 - Wire overlaps (KiCad silently merges nets — no ERC error, just wrong connectivity)
@@ -434,28 +447,20 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 
 ### Phase 3: Shared Library Development (Parallel to Phase 2)
 
-Build out shared KiCad libraries:
-- **Symbols needed:**
-  - SN74LVC1G00, 1G02, 1G04, 1G08, 1G32, 1G86 (logic gates)
-  - SN74LVC1G79 (D flip-flop, DSBGA)
-  - SN74LVC1G74 (D flip-flop with set/reset, X2SON — not DSBGA)
-  - SN74LVC1G07, 1G125 (buffers/drivers)
-  - 0402 LED symbols
-  - Power connectors
+**Python generation library (`shared/python/kicad_gen/`) — COMPLETED:**
+- [x] `common.py` — constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP), snap(), uid(), part lookup, LED resistor calc
+- [x] `symbols.py` — library loading, raw text extraction, ERC-based pin offset discovery, caching
+- [x] `schematic.py` — `SchematicBuilder` class (place, wire, LED, labels, trunks, power, save, lib fixup)
+- [x] `verify.py` — `parse_schematic`, 11 general checks, `run_all_checks`, `run_erc`, `UnionFind`
+- [x] `__init__.py` — re-exports key public API
+- [ ] `pcb.py` — PCB layout generation (stub, pending Phase 2 Step 3)
 
-- **Footprints needed:**
-  - DSBGA (YZP) 5-ball, 6-ball variants
-  - X2SON (DQE) 8-pin (for SN74LVC1G74)
-  - 0402 SMD LED
-  - 0402 SMD resistor
-  - Power connectors
-  - Board interconnect connectors
-
-- **Python utilities:**
-  - LED array generation helpers
-  - Bus routing helpers
-  - Hierarchical sheet management
-  - DSBGA grid placement
+**KiCad symbol/footprint libraries (still needed):**
+- SN74LVC1G00, 1G02, 1G04, 1G08, 1G32, 1G86 (logic gates)
+- SN74LVC1G79 (D flip-flop, DSBGA), SN74LVC1G74 (D flip-flop, X2SON)
+- SN74LVC1G07, 1G125 (buffers/drivers)
+- 0402 LED/resistor, power connectors, board interconnect connectors
+- DSBGA (YZP) 5-ball/6-ball, X2SON (DQE) 8-pin footprints
 
 ### Phase 4: FPGA Logic Extraction (Research Phase)
 
@@ -563,6 +568,7 @@ After RAM prototype success:
 
 **Phase 1 COMPLETE** (including migration to TI Little Logic DSBGA)
 **Phase 2 Steps 1-2 COMPLETE** (schematic generation with ERC-clean output)
+**Phase 3 Python library COMPLETE** (shared kicad_gen extracted from RAM prototype scripts)
 **Next: Phase 2 Step 3 - PCB Layout**
 
 ## Important Notes for Future Sessions

@@ -5,6 +5,8 @@ Provides shared functions and constants used across schematic and PCB generation
 Configured for TI Little Logic (SN74LVC1G) in DSBGA (NanoFree) packages.
 """
 
+import os
+import uuid as _uuid
 from typing import Dict, Tuple
 
 # Power supply voltages
@@ -170,3 +172,47 @@ def grid_position(row: int, col: int, spacing: Tuple[float, float] = (4.0, 4.0))
         (x, y) position in mm
     """
     return (col * spacing[0], row * spacing[1])
+
+
+# ==============================================================
+# Schematic generation constants and helpers
+# ==============================================================
+
+# Schematic grid (KiCad default = 1.27 mm, we use 2.54 multiples)
+GRID = 2.54
+SYM_SPACING_Y = 10 * GRID    # vertical spacing between symbol rows (gates)
+
+# kicad-cli path (auto-detect from Program Files)
+KICAD_CLI = r"C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
+
+# Map symbol base names to their KiCad library name prefix
+SYMBOL_LIB_MAP = {
+    "74LVC1G00": "74xGxx",
+    "74LVC1G04": "74xGxx",
+    "74LVC1G08": "74xGxx",
+    "74LVC1G11": "74xGxx",
+    "74LVC1G79": "74xGxx",
+    "74LVC1G125": "74xGxx",
+    "R_Small": "Device",
+    "LED_Small": "Device",
+    "C_Small": "Device",
+    "VCC": "power",
+    "GND": "power",
+    "PWR_FLAG": "power",
+    "Conn_01x16": "Connector_Generic",
+}
+
+
+def uid():
+    """Generate a new UUID string."""
+    return str(_uuid.uuid4())
+
+
+def snap(v):
+    """Round a coordinate to 2 decimal places to eliminate floating-point noise.
+
+    KiCad internally converts mm to integer units (mils/nm).  Tiny FP errors
+    like 83.82000000000001 vs 83.82 can cause wire-to-pin mismatches when
+    KiCad parses them from the file independently.
+    """
+    return round(v, 2)

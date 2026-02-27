@@ -19,32 +19,24 @@ Produces:
   byte.kicad_sch             -- 8 DFFs + 8 tri-state buffers (shared by all 8 byte instances)
 """
 
-import copy
-import json
-import math
 import os
-import re
-import subprocess
 import sys
-import uuid as _uuid
 
-from kiutils.schematic import Schematic
-from kiutils.symbol import Symbol, SymbolLib, SymbolPin
+# Add shared library to path
+sys.path.insert(0, os.path.normpath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "shared", "python")))
+
+from kicad_gen import SchematicBuilder, snap, uid, GRID, SYM_SPACING_Y
+from kicad_gen.symbols import get_pin_offsets
+
 from kiutils.items.schitems import (
-    SchematicSymbol, Connection, LocalLabel, GlobalLabel,
-    HierarchicalLabel, HierarchicalSheet, HierarchicalPin,
-    HierarchicalSheetInstance, HierarchicalSheetProjectInstance,
-    HierarchicalSheetProjectPath, SymbolInstance,
+    HierarchicalSheet, HierarchicalPin,
+    HierarchicalSheetProjectInstance, HierarchicalSheetProjectPath,
     SymbolProjectInstance, SymbolProjectPath,
-    Junction,
 )
 from kiutils.items.common import (
-    Position, Property, Effects, Font, Justify, Stroke, Fill, ColorRGBA,
-    PageSettings,
+    Position, Property, Effects, Font, Justify, Stroke, ColorRGBA,
 )
-from kiutils.items.syitems import SyRect, SyPolyLine
-
-KICAD_CLI = r"C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
 
 # --------------------------------------------------------------
 # Constants
@@ -52,777 +44,8 @@ KICAD_CLI = r"C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
 PROJECT_NAME = "ram"
 BOARD_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 
-# Schematic grid (KiCad default = 1.27 mm, we use 2.54 multiples)
-GRID = 2.54
-SYM_SPACING_Y = 10 * GRID    # vertical spacing between symbol rows (gates)
 DFF_SPACING_Y = 13 * GRID    # vertical spacing between DFF rows in byte sheet
 LED_GAP_X = 3 * GRID         # gap from output pin to LED chain center
-PWR_WIRE_LEN = GRID          # power symbol offset from pin
-LABEL_STUB = GRID             # wire stub length for labels
-
-# Map symbol base names to their KiCad library name prefix
-SYMBOL_LIB_MAP = {
-    "74LVC1G00": "74xGxx",
-    "74LVC1G04": "74xGxx",
-    "74LVC1G08": "74xGxx",
-    "74LVC1G11": "74xGxx",
-    "74LVC1G79": "74xGxx",
-    "74LVC1G125": "74xGxx",
-    "R_Small": "Device",
-    "LED_Small": "Device",
-    "C_Small": "Device",
-    "VCC": "power",
-    "GND": "power",
-    "PWR_FLAG": "power",
-    "Conn_01x16": "Connector_Generic",
-}
-
-
-def uid():
-    """Generate a new UUID string."""
-    return str(_uuid.uuid4())
-
-
-def snap(v):
-    """Round a coordinate to 2 decimal places to eliminate floating-point noise.
-
-    KiCad internally converts mm to integer units (mils/nm).  Tiny FP errors
-    like 83.82000000000001 vs 83.82 can cause wire-to-pin mismatches when
-    KiCad parses them from the file independently.
-    """
-    return round(v, 2)
-
-
-# --------------------------------------------------------------
-# Library symbol loading -- each .kicad_sch embeds its own copy
-# --------------------------------------------------------------
-
-def _block_has_hide(text, keyword):
-    """Check if a (keyword ...) s-expression block contains (hide yes).
-
-    Finds the block starting with ``(keyword`` in *text*, extracts it by
-    matching parentheses, and returns True if ``(hide yes)`` appears inside.
-    """
-    start = text.find(f"({keyword}")
-    if start == -1:
-        return False
-    # Walk forward from '(' matching parens to find the block end
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                block = text[start:i + 1]
-                return "(hide yes)" in block
-    return False
-
-
-def _parse_pin_hide_flags(lib_path, wanted):
-    """Parse raw .kicad_sym text to detect (pin_numbers (hide yes)) and
-    (pin_names ... (hide yes)) directives that kiutils doesn't read.
-
-    Returns {sym_name: (hide_pin_numbers: bool, hide_pin_names: bool)}.
-    """
-    text = open(lib_path, "r", encoding="utf-8").read()
-    result = {}
-    for sym_name in wanted:
-        # Match the top-level symbol block header (one-tab indent)
-        pat = re.compile(r'^\t\(symbol "' + re.escape(sym_name) + r'"', re.MULTILINE)
-        m = pat.search(text)
-        if not m:
-            continue
-        # Grab enough of the block header to find pin_numbers/pin_names
-        # (they appear right after the symbol name, before properties)
-        block = text[m.start():m.start() + 500]
-        hide_numbers = _block_has_hide(block, "pin_numbers")
-        hide_names = _block_has_hide(block, "pin_names")
-        result[sym_name] = (hide_numbers, hide_names)
-    return result
-
-
-def _extract_raw_symbol(text, sym_name):
-    """Extract the raw s-expression block for a symbol from library file text.
-
-    Returns the block as a string (one-tab indent, matching the library file
-    format), or None if not found.
-    """
-    pat = re.compile(r'^\t\(symbol "' + re.escape(sym_name) + r'"', re.MULTILINE)
-    m = pat.search(text)
-    if not m:
-        return None
-    depth = 0
-    for i in range(m.start(), len(text)):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return text[m.start():i + 1]
-    return None
-
-
-def load_lib_symbols():
-    """Load symbol definitions from KiCad stock libraries.
-
-    Also extracts the raw s-expression text for each symbol so that
-    ``SchematicBuilder.save()`` can replace kiutils' lossy serialization
-    with exact library text (fixing exclude_from_sim, property/pin hide
-    flags, and other attributes that kiutils drops).
-    """
-    symbols = {}
-    raw_texts = {}  # sym_name -> raw s-expression text from library file
-
-    kicad_sym_dir = r"C:\Program Files\KiCad\9.0\share\kicad\symbols"
-    stock_libs = {
-        "74xGxx.kicad_sym": [
-            "74LVC1G00", "74LVC1G04", "74LVC1G08",
-            "74LVC1G11", "74LVC1G79", "74LVC1G125",
-        ],
-        "Device.kicad_sym": ["R_Small", "LED_Small", "C_Small"],
-        "power.kicad_sym": ["VCC", "GND", "PWR_FLAG"],
-        "Connector_Generic.kicad_sym": ["Conn_01x16"],
-    }
-    for lib_file, wanted in stock_libs.items():
-        lib_path = os.path.join(kicad_sym_dir, lib_file)
-        if not os.path.exists(lib_path):
-            raise FileNotFoundError(
-                f"KiCad stock library not found: {lib_path}\n"
-                "Install KiCad 9.0 or adjust kicad_sym_dir path."
-            )
-        lib_text = open(lib_path, "r", encoding="utf-8").read()
-        lib_prefix = ""
-        # Determine the library prefix from SYMBOL_LIB_MAP
-        for sn in wanted:
-            if sn in SYMBOL_LIB_MAP:
-                lib_prefix = SYMBOL_LIB_MAP[sn]
-                break
-
-        # Extract raw text and parse pin hide flags
-        hide_flags = _parse_pin_hide_flags(lib_path, wanted)
-        for sn in wanted:
-            raw = _extract_raw_symbol(lib_text, sn)
-            if raw:
-                # Re-key with the "lib:name" prefix used in schematics
-                qualified = f"{lib_prefix}:{sn}" if lib_prefix else sn
-                # Replace the library indent with schematic indent (4 spaces)
-                # and rename the symbol to include the library prefix
-                fixed = raw.replace(
-                    f'(symbol "{sn}"',
-                    f'(symbol "{qualified}"',
-                    1,
-                )
-                raw_texts[sn] = fixed
-
-        lib = SymbolLib.from_file(lib_path)
-        for sym in lib.symbols:
-            if sym.libId in wanted:
-                hn, hname = hide_flags.get(sym.libId, (False, False))
-                if hn:
-                    sym.hidePinNumbers = True
-                if hname:
-                    sym.pinNamesHide = True
-                symbols[sym.libId] = sym
-
-    return symbols, raw_texts
-
-
-ALL_SYMBOLS = None   # lazy-loaded
-RAW_LIB_TEXTS = None  # lazy-loaded: {sym_name: raw s-expression text}
-
-
-def get_lib_symbols():
-    global ALL_SYMBOLS, RAW_LIB_TEXTS
-    if ALL_SYMBOLS is None:
-        ALL_SYMBOLS, RAW_LIB_TEXTS = load_lib_symbols()
-    return ALL_SYMBOLS
-
-
-def get_raw_lib_texts():
-    get_lib_symbols()  # ensure loaded
-    return RAW_LIB_TEXTS
-
-
-# --------------------------------------------------------------
-# Pin offset discovery via kicad-cli ERC
-# --------------------------------------------------------------
-
-PIN_OFFSETS = None  # lazy-loaded: {(sym_name, angle): {pin_num: (dx, dy)}}
-
-
-def _run_erc_for_pins(sch_path):
-    """Run kicad-cli ERC and parse pin positions from the JSON output.
-
-    Returns {ref: {pin_num: (x_mm, y_mm)}}.
-    ERC reports coordinates that need ×100 to convert to schematic mm.
-    """
-    erc_path = sch_path.replace(".kicad_sch", "_erc.json")
-    subprocess.run(
-        [KICAD_CLI, "sch", "erc", "--format", "json",
-         "--severity-all", "--output", erc_path, sch_path],
-        capture_output=True, text=True,
-    )
-    if not os.path.exists(erc_path):
-        return {}
-
-    with open(erc_path) as f:
-        data = json.load(f)
-
-    pins = {}
-    pat = re.compile(r"Symbol (\S+) Pin (\d+)")
-    for sheet in data.get("sheets", []):
-        for v in sheet.get("violations", []):
-            if v["type"] != "pin_not_connected":
-                continue
-            for item in v["items"]:
-                m = pat.search(item["description"])
-                if m:
-                    ref, pin_num = m.group(1), m.group(2)
-                    x_mm = round(item["pos"]["x"] * 100, 4)
-                    y_mm = round(item["pos"]["y"] * 100, 4)
-                    pins.setdefault(ref, {})[pin_num] = (x_mm, y_mm)
-
-    # Clean up temp files
-    for p in [erc_path, sch_path]:
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-    return pins
-
-
-def discover_pin_offsets():
-    """Discover pin position offsets for every (component, angle) we use.
-
-    Places one component at a known origin in a temp schematic, runs
-    kicad-cli ERC, and reads back absolute pin positions.  The offset is
-    just (reported_pos − origin).  KiCad handles all Y-negation and
-    rotation — we never compute it ourselves.
-
-    Returns {(sym_name, angle): {pin_num: (dx, dy)}}
-    """
-    # Every (symbol, ref_prefix, angle) combination used in the design
-    specs = [
-        ("74LVC1G04", "U", 0),
-        ("74LVC1G08", "U", 0),
-        ("74LVC1G00", "U", 0),
-        ("74LVC1G11", "U", 0),
-        ("74LVC1G79", "U", 0),
-        ("74LVC1G125", "U", 0),
-        ("R_Small", "R", 90),
-        ("LED_Small", "D", 180),
-        ("Conn_01x16", "J", 0),
-        ("Conn_01x16", "J", 180),
-    ]
-    origin = (100.0, 100.0)
-    offsets = {}
-
-    for sym_name, prefix, angle in specs:
-        temp_path = os.path.join(BOARD_DIR, "_pin_probe.kicad_sch")
-
-        # Build a minimal schematic with just one component
-        b = _MinimalBuilder()
-        b.place(sym_name, origin[0], origin[1], prefix, angle)
-        b.save(temp_path)
-
-        pin_map = _run_erc_for_pins(temp_path)
-        ref = f"{prefix}1"
-        if ref in pin_map:
-            offsets[(sym_name, angle)] = {
-                pin: (round(px - origin[0], 2), round(py - origin[1], 2))
-                for pin, (px, py) in pin_map[ref].items()
-            }
-        else:
-            print(f"  WARNING: no pins found for {sym_name} angle={angle}")
-
-    return offsets
-
-
-class _MinimalBuilder:
-    """Tiny helper that creates a one-component schematic for pin probing."""
-
-    def __init__(self):
-        self.sch = Schematic.create_new()
-        self.sch.version = 20250114
-        self.sch.uuid = uid()
-        self.sch.paper = PageSettings(paperSize="A4")
-        self._embedded = set()
-
-    def place(self, sym_name, x, y, prefix, angle):
-        if sym_name not in self._embedded:
-            sym_copy = copy.deepcopy(get_lib_symbols()[sym_name])
-            lib_pfx = SYMBOL_LIB_MAP.get(sym_name, "")
-            if lib_pfx:
-                sym_copy.libId = f"{lib_pfx}:{sym_name}"
-            self.sch.libSymbols.append(sym_copy)
-            self._embedded.add(sym_name)
-
-        s = SchematicSymbol()
-        lib_pfx = SYMBOL_LIB_MAP.get(sym_name, "")
-        s.libId = f"{lib_pfx}:{sym_name}" if lib_pfx else sym_name
-        s.position = Position(X=x, Y=y, angle=angle)
-        s.unit = 1
-        s.inBom = True
-        s.onBoard = True
-        s.uuid = uid()
-        ref = f"{prefix}1"
-        s.properties = [
-            Property(key="Reference", value=ref, id=0,
-                     position=Position(X=x, Y=y - 5, angle=0),
-                     effects=Effects(font=Font(width=1.27, height=1.27))),
-            Property(key="Value", value=sym_name, id=1,
-                     position=Position(X=x, Y=y + 5, angle=0),
-                     effects=Effects(font=Font(width=1.27, height=1.27), hide=True)),
-        ]
-        s.instances.append(SymbolProjectInstance(
-            name="probe",
-            paths=[SymbolProjectPath(
-                sheetInstancePath=f"/{self.sch.uuid}/",
-                reference=ref, unit=1,
-            )]
-        ))
-        self.sch.schematicSymbols.append(s)
-
-    def save(self, path):
-        self.sch.to_file(path)
-
-
-def _fallback_pin_offsets(sym_name, angle):
-    """Get pin offsets from library symbol when ERC probe fails.
-
-    Library coordinates use Y-up; schematic uses Y-down.
-    KiCad rotation convention is CW in schematic space.
-    """
-    lib_sym = get_lib_symbols()[sym_name]
-    pins = {}
-    for unit in lib_sym.units:
-        for pin in unit.pins:
-            lx, ly = pin.position.X, pin.position.Y
-            rad = math.radians(angle)
-            # Library Y-up -> Schematic Y-down, then CW rotation
-            bx, by = lx, -ly
-            dx = round(math.cos(rad) * bx + math.sin(rad) * by, 2)
-            dy = round(-math.sin(rad) * bx + math.cos(rad) * by, 2)
-            pins[pin.number] = (dx, dy)
-    return pins
-
-
-def get_pin_offsets():
-    """Return cached pin offsets, discovering them on first call."""
-    global PIN_OFFSETS
-    if PIN_OFFSETS is None:
-        print("Discovering pin offsets via kicad-cli ERC...")
-        PIN_OFFSETS = discover_pin_offsets()
-        print(f"  Discovered offsets for {len(PIN_OFFSETS)} component/angle combos")
-
-        # Fallback for any symbols where ERC didn't find pins
-        specs = [
-            ("74LVC1G04", 0), ("74LVC1G08", 0), ("74LVC1G00", 0),
-            ("74LVC1G11", 0), ("74LVC1G79", 0), ("74LVC1G125", 0),
-            ("R_Small", 90), ("LED_Small", 180), ("Conn_01x16", 0),
-            ("Conn_01x16", 180),
-        ]
-        for sym_name, angle in specs:
-            key = (sym_name, angle)
-            if key not in PIN_OFFSETS:
-                fallback = _fallback_pin_offsets(sym_name, angle)
-                if fallback:
-                    print(f"  Using library fallback for {sym_name} angle={angle}: {fallback}")
-                    PIN_OFFSETS[key] = fallback
-    return PIN_OFFSETS
-
-
-# --------------------------------------------------------------
-# Schematic builder helpers
-# --------------------------------------------------------------
-
-class SchematicBuilder:
-    """Convenience wrapper around a kiutils Schematic for building sheets."""
-
-    def __init__(self, title="", page_size="A3"):
-        self.sch = Schematic.create_new()
-        self.sch.version = 20250114  # KiCad 9 format (required for wire connectivity)
-        self.sch.generator = "eeschema"
-        self.sch.uuid = uid()
-        self.sch.paper = PageSettings(paperSize=page_size)
-        self._ref_counters = {}   # prefix -> next number
-        self._embedded_symbols = set()  # track which lib symbols we've embedded
-        self._pin_offsets = get_pin_offsets()
-
-    # -- reference designator allocation --
-
-    def _next_ref(self, prefix):
-        n = self._ref_counters.get(prefix, 1)
-        self._ref_counters[prefix] = n + 1
-        return f"{prefix}{n}"
-
-    # -- embed a library symbol definition (once per symbol type) --
-
-    def _ensure_lib_symbol(self, sym_name):
-        """Embed a library symbol into this schematic's libSymbols if not already there."""
-        if sym_name in self._embedded_symbols:
-            return
-        all_syms = get_lib_symbols()
-        if sym_name not in all_syms:
-            raise ValueError(f"Symbol '{sym_name}' not found in libraries")
-        sym_copy = copy.deepcopy(all_syms[sym_name])
-        lib_prefix = SYMBOL_LIB_MAP.get(sym_name, "")
-        if lib_prefix:
-            sym_copy.libId = f"{lib_prefix}:{sym_name}"
-        # pin_numbers/pin_names (hide yes) flags are now parsed from the raw
-        # library files in load_lib_symbols() and already set on the symbol.
-        self.sch.libSymbols.append(sym_copy)
-        self._embedded_symbols.add(sym_name)
-
-    # -- place a component --
-
-    def place_symbol(self, lib_name, x, y, ref_prefix="U", value=None,
-                     angle=0, mirror=None, extra_props=None):
-        """Place a symbol instance in the schematic.
-
-        Returns (reference_designator, pins_dict) where pins_dict maps
-        pin_number -> (schematic_x, schematic_y).
-
-        Pin positions come from kicad-cli ERC probing (done once at startup),
-        so no manual Y-negation or rotation math is needed.
-        """
-        x, y = snap(x), snap(y)
-        self._ensure_lib_symbol(lib_name)
-        ref = self._next_ref(ref_prefix)
-        if value is None:
-            value = lib_name
-
-        sym = SchematicSymbol()
-        lib_prefix = SYMBOL_LIB_MAP.get(lib_name, "")
-        sym.libId = f"{lib_prefix}:{lib_name}" if lib_prefix else lib_name
-        sym.position = Position(X=x, Y=y, angle=angle)
-        sym.unit = 1
-        sym.inBom = True
-        sym.onBoard = True
-        sym.uuid = uid()
-
-        # Properties: copy positions + effects from library symbol defaults,
-        # transforming positions from library space to schematic space.
-        # This matches what KiCad does when you place a component manually.
-        all_syms = get_lib_symbols()
-        lib_sym = all_syms[lib_name]
-
-        # Library-only metadata — not copied to instances
-        _skip_keys = {"ki_keywords", "ki_fp_filters"}
-        # Properties hidden by KiCad convention in instances
-        _hide_keys = {"Footprint", "Datasheet", "Description", "Sim.Pins"}
-        # Text value overrides
-        _overrides = {"Reference": ref, "Value": value}
-
-        rad = math.radians(angle)
-        cos_a = round(math.cos(rad), 10)
-        sin_a = round(math.sin(rad), 10)
-
-        sym.properties = []
-        for lib_prop in lib_sym.properties:
-            if lib_prop.key in _skip_keys:
-                continue
-
-            prop_value = _overrides.get(lib_prop.key, lib_prop.value)
-
-            # Transform library position to schematic position
-            lx = lib_prop.position.X if lib_prop.position else 0
-            ly = lib_prop.position.Y if lib_prop.position else 0
-            prop_text_angle = (lib_prop.position.angle or 0) if lib_prop.position else 0
-            bx, by = lx, -ly  # library Y-up → schematic Y-down
-            dx = snap(cos_a * bx + sin_a * by)
-            dy = snap(-sin_a * bx + cos_a * by)
-
-            # Copy effects from library
-            effects = copy.deepcopy(lib_prop.effects) if lib_prop.effects else Effects()
-            if lib_prop.key == "Reference" and ref_prefix.startswith("#"):
-                effects.hide = True
-            elif lib_prop.key in _hide_keys:
-                effects.hide = True
-
-            sym.properties.append(Property(
-                key=lib_prop.key, value=prop_value,
-                id=len(sym.properties),
-                position=Position(X=snap(x + dx), Y=snap(y + dy),
-                                  angle=prop_text_angle),
-                effects=effects,
-            ))
-
-        if extra_props:
-            for k, v in extra_props.items():
-                sym.properties.append(
-                    Property(key=k, value=v, id=len(sym.properties),
-                             position=Position(X=x, Y=y, angle=0),
-                             effects=Effects(font=Font(width=1.27, height=1.27),
-                                             hide=True))
-                )
-
-        if mirror:
-            sym.mirror = mirror
-
-        # Pin UUIDs — required for KiCad 9 wire connectivity
-        key = (lib_name, angle)
-        if key in self._pin_offsets:
-            sym.pins = {pin: uid() for pin in self._pin_offsets[key]}
-        else:
-            # For power symbols etc., get pins from the library symbol units
-            all_syms = get_lib_symbols()
-            if lib_name in all_syms:
-                lib_sym = all_syms[lib_name]
-                for unit in lib_sym.units:
-                    for p in unit.pins:
-                        sym.pins[p.number] = uid()
-
-        # Instance data
-        sym.instances.append(SymbolProjectInstance(
-            name=PROJECT_NAME,
-            paths=[SymbolProjectPath(
-                sheetInstancePath=f"/{self.sch.uuid}/",
-                reference=ref,
-                unit=1,
-            )]
-        ))
-
-        self.sch.schematicSymbols.append(sym)
-
-        # Look up pin positions from pre-discovered offsets
-        if key in self._pin_offsets:
-            pins = {pin: (snap(x + dx), snap(y + dy))
-                    for pin, (dx, dy) in self._pin_offsets[key].items()}
-        else:
-            pins = {}
-        return ref, pins
-
-    # -- power wiring helpers --
-
-    def wire_power(self, power_name, pin_pos, offset_x=0, offset_y=0, angle=0):
-        """Place power symbol near pin and wire to it."""
-        px, py = pin_pos
-        self.place_power(power_name, px + offset_x, py + offset_y, angle=angle)
-        self.add_wire(px, py, px + offset_x, py + offset_y)
-
-    def connect_power(self, pins, vcc_pin="5", gnd_pin="3"):
-        """Connect IC power pins by placing VCC/GND symbols directly at pin positions.
-
-        No wires needed — the power symbol's pin overlaps the IC's power pin
-        at the exact same position, creating a direct connection.
-        This avoids wire overlap issues between adjacent ICs.
-        """
-        self.place_power("VCC", *pins[vcc_pin])
-        self.place_power("GND", *pins[gnd_pin])
-
-    # -- place an LED + resistor pair (indicator for a gate output) --
-
-    def place_led_indicator(self, x, y):
-        """Place R + LED + GND chain at (x, y). Signal enters from left.
-
-        Layout (left to right): signal → R Pin 1 → R Pin 2 → LED Pin 2 → LED Pin 1 → GND
-
-        R_Small at angle=90:   Pin 1 at LEFT (dx=-2.54), Pin 2 at RIGHT (dx=+2.54)
-        LED_Small at angle=180: Pin 2/Anode at LEFT (dx=-2.54), Pin 1/Cathode at RIGHT (dx=+2.54)
-
-        Components are spaced apart so wires don't pass through symbol bodies.
-        """
-        r_x = x + GRID  # shift R center right so pin 1 (at dx=-2.54) lands at x
-        _, r_pins = self.place_symbol("R_Small", r_x, y, ref_prefix="R",
-                                      value="680R", angle=90)
-
-        # LED placed 3 grid units right of R center — enough gap to avoid overlap
-        led_x = r_x + 3 * GRID
-        _, led_pins = self.place_symbol("LED_Small", led_x, y, ref_prefix="D",
-                                        value="Red", angle=180)
-        # Wire from R Pin 2 (right) to LED Pin 2 / Anode (left)
-        self.add_wire(*r_pins["2"], *led_pins["2"])
-
-        # GND below LED cathode (Pin 1, right side)
-        self.wire_power("GND", led_pins["1"], offset_y=2 * GRID)
-
-        # Signal enters at R Pin 1 (left side)
-        return r_pins["1"]
-
-    # -- net labels --
-
-    def _label_effects(self, justify=None):
-        """Build Effects for a label, optionally with justify."""
-        if justify:
-            return Effects(font=Font(width=1.27, height=1.27),
-                           justify=Justify(horizontally=justify))
-        return Effects(font=Font(width=1.27, height=1.27))
-
-    def add_label(self, text, x, y, angle=0, justify=None):
-        """Add a local net label."""
-        x, y = snap(x), snap(y)
-        label = LocalLabel()
-        label.text = text
-        label.position = Position(X=x, Y=y, angle=angle)
-        label.effects = self._label_effects(justify)
-        label.uuid = uid()
-        self.sch.labels.append(label)
-        return label
-
-    def add_global_label(self, text, x, y, shape="bidirectional", angle=0,
-                         justify=None):
-        """Add a global net label."""
-        x, y = snap(x), snap(y)
-        label = GlobalLabel()
-        label.text = text
-        label.shape = shape
-        label.position = Position(X=x, Y=y, angle=angle)
-        label.effects = self._label_effects(justify)
-        label.uuid = uid()
-        self.sch.globalLabels.append(label)
-        return label
-
-    def add_hier_label(self, text, x, y, shape="bidirectional", angle=0,
-                       justify=None):
-        """Add a hierarchical label (connects to parent sheet pin)."""
-        x, y = snap(x), snap(y)
-        label = HierarchicalLabel()
-        label.text = text
-        label.shape = shape
-        label.position = Position(X=x, Y=y, angle=angle)
-        label.effects = self._label_effects(justify)
-        label.uuid = uid()
-        self.sch.hierarchicalLabels.append(label)
-        return label
-
-    # -- wires --
-
-    def add_wire(self, x1, y1, x2, y2):
-        """Add a wire between two points."""
-        x1, y1, x2, y2 = snap(x1), snap(y1), snap(x2), snap(y2)
-        conn = Connection()
-        conn.type = "wire"
-        conn.points = [Position(X=x1, Y=y1), Position(X=x2, Y=y2)]
-        conn.uuid = uid()
-        self.sch.graphicalItems.append(conn)
-        return conn
-
-    def add_junction(self, x, y):
-        """Add a junction dot at (x, y) for T-connections."""
-        x, y = snap(x), snap(y)
-        j = Junction()
-        j.position = Position(X=x, Y=y)
-        j.diameter = 0  # use default
-        j.color = ColorRGBA()
-        j.uuid = uid()
-        self.sch.junctions.append(j)
-
-    def add_segmented_trunk(self, x, ys):
-        """Create a segmented vertical trunk wire at x with connections at each y.
-
-        Instead of one long wire from min to max Y, creates separate wire
-        segments between consecutive Y values.  This ensures that every
-        branch point is a wire endpoint, which KiCad 9 requires for
-        reliable T-connection recognition.
-
-        Junctions are placed at all intermediate Y values (not first/last).
-        """
-        sorted_ys = sorted(set(snap(y) for y in ys))
-        if len(sorted_ys) < 2:
-            return
-        for i in range(len(sorted_ys) - 1):
-            self.add_wire(x, sorted_ys[i], x, sorted_ys[i + 1])
-        for y in sorted_ys[1:-1]:
-            self.add_junction(x, y)
-
-    def place_led_below(self, x, y, drop=None):
-        """Branch an LED indicator below a main horizontal wire.
-
-        Places the LED chain at (x, y + drop), wires down from (x, y),
-        and adds a junction at (x, y) so the main wire can continue through.
-
-        Returns the junction point (x, y) — caller wires through this point.
-        """
-        if drop is None:
-            drop = 3 * GRID
-        x, y = snap(x), snap(y)
-        led_y = snap(y + drop)
-        led_in = self.place_led_indicator(x, led_y)
-        # L-wire: vertical from junction down, then horizontal to LED entry
-        self.add_wire(x, y, x, led_in[1])
-        if snap(led_in[0]) != x:
-            self.add_wire(x, led_in[1], led_in[0], led_in[1])
-        # Junction at the branch point on the main wire
-        self.add_junction(x, y)
-        return (x, y)
-
-    # -- power symbols --
-
-    def place_power(self, symbol_name, x, y, angle=0):
-        """Place a power symbol (VCC, GND, PWR_FLAG).
-
-        Power symbols have their single pin at the component origin,
-        so we always return pin "1" at (x, y) regardless of angle.
-        """
-        prefix = "#FLG" if symbol_name == "PWR_FLAG" else "#PWR"
-        ref, _ = self.place_symbol(symbol_name, x, y, ref_prefix=prefix,
-                                   value=symbol_name, angle=angle)
-        return ref, {"1": (x, y)}
-
-    # -- save --
-
-    @staticmethod
-    def _fix_lib_symbols(filepath):
-        """Replace kiutils-serialized lib_symbol blocks with exact library text.
-
-        kiutils drops several attributes when serializing library symbols:
-        - ``exclude_from_sim no``
-        - ``(hide yes)`` on properties (Footprint, Datasheet, etc.)
-        - ``(hide yes)`` on pins (e.g., 74LVC1G04 NC pin)
-        - ``(embedded_fonts no)``
-
-        This post-processing step replaces each embedded lib_symbol block
-        with the raw s-expression text extracted from the KiCad stock library
-        files, ensuring a byte-exact match and eliminating lib_symbol_mismatch
-        ERC warnings.
-        """
-        raw_texts = get_raw_lib_texts()
-        text = open(filepath, "r", encoding="utf-8").read()
-
-        for sym_name, raw_block in raw_texts.items():
-            qualified = SYMBOL_LIB_MAP.get(sym_name, "")
-            qualified = f"{qualified}:{sym_name}" if qualified else sym_name
-
-            # Find the kiutils-generated block for this symbol
-            pat = re.compile(
-                r'^(\s*)\(symbol "' + re.escape(qualified) + r'"',
-                re.MULTILINE,
-            )
-            m = pat.search(text)
-            if not m:
-                continue
-
-            # Find the end of this block by matching parens
-            depth = 0
-            start = m.start()
-            end = start
-            for i in range(start, len(text)):
-                if text[i] == "(":
-                    depth += 1
-                elif text[i] == ")":
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
-
-            # Determine the indentation of the block in the schematic
-            indent = m.group(1)
-            # Re-indent the raw library block to match (library uses one tab)
-            fixed = raw_block.replace("\n\t", "\n" + indent)
-            # Fix the first line indent too
-            if fixed.startswith("\t"):
-                fixed = indent + fixed.lstrip("\t")
-
-            text = text[:start] + fixed + text[end:]
-
-        open(filepath, "w", encoding="utf-8").write(text)
-
-    def save(self, filepath):
-        self.sch.to_file(filepath)
-        self._fix_lib_symbols(filepath)
-        return filepath
 
 
 # --------------------------------------------------------------
@@ -842,11 +65,12 @@ def generate_address_decoder():
     SEL7 =  A2 &  A1 &  A0
 
     Wiring approach:
-      - A0/A1/A2: hier label → wire → vertical trunk, branches to inverter + AND inputs
-      - A0_INV/A1_INV/A2_INV: inverter output → LED T-junction → vertical trunk → AND inputs
-      - SEL0-SEL7: AND output → LED T-junction → wire → hier label
+      - A0/A1/A2: hier label -> wire -> vertical trunk, branches to inverter + AND inputs
+      - A0_INV/A1_INV/A2_INV: inverter output -> LED T-junction -> vertical trunk -> AND inputs
+      - SEL0-SEL7: AND output -> LED T-junction -> wire -> hier label
     """
-    b = SchematicBuilder(title="Address Decoder", page_size="A3")
+    b = SchematicBuilder(title="Address Decoder", page_size="A3",
+                         project_name=PROJECT_NAME)
     base_x, base_y = 25.4, 30.48
 
     inv_x = base_x + 18 * GRID
@@ -854,12 +78,9 @@ def generate_address_decoder():
     hl_out_x = and_x + 22 * GRID
 
     # X positions for 6 vertical trunks (A0, A1, A2, A0_INV, A1_INV, A2_INV)
-    # True address trunks: placed LEFT of inverter inputs (X=55.88) so that
-    # branch wires go rightward to the pin — away from the stub (which goes
-    # rightward from tip into body).  Stagger A0 closest, A2 furthest left.
     inv_in_x = inv_x - 15.24  # 55.88: inverter input pin X (74LVC1G04 pin 2)
-    addr_trunk_x = [snap(inv_in_x - (1.5 + i) * GRID) for i in range(3)]   # 52.07, 49.53, 46.99
-    inv_trunk_x = [base_x + 31 * GRID + i * 2 * GRID for i in range(3)]  # A0_INV, A1_INV, A2_INV (shifted +GRID to avoid LED cathode GND overlap)
+    addr_trunk_x = [snap(inv_in_x - (1.5 + i) * GRID) for i in range(3)]
+    inv_trunk_x = [base_x + 31 * GRID + i * 2 * GRID for i in range(3)]
 
     # The AND gates span 8 rows (SEL0-SEL7)
     and_top_y = base_y
@@ -867,25 +88,13 @@ def generate_address_decoder():
 
     # -- Hierarchical labels for A0-A2, wired to trunk tops --
     for i in range(3):
-        trunk_top_y = snap(base_y - (4 - i) * GRID)  # stagger slightly
+        trunk_top_y = snap(base_y - (4 - i) * GRID)
         b.add_hier_label(f"A{i}", base_x, trunk_top_y, shape="input", justify="right")
         b.add_wire(base_x, trunk_top_y, addr_trunk_x[i], trunk_top_y)
 
     # -- Three inverters for complemented address bits --
-    # Offset inverter Y by +5*GRID, with LED drop=4*GRID, satisfying:
-    #   1. Pin coincidence: center Y and NC pin Y (center - 2.54) must not
-    #      coincide with any AND gate pin Y (mod 25.4: {0, ±5.08}).
-    #      Forbidden center offsets: 0, ±2.54, ±5.08, 7.62.
-    #   2. Body overlap: inverter body bbox (±6.35mm Y from center) must not
-    #      overlap branch wire Y values at AND pin positions.
-    #      +4*GRID body range [3.81, 16.51] overlaps 5.08 → FAIL.
-    #      +5*GRID body range [6.35, 19.05] clears all → OK.
-    #   3. LED GND endpoint: inverter LED GND wire at center + drop + 2*GRID
-    #      must not coincide with AND pin Y values.
-    #      +5*GRID, drop=3*GRID → GND at +5+3+2=+10*GRID ≡ 0 mod 25.4 → FAIL.
-    #      +5*GRID, drop=4*GRID → GND at +5+4+2=+11*GRID ≡ 2.54 mod 25.4 → OK.
-    inv_in_pins = []   # inverter input pin positions
-    inv_out_pins = []  # inverter output pin positions
+    inv_in_pins = []
+    inv_out_pins = []
     for i in range(3):
         y = base_y + i * SYM_SPACING_Y + 5 * GRID
         _, pins = b.place_symbol("74LVC1G04", inv_x, y)
@@ -893,13 +102,12 @@ def generate_address_decoder():
         inv_in_pins.append(pins["2"])
         inv_out_pins.append(pins["4"])
 
-    # Wire address trunks: each A{i} trunk connects to inverter input + AND gate inputs
+    # Wire address trunks
     decode_table = [
         (0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1),
         (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1),
     ]
-    # Pin mapping for 74LVC1G11: pin 6=A2, pin 1=A1, pin 3=A0
-    addr_pin_map = {0: "3", 1: "1", 2: "6"}  # address bit index → AND gate pin number
+    addr_pin_map = {0: "3", 1: "1", 2: "6"}
 
     # Place 8 AND gates first to get pin positions
     and_gate_pins = []
@@ -916,19 +124,16 @@ def generate_address_decoder():
         inv_in = inv_in_pins[addr_i]
         pin_num = addr_pin_map[addr_i]
 
-        # Collect Y positions where this trunk branches: inverter input + AND gates using A{i}
         trunk_ys = [trunk_top_y, inv_in[1]]
         branch_targets = [(inv_in[0], inv_in[1])]
         for sel_idx, bits in enumerate(decode_table):
-            if bits[2 - addr_i] == 1:  # this AND uses the true (non-inverted) signal
+            if bits[2 - addr_i] == 1:
                 target = and_gate_pins[sel_idx][pin_num]
                 trunk_ys.append(target[1])
                 branch_targets.append((target[0], target[1]))
 
-        # Segmented vertical trunk (splits at every branch point)
         b.add_segmented_trunk(trunk_x, trunk_ys)
 
-        # Horizontal branches
         for tx, ty in branch_targets:
             b.add_wire(trunk_x, ty, tx, ty)
 
@@ -938,44 +143,33 @@ def generate_address_decoder():
         out_pin = inv_out_pins[addr_i]
         pin_num = addr_pin_map[addr_i]
 
-        # Inverter output → LED T-junction → horizontal wire to trunk
         led_jct_x = out_pin[0] + 2 * GRID
-        # Wire from inverter output to trunk (split at LED junction point)
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], trunk_x, out_pin[1])
-        # LED branches down from a point on this wire.
-        # drop=4*GRID so the GND wire endpoint (drop + 2*GRID = 6*GRID below)
-        # doesn't coincide with AND gate branch wire Y values.
         b.place_led_below(led_jct_x, out_pin[1], drop=4 * GRID)
 
-        # Collect AND gate inputs using inverted signal
         branch_targets = []
         trunk_ys = [out_pin[1]]
         for sel_idx, bits in enumerate(decode_table):
-            if bits[2 - addr_i] == 0:  # this AND uses the inverted signal
+            if bits[2 - addr_i] == 0:
                 target = and_gate_pins[sel_idx][pin_num]
                 branch_targets.append((target[0], target[1]))
                 trunk_ys.append(target[1])
 
         if branch_targets:
-            # Segmented vertical trunk
             b.add_segmented_trunk(trunk_x, trunk_ys)
-            # Horizontal branches to AND inputs
             for tx, ty in branch_targets:
                 b.add_wire(trunk_x, ty, tx, ty)
 
-    # -- SEL outputs: AND output → LED T-junction → wire → hier label --
+    # -- SEL outputs: AND output -> LED T-junction -> wire -> hier label --
     for sel_idx in range(8):
         pins = and_gate_pins[sel_idx]
         out_pin = pins["4"]
 
-        # Wire from AND output to hier label, split at LED junction
         led_jct_x = out_pin[0] + 2 * GRID
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
-        # LED branches below from junction on this wire
         b.place_led_below(led_jct_x, out_pin[1])
-        # Hier label at end of wire
         b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output", justify="left")
 
     return b
@@ -995,103 +189,80 @@ def generate_control_logic():
       1x 74LVC1G08 AND(CE, OE) -> CE_AND_OE
       1x 74LVC1G08 AND(CE_AND_OE, /WE) -> READ_EN
 
-    All connections are direct wires — no local labels.
+    All connections are direct wires -- no local labels.
     """
-    b = SchematicBuilder(title="Control Logic", page_size="A3")
+    b = SchematicBuilder(title="Control Logic", page_size="A3",
+                         project_name=PROJECT_NAME)
     base_x, base_y = 25.4, 30.48
 
     inv_x = base_x + 15 * GRID
-    and1_x = base_x + 42 * GRID    # AND(CE, WE) → WRITE_ACTIVE
-    and2_x = base_x + 42 * GRID    # AND(CE, OE) → CE_AND_OE
-    and3_x = base_x + 62 * GRID    # AND(CE_AND_OE, /WE) → READ_EN
+    and1_x = base_x + 42 * GRID
+    and2_x = base_x + 42 * GRID
+    and3_x = base_x + 62 * GRID
 
-    # Inverter row Y positions
     ce_y = base_y
     oe_y = base_y + SYM_SPACING_Y
     we_y = base_y + 2 * SYM_SPACING_Y
 
-    # AND gate Y positions (between inverter rows for clean routing)
-    and1_y = base_y + 4 * GRID      # CE & WE
-    and2_y = base_y + 14 * GRID     # CE & OE
-    and3_y = and2_y                  # CE_AND_OE & /WE (same row, further right)
+    and1_y = base_y + 4 * GRID
+    and2_y = base_y + 14 * GRID
+    and3_y = and2_y
 
-    # -- Hier labels for inputs → wire to inverter inputs --
-    # nCE
+    # -- Hier labels for inputs -> wire to inverter inputs --
     b.add_hier_label("nCE", base_x, ce_y, shape="input", justify="right")
     _, ce_inv_pins = b.place_symbol("74LVC1G04", inv_x, ce_y)
     b.connect_power(ce_inv_pins)
     ce_inv_in = ce_inv_pins["2"]
-    # nCE also fans out to nowhere else, just wire hier label to inverter input
     b.add_wire(base_x, ce_y, ce_inv_in[0], ce_inv_in[1])
 
-    # nOE
     b.add_hier_label("nOE", base_x, oe_y, shape="input", justify="right")
     _, oe_inv_pins = b.place_symbol("74LVC1G04", inv_x, oe_y)
     b.connect_power(oe_inv_pins)
     oe_inv_in = oe_inv_pins["2"]
     b.add_wire(base_x, oe_y, oe_inv_in[0], oe_inv_in[1])
 
-    # nWE — fans out to inverter input AND AND3 input B (via junction)
     nwe_jct_x = base_x + 8 * GRID
     b.add_hier_label("nWE", base_x, we_y, shape="input", justify="right")
     _, we_inv_pins = b.place_symbol("74LVC1G04", inv_x, we_y)
     b.connect_power(we_inv_pins)
     we_inv_in = we_inv_pins["2"]
-    # nWE wire to inverter is created below (split at junction for AND3.B tap)
 
-    # -- Inverter outputs with LED T-junctions --
-
-    # CE inverter output → fans out to AND1 pin A and AND2 pin A
     ce_out = ce_inv_pins["4"]
-
-    # OE inverter output → fans out to AND2 pin B only
     oe_out = oe_inv_pins["4"]
-
-    # WE inverter output → fans out to AND1 pin B only
     we_out = we_inv_pins["4"]
 
-    # -- AND1: CE & WE → WRITE_ACTIVE --
+    # -- AND1: CE & WE -> WRITE_ACTIVE --
     _, and1_pins = b.place_symbol("74LVC1G08", and1_x, and1_y)
     b.connect_power(and1_pins)
-    and1_a = and1_pins["1"]   # CE
-    and1_b = and1_pins["2"]   # WE
+    and1_a = and1_pins["1"]
+    and1_b = and1_pins["2"]
     and1_out = and1_pins["4"]
 
-    # -- AND2: CE & OE → CE_AND_OE --
+    # -- AND2: CE & OE -> CE_AND_OE --
     _, and2_pins = b.place_symbol("74LVC1G08", and2_x, and2_y)
     b.connect_power(and2_pins)
-    and2_a = and2_pins["1"]   # CE
-    and2_b = and2_pins["2"]   # OE
+    and2_a = and2_pins["1"]
+    and2_b = and2_pins["2"]
     and2_out = and2_pins["4"]
 
-    # -- AND3: CE_AND_OE & /WE → READ_EN --
+    # -- AND3: CE_AND_OE & /WE -> READ_EN --
     _, and3_pins = b.place_symbol("74LVC1G08", and3_x, and3_y)
     b.connect_power(and3_pins)
-    and3_a = and3_pins["1"]   # CE_AND_OE
-    and3_b = and3_pins["2"]   # /WE
+    and3_a = and3_pins["1"]
+    and3_b = and3_pins["2"]
     and3_out = and3_pins["4"]
 
-    # -- Wire CE output to AND1.A and AND2.A (fanout=2 via vertical trunk) --
-    # CE trunk must be to the RIGHT of LED cathode GND wires (at led_x + 5*GRID
-    # from ce_out) to avoid horizontal overlap between R-to-LED wires and CE
-    # branch wires.  After Change 3, LED cathode is at ce_out[0] + 7*GRID,
-    # GND wire extends 2*GRID below.  Trunk at +9*GRID clears everything.
+    # -- Wire CE output to AND1.A and AND2.A --
     ce_led_x = snap(ce_out[0] + 2 * GRID)
     ce_trunk_x = snap(ce_out[0] + 9 * GRID)
-    # Split wire at LED junction point
     b.add_wire(ce_out[0], ce_out[1], ce_led_x, ce_out[1])
     b.add_wire(ce_led_x, ce_out[1], ce_trunk_x, ce_out[1])
     b.place_led_below(ce_led_x, ce_out[1])
-    # Segmented vertical trunk from CE output Y through AND1.A Y to AND2.A Y
     b.add_segmented_trunk(ce_trunk_x, [ce_out[1], and1_a[1], and2_a[1]])
-    # Branch to AND1.A
     b.add_wire(ce_trunk_x, and1_a[1], and1_a[0], and1_a[1])
-    # Branch to AND2.A
     b.add_wire(ce_trunk_x, and2_a[1], and2_a[0], and2_a[1])
 
     # -- Wire OE output to AND2.B --
-    # Route OE vertical between LED cathode GND wires and CE trunk to avoid
-    # crossing either.  oe_vert_x = ce_trunk_x - GRID sits in the gap.
     oe_led_x = snap(oe_out[0] + 2 * GRID)
     oe_vert_x = snap(ce_trunk_x - GRID)
     b.add_wire(oe_out[0], oe_out[1], oe_led_x, oe_out[1])
@@ -1101,8 +272,6 @@ def generate_control_logic():
     b.place_led_below(oe_led_x, oe_out[1])
 
     # -- Wire WE output to AND1.B --
-    # Route WE vertical to the LEFT of AND input pins so the branch wire
-    # approaches from the left — away from the pin stub direction.
     we_led_x = snap(we_out[0] + 2 * GRID)
     we_vert_x = snap(and1_b[0] - 2 * GRID)
     b.add_wire(we_out[0], we_out[1], we_led_x, we_out[1])
@@ -1111,7 +280,7 @@ def generate_control_logic():
     b.add_wire(we_vert_x, and1_b[1], and1_b[0], and1_b[1])
     b.place_led_below(we_led_x, we_out[1])
 
-    # -- Wire CE_AND_OE (AND2 output) to AND3.A with LED (L-shaped) --
+    # -- Wire CE_AND_OE (AND2 output) to AND3.A with LED --
     and2_led_x = snap(and2_out[0] + 2 * GRID)
     b.add_wire(and2_out[0], and2_out[1], and2_led_x, and2_out[1])
     b.add_wire(and2_led_x, and2_out[1], and3_a[0], and2_out[1])
@@ -1119,8 +288,6 @@ def generate_control_logic():
     b.place_led_below(and2_led_x, and2_out[1])
 
     # -- Wire /WE to AND3.B --
-    # Route nWE BELOW all vertical wires (LED GND endpoints max at we_y+5*GRID,
-    # WE vert max at we_y) to avoid crossing any signal or GND wires.
     nwe_route_y = snap(we_y + 7 * GRID)
     b.add_wire(base_x, we_y, nwe_jct_x, we_y)
     b.add_wire(nwe_jct_x, we_y, we_inv_in[0], we_inv_in[1])
@@ -1129,7 +296,7 @@ def generate_control_logic():
     b.add_wire(and3_b[0], nwe_route_y, and3_b[0], and3_b[1])
     b.add_junction(nwe_jct_x, we_y)
 
-    # -- AND1 output → LED T-junction → hier label WRITE_ACTIVE --
+    # -- AND1 output -> LED T-junction -> hier label WRITE_ACTIVE --
     out_label_x = and3_x + 22 * GRID
     and1_led_x = snap(and1_out[0] + 2 * GRID)
     b.add_wire(and1_out[0], and1_out[1], and1_led_x, and1_out[1])
@@ -1137,7 +304,7 @@ def generate_control_logic():
     b.place_led_below(and1_led_x, and1_out[1])
     b.add_hier_label("WRITE_ACTIVE", out_label_x, and1_out[1], shape="output", justify="left")
 
-    # -- AND3 output → LED T-junction → hier label READ_EN --
+    # -- AND3 output -> LED T-junction -> hier label READ_EN --
     and3_led_x = snap(and3_out[0] + 2 * GRID)
     b.add_wire(and3_out[0], and3_out[1], and3_led_x, and3_out[1])
     b.add_wire(and3_led_x, and3_out[1], out_label_x, and3_out[1])
@@ -1148,30 +315,21 @@ def generate_control_logic():
 
 
 def _generate_nand_bank(title, enable_signal, output_prefix):
-    """Shared generator for write_clk_gen and read_oe_gen (8 NANDs each).
-
-    74LVC1G00 has same pin layout as 74LVC1G08.
-
-    Wiring approach:
-      - Enable signal: hier label → vertical trunk → branches to each NAND A pin
-      - SEL0-SEL7: hier label → wire → NAND B pin (1:1)
-      - Outputs: NAND output → LED T-junction → wire → hier label (1:1)
-    """
-    b = SchematicBuilder(title=title, page_size="A3")
+    """Shared generator for write_clk_gen and read_oe_gen (8 NANDs each)."""
+    b = SchematicBuilder(title=title, page_size="A3",
+                         project_name=PROJECT_NAME)
     base_x, base_y = 25.4, 30.48
 
     nand_x = base_x + 18 * GRID
     hl_out_x = nand_x + 22 * GRID
     enable_trunk_x = base_x + 10 * GRID
 
-    # Enable signal hier label at top → horizontal wire → trunk
     enable_hier_y = snap(base_y - 2 * GRID)
     b.add_hier_label(enable_signal, base_x, enable_hier_y, shape="input", justify="right")
     b.add_wire(base_x, enable_hier_y, enable_trunk_x, enable_hier_y)
 
-    # Place 8 NANDs and collect pin positions
-    nand_a_pins = []   # enable input pins (pin A)
-    nand_b_pins = []   # SEL input pins (pin B)
+    nand_a_pins = []
+    nand_b_pins = []
     nand_out_pins = []
     for i in range(8):
         y = base_y + i * SYM_SPACING_Y
@@ -1181,24 +339,20 @@ def _generate_nand_bank(title, enable_signal, output_prefix):
         nand_b_pins.append(pins["2"])
         nand_out_pins.append(pins["4"])
 
-    # -- Enable vertical trunk: segmented from hier label Y through all NAND A pins --
     trunk_ys = [enable_hier_y] + [nand_a_pins[i][1] for i in range(8)]
     b.add_segmented_trunk(enable_trunk_x, trunk_ys)
     for i in range(8):
         a_pin = nand_a_pins[i]
         b.add_wire(enable_trunk_x, a_pin[1], a_pin[0], a_pin[1])
 
-    # -- SEL inputs: hier label → wire → NAND B pin (1:1) --
     for i in range(8):
         b_pin = nand_b_pins[i]
         b.add_hier_label(f"SEL{i}", base_x, b_pin[1], shape="input", justify="right")
         b.add_wire(base_x, b_pin[1], b_pin[0], b_pin[1])
 
-    # -- Outputs: NAND output → LED T-junction → wire → hier label --
     for i in range(8):
         out_pin = nand_out_pins[i]
         out_net = f"{output_prefix}{i}"
-        # Split wire at LED junction point
         led_jct_x = snap(out_pin[0] + 2 * GRID)
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
@@ -1221,78 +375,54 @@ def generate_read_oe_gen():
 def generate_byte_sheet():
     """
     Generate one memory byte (8 bits) -- reused for all 8 bytes.
-
-    Each bit:
-      - 74LVC1G79 D flip-flop: D <- data bus, CLK <- WRITE_CLK, Q -> LED + buffer
-      - 74LVC1G125 tri-state buffer: A <- DFF Q, /OE <- BUF_OE, Y -> data bus
-      - LED on DFF Q output (branches below via T-junction)
-      - LED on buffer Y output
-
-    Wiring approach:
-      - D0-D7: labels (3-way fanout — hier label, DFF D, buffer Y)
-      - Q outputs: direct wire from DFF Q → buffer A, LED branches below
-      - WRITE_CLK: vertical trunk wire with horizontal branches to each DFF CLK
-      - BUF_OE: vertical trunk wire with horizontal branches to each buffer /OE
     """
-    b = SchematicBuilder(title="Memory Byte", page_size="A3")
-    base_x, base_y = 25.4, 30.48  # top margin for trunk headers
+    b = SchematicBuilder(title="Memory Byte", page_size="A3",
+                         project_name=PROJECT_NAME)
+    base_x, base_y = 25.4, 30.48
 
     dff_x = base_x + 18 * GRID
     buf_x = base_x + 52 * GRID
-    wclk_trunk_x = base_x + 10 * GRID   # WRITE_CLK vertical trunk
-    boe_trunk_x = buf_x - 8 * GRID      # BUF_OE vertical trunk (avoid buffer A pin X)
+    wclk_trunk_x = base_x + 10 * GRID
+    boe_trunk_x = buf_x - 8 * GRID
 
-    # -- WRITE_CLK hier label at top → horizontal wire → trunk --
     wclk_hier_y = snap(base_y - 4 * GRID)
     b.add_hier_label("WRITE_CLK", base_x, wclk_hier_y, shape="input", justify="right")
     b.add_wire(base_x, wclk_hier_y, wclk_trunk_x, wclk_hier_y)
 
-    # -- BUF_OE hier label at top → horizontal wire → trunk --
-    # Must avoid Y=25.4 (DFF D pin 1 Y for bit 0) to prevent net merging
     boe_hier_y = snap(base_y - 6 * GRID)
     b.add_hier_label("BUF_OE", base_x, boe_hier_y, shape="input", justify="right")
     b.add_wire(base_x, boe_hier_y, boe_trunk_x, boe_hier_y)
 
-    # -- Place components and wire each bit --
     clk_pin_positions = []
     oe_pin_positions = []
 
     for bit in range(8):
         y = base_y + bit * DFF_SPACING_Y
 
-        # D flip-flop (74LVC1G79)
         _, dff_pins = b.place_symbol("74LVC1G79", dff_x, y)
         b.connect_power(dff_pins)
 
-        # D input: hier label wires directly to DFF D pin
         d_pin = dff_pins["1"]
         hl_y = base_y + bit * DFF_SPACING_Y
         b.add_hier_label(f"D{bit}", base_x, hl_y, shape="bidirectional", justify="right")
-        # L-wire from hier label to D pin (handle possible Y offset)
         if snap(hl_y) != snap(d_pin[1]):
             b.add_wire(base_x, hl_y, base_x, d_pin[1])
         b.add_wire(base_x, d_pin[1], d_pin[0], d_pin[1])
 
-        # CLK input: horizontal wire from WRITE_CLK trunk
         clk_pin = dff_pins["2"]
         clk_pin_positions.append(clk_pin)
         b.add_wire(wclk_trunk_x, clk_pin[1], clk_pin[0], clk_pin[1])
 
-        # Q output → direct wire to buffer A input, LED branches below
         q_pin = dff_pins["4"]
 
-        # Tri-state buffer (74LVC1G125)
         _, buf_pins = b.place_symbol("74LVC1G125", buf_x, y)
         b.connect_power(buf_pins)
 
         a_pin = buf_pins["2"]
         vcc_pin = buf_pins["5"]
-        # L-wire from DFF Q → buffer A (Q and A may have different Y offsets)
-        # Split horizontal wire at LED junction point
         q_led_x = snap(q_pin[0] + 2 * GRID)
         b.add_wire(q_pin[0], q_pin[1], q_led_x, q_pin[1])
 
-        # Check if horizontal wire at q_pin[1] would pass through VCC pin 5
         wire_y = snap(q_pin[1])
         x_lo = min(q_led_x, a_pin[0])
         x_hi = max(q_led_x, a_pin[0])
@@ -1300,33 +430,27 @@ def generate_byte_sheet():
                        x_lo + 0.01 < snap(vcc_pin[0]) < x_hi - 0.01)
 
         if vcc_on_path:
-            # Route around VCC pin: vertical to a_pin Y, then horizontal
             b.add_wire(q_led_x, q_pin[1], q_led_x, a_pin[1])
             b.add_wire(q_led_x, a_pin[1], a_pin[0], a_pin[1])
         else:
             b.add_wire(q_led_x, q_pin[1], a_pin[0], q_pin[1])
             if snap(q_pin[1]) != snap(a_pin[1]):
                 b.add_wire(a_pin[0], q_pin[1], a_pin[0], a_pin[1])
-        # LED branches down from junction on the horizontal segment
         b.place_led_below(q_led_x, q_pin[1])
 
-        # /OE input: horizontal wire from BUF_OE trunk
         oe_pin = buf_pins["1"]
         oe_pin_positions.append(oe_pin)
         b.add_wire(boe_trunk_x, oe_pin[1], oe_pin[0], oe_pin[1])
 
-        # Y output: wire to LED + label back to data bus
         y_pin = buf_pins["4"]
         led_in = b.place_led_indicator(y_pin[0] + LED_GAP_X, y_pin[1])
         b.add_wire(*y_pin, *led_in)
         b.add_label(f"D{bit}", *y_pin, justify="right")
 
-    # -- WRITE_CLK vertical trunk wire (segmented at each branch) --
     clk_ys = [p[1] for p in clk_pin_positions]
     wclk_all_ys = sorted([wclk_hier_y] + clk_ys)
     b.add_segmented_trunk(wclk_trunk_x, wclk_all_ys)
 
-    # -- BUF_OE vertical trunk wire (segmented at each branch) --
     oe_ys = [p[1] for p in oe_pin_positions]
     boe_all_ys = sorted([boe_hier_y] + oe_ys)
     b.add_segmented_trunk(boe_trunk_x, boe_all_ys)
@@ -1341,37 +465,21 @@ def generate_byte_sheet():
 def generate_root_sheet():
     """
     Root sheet: connector, bus indicator LEDs, and hierarchical sheet references.
-
-    Layout (left to right):
-      1. Connector J1 (16-pin, with VCC/GND) + bus indicator LEDs
-      2. Column 1: Address Decoder (top) + Control Logic (bottom)
-      3. Column 2: Write Clk Gen (top) + Read OE Gen (bottom)
-      4. Byte sheets: 2 columns of 4
-
-    Wiring strategy:
-      - D0-D7: local labels (high fanout — connector + LEDs + 8 byte sheets)
-      - All other signals: direct wires between sheet pins
-      - Each control block has inputs on LEFT, outputs on RIGHT
     """
-    b = SchematicBuilder(title="8-Byte Discrete RAM", page_size="A2")
+    b = SchematicBuilder(title="8-Byte Discrete RAM", page_size="A2",
+                         project_name=PROJECT_NAME)
     base_x, base_y = 25.4, 25.4
 
-    # -- Layout constants --
     sheet_gap = 5 * GRID
     wire_stub = 5.08
 
     def _sheet_height(num_pins):
         return snap(num_pins * 2.54 + 5.08)
 
-    # Pre-compute the vertical extent of sheet blocks so we can center
-    # the connector + LED bank ensemble with the sheet block columns.
-    byte_h_pre = _sheet_height(10)  # 30.48 (same as byte_h computed later)
+    byte_h_pre = _sheet_height(10)
     sheet_bottom_y = snap(base_y + 3 * (byte_h_pre + sheet_gap) + byte_h_pre)
     ensemble_center_y = snap((base_y + sheet_bottom_y) / 2)
 
-    # -- External connector centered vertically with sheet blocks --
-    # The pin midpoint is ~1.27mm above the component center for
-    # Conn_01x16 at 180°, so we offset to align the pin midpoint.
     conn_x = base_x
     conn_y = snap(ensemble_center_y + 1.27)
     _, conn_pins = b.place_symbol("Conn_01x16", conn_x, conn_y,
@@ -1380,15 +488,8 @@ def generate_root_sheet():
     def _pin_y(sy, pin_idx):
         return snap(sy + 2.54 + pin_idx * 2.54)
 
-    # -- Helper to create a sheet block --
     def _add_sheet_block(name, filename, pins, sx, sy, sw, sh, fill_color,
                          right_pins=None):
-        """Create sheet block, return dict mapping pin_name -> (x, y).
-
-        Args:
-            right_pins: set of pin names to place on the RIGHT edge (facing right).
-                        All other pins go on the LEFT edge (facing left).
-        """
         if right_pins is None:
             right_pins = set()
         sheet = HierarchicalSheet()
@@ -1406,12 +507,10 @@ def generate_root_sheet():
             key="Sheet file", value=filename, id=1,
             position=Position(X=sx + sw, Y=sy + sh + 1.27, angle=0),
         )
-        # Count left and right pins separately for Y positioning
         left_pins_list = [(pn, pt) for pn, pt in pins if pn not in right_pins]
         right_pins_list = [(pn, pt) for pn, pt in pins if pn in right_pins]
 
         pin_positions = {}
-        # Place left pins
         for pin_idx, (pin_name, pin_type) in enumerate(left_pins_list):
             pin = HierarchicalPin()
             pin.name = pin_name
@@ -1423,7 +522,6 @@ def generate_root_sheet():
             pin_positions[pin_name] = (sx, py)
             pin.uuid = uid()
             sheet.pins.append(pin)
-        # Place right pins
         for pin_idx, (pin_name, pin_type) in enumerate(right_pins_list):
             pin = HierarchicalPin()
             pin.name = pin_name
@@ -1464,10 +562,9 @@ def generate_root_sheet():
     byte_col2_x = snap(byte_col1_x + byte_w + byte_inter_gap)
 
     # ================================================================
-    # Place all sheet blocks, collecting pin positions
+    # Place all sheet blocks
     # ================================================================
 
-    # -- Column 1 top: Address Decoder (3 input + 8 output = 11 pins) --
     addr_left_defs = [("A0", "input"), ("A1", "input"), ("A2", "input")]
     addr_right_defs = [(f"SEL{i}", "output") for i in range(8)]
     addr_pin_defs = addr_left_defs + addr_right_defs
@@ -1481,7 +578,6 @@ def generate_root_sheet():
                                col1_w, addr_h, yellow_fill,
                                right_pins=addr_right_names)
 
-    # -- Column 1 bottom: Control Logic (3 input + 2 output = 5 pins) --
     ctrl_left_defs = [("nCE", "input"), ("nOE", "input"), ("nWE", "input")]
     ctrl_right_defs = [("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
     ctrl_pin_defs = ctrl_left_defs + ctrl_right_defs
@@ -1495,7 +591,6 @@ def generate_root_sheet():
                                col1_w, ctrl_h, yellow_fill,
                                right_pins=ctrl_right_names)
 
-    # -- Column 2 top: Write Clk Gen (9 input + 8 output = 17 pins) --
     wclk_left_defs = [("WRITE_ACTIVE", "input")]
     wclk_left_defs += [(f"SEL{i}", "input") for i in range(8)]
     wclk_right_defs = [(f"WRITE_CLK_{i}", "output") for i in range(8)]
@@ -1510,7 +605,6 @@ def generate_root_sheet():
                                col2_w, wclk_h, yellow_fill,
                                right_pins=wclk_right_names)
 
-    # -- Column 2 bottom: Read OE Gen (9 input + 8 output = 17 pins) --
     roe_left_defs = [("READ_EN", "input")]
     roe_left_defs += [(f"SEL{i}", "input") for i in range(8)]
     roe_right_defs = [(f"BUF_OE_{i}", "output") for i in range(8)]
@@ -1525,7 +619,6 @@ def generate_root_sheet():
                               col2_w, roe_h, yellow_fill,
                               right_pins=roe_right_names)
 
-    # -- Byte sheets (2 columns of 4, all pins on LEFT) --
     byte_pin_defs = [("WRITE_CLK", "input"), ("BUF_OE", "input")]
     byte_pin_defs += [(f"D{bit}", "bidirectional") for bit in range(8)]
     byte_h = _sheet_height(len(byte_pin_defs))
@@ -1541,8 +634,7 @@ def generate_root_sheet():
         byte_pp.append(pp)
 
     # ================================================================
-    # Connector pin positions (16-pin, flipped 180°, pins face RIGHT)
-    # Pin 1: GND (bottom), Pins 2-15: signals, Pin 16: VCC (top)
+    # Connector pins
     # ================================================================
     signal_names = ["D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0",
                     "nWE", "nOE", "nCE",
@@ -1552,19 +644,15 @@ def generate_root_sheet():
         conn_signal_pos[sig] = conn_pins[str(pin_num_int)]
 
     # ================================================================
-    # Connector power pins (VCC at pin 16 = top, GND at pin 1 = bottom)
+    # Connector power pins
     # ================================================================
     vcc_pos = conn_pins["16"]
     gnd_pos = conn_pins["1"]
-    # Power symbols + PWR_FLAG at connector power pins.
-    # PWR_FLAG marks these nets as externally driven (required for ERC).
     pwr_wire_len = snap(3 * GRID)
-    # VCC: wire from connector pin rightward, power symbol + PWR_FLAG at end
     vcc_sym_x = snap(vcc_pos[0] + pwr_wire_len)
     b.add_wire(vcc_pos[0], vcc_pos[1], vcc_sym_x, vcc_pos[1])
     b.place_power("VCC", vcc_sym_x, vcc_pos[1])
     b.place_power("PWR_FLAG", vcc_sym_x, vcc_pos[1])
-    # GND: wire from connector pin rightward, power symbol + PWR_FLAG at end
     gnd_sym_x = snap(gnd_pos[0] + pwr_wire_len)
     b.add_wire(gnd_pos[0], gnd_pos[1], gnd_sym_x, gnd_pos[1])
     b.place_power("GND", gnd_sym_x, gnd_pos[1])
@@ -1573,45 +661,23 @@ def generate_root_sheet():
     # ================================================================
     # Connector signal wires + LED indicators + direct wiring
     # ================================================================
-    # Signals fan out from the connector into horizontal runs at evenly
-    # spaced Y positions.  Each run has an LED dropping below via
-    # place_led_below().  D signals continue to labels (high fanout).
-    # A0-A2 and nCE/nOE/nWE are direct-wired to their sheet block pins.
     conn_pin_x = conn_signal_pos[signal_names[0]][0]
-
-    # Sort signals by connector Y (ascending = top to bottom)
     led_order = sorted(signal_names, key=lambda s: conn_signal_pos[s][1])
     n_signals = len(led_order)
 
-    # Fan-out Y positions: 6*GRID (15.24mm) spacing gives 5.08mm clearance
-    # above the LED GND bottom (drop=2*GRID → LED chain occupies ~10.16mm).
     fan_spacing = snap(6 * GRID)
     fan_span = (n_signals - 1) * fan_spacing
-    # Center the fan-out vertically with the connector pin midpoint
     min_conn_pin_y = min(conn_pins[str(i)][1] for i in range(1, 17))
     max_conn_pin_y = max(conn_pins[str(i)][1] for i in range(1, 17))
     conn_pin_mid_y = snap((min_conn_pin_y + max_conn_pin_y) / 2)
-    # Half-grid Y offset avoids coincidence with grid-aligned connector
-    # pin Y values, preventing horizontal wire overlaps between
-    # connector-to-turning-column wires and fan-out horizontal wires.
     fan_start_y = snap(conn_pin_mid_y - fan_span / 2)
-    # Ensure half-grid: with even fan spacing (6*GRID) the raw value is
-    # already half-grid; with odd (5*GRID) it needs a GRID/2 nudge.
     grid_units = fan_start_y / GRID
     if abs(grid_units - round(grid_units)) < 0.01:
         fan_start_y = snap(fan_start_y + GRID / 2)
-    # Ensure within A2 page border (top edge at ~9.5mm)
     page_min_y = snap(5 * GRID)
     while fan_start_y < page_min_y:
         fan_start_y = snap(fan_start_y + GRID)
 
-    # Turning column X positions — staggered right of power wire endpoints.
-    # Power wires extend to conn_pin_x + 3*GRID; start columns beyond that.
-    # Inverted-V assignment: edge signals get innermost columns (closest to
-    # connector), center signals get outermost columns.  Within the top half
-    # ranks increase with index, within the bottom half they decrease — so
-    # each signal's horizontal stub is shorter than the next inward signal's,
-    # eliminating perpendicular wire crossings entirely.
     turn_base_x = snap(conn_pin_x + 4 * GRID)
     turn_spacing = snap(GRID / 2)
     center_idx = (n_signals - 1) / 2
@@ -1619,21 +685,14 @@ def generate_root_sheet():
                      key=lambda i: (-abs(i - center_idx), i))
     v_rank = {idx: rank for rank, idx in enumerate(v_order)}
 
-    # LED junction X: past the last turning column + gap
     led_jct_x = snap(turn_base_x + (n_signals - 1) * turn_spacing + 3 * GRID)
-
-    # Label X: past the LED horizontal extent (R + LED + GND ≈ 6*GRID)
     label_x = snap(led_jct_x + 6 * GRID)
 
-    # Direct-wire destination map for non-D signals
     direct_wire_dest = {
         "A0": addr_pp["A0"], "A1": addr_pp["A1"], "A2": addr_pp["A2"],
         "nCE": ctrl_pp["nCE"], "nOE": ctrl_pp["nOE"], "nWE": ctrl_pp["nWE"],
     }
 
-    # Approach turning columns — left of col1_x, one per direct signal.
-    # Ordered so that signals with increasing fan-out Y get approach columns
-    # closer to col1_x, preventing vertical wire crossings.
     direct_signals_order = ["A0", "A1", "A2", "nCE", "nOE", "nWE"]
     direct_turn = {}
     for i, sig in enumerate(direct_signals_order):
@@ -1644,33 +703,24 @@ def generate_root_sheet():
         ty = snap(fan_start_y + idx * fan_spacing)
         tx = snap(turn_base_x + v_rank[idx] * turn_spacing)
 
-        # 1. Horizontal from connector pin to turning column
         b.add_wire(cx, cy, tx, cy)
-
-        # 2. Vertical from connector Y to fan-out target Y
         b.add_wire(tx, cy, tx, ty)
-
-        # 3. Horizontal to LED junction + LED below
         b.add_wire(tx, ty, led_jct_x, ty)
         b.place_led_below(led_jct_x, ty, drop=2 * GRID)
 
         if sig in direct_wire_dest:
-            # Direct wire: LED junction → approach column → destination pin
             dtx = direct_turn[sig]
             dest_px, dest_py = direct_wire_dest[sig]
-            b.add_wire(led_jct_x, ty, dtx, ty)          # horizontal to approach col
-            b.add_wire(dtx, ty, dtx, dest_py)            # vertical to pin Y
-            b.add_wire(dtx, dest_py, dest_px, dest_py)   # horizontal into pin
+            b.add_wire(led_jct_x, ty, dtx, ty)
+            b.add_wire(dtx, ty, dtx, dest_py)
+            b.add_wire(dtx, dest_py, dest_px, dest_py)
         else:
-            # D signal: LED junction → label (high fanout to 8 byte sheets)
             b.add_wire(led_jct_x, ty, label_x, ty)
             b.add_label(sig, label_x, ty)
 
     # ================================================================
-    # Labels on sheet block input pins (connector signals)
+    # Labels on byte sheet input pins
     # ================================================================
-
-    # -- D0-D7 labels on byte sheet pins (LEFT side) --
     for byte_idx in range(8):
         pp = byte_pp[byte_idx]
         for bit in range(8):
@@ -1680,46 +730,36 @@ def generate_root_sheet():
             b.add_label(sig, px - wire_stub, py, justify="right")
 
     # ================================================================
-    # Route C: Col1 RIGHT → Col2 LEFT (SEL0-7 trunks)
+    # Route C: Col1 RIGHT -> Col2 LEFT (SEL0-7 trunks)
     # ================================================================
-    # 8 vertical trunks in the inter-column gap
     sel_trunk_base_x = snap(col2_x - 3 * GRID)
     sel_trunk_x = [snap(sel_trunk_base_x - i * GRID) for i in range(8)]
 
     for i in range(8):
         sig = f"SEL{i}"
-        # Source: Address Decoder RIGHT pin
         ax, ay = addr_pp[sig]
-        # Destinations: Write Clk Gen LEFT pin + Read OE Gen LEFT pin
         wx, wy = wclk_pp[sig]
         rx, ry = roe_pp[sig]
         tx = sel_trunk_x[i]
 
-        # Horizontal from addr decoder RIGHT to trunk
         b.add_wire(ax, ay, tx, ay)
-        # Segmented vertical trunk
         trunk_ys = sorted(set([snap(ay), snap(wy), snap(ry)]))
         b.add_segmented_trunk(tx, trunk_ys)
-        # Horizontal branches to col2 LEFT pins
         b.add_wire(tx, wy, wx, wy)
         b.add_wire(tx, ry, rx, ry)
 
     # ================================================================
-    # Route D: Col1 RIGHT → Col2 LEFT (WRITE_ACTIVE, READ_EN)
+    # Route D: Col1 RIGHT -> Col2 LEFT (WRITE_ACTIVE, READ_EN)
     # ================================================================
-    # Trunk X positions BETWEEN sel_trunk_x[0] and col2_x to avoid
-    # horizontal overlaps with SEL wires at the same Y
     wa_trunk_x = snap(sel_trunk_base_x + 1 * GRID)
     re_trunk_x = snap(sel_trunk_base_x + 2 * GRID)
 
-    # WRITE_ACTIVE: Control Logic RIGHT → Write Clk Gen LEFT
     wa_src = ctrl_pp["WRITE_ACTIVE"]
     wa_dst = wclk_pp["WRITE_ACTIVE"]
     b.add_wire(wa_src[0], wa_src[1], wa_trunk_x, wa_src[1])
     b.add_wire(wa_trunk_x, wa_src[1], wa_trunk_x, wa_dst[1])
     b.add_wire(wa_trunk_x, wa_dst[1], wa_dst[0], wa_dst[1])
 
-    # READ_EN: Control Logic RIGHT → Read OE Gen LEFT
     re_src = ctrl_pp["READ_EN"]
     re_dst = roe_pp["READ_EN"]
     b.add_wire(re_src[0], re_src[1], re_trunk_x, re_src[1])
@@ -1727,7 +767,7 @@ def generate_root_sheet():
     b.add_wire(re_trunk_x, re_dst[1], re_dst[0], re_dst[1])
 
     # ================================================================
-    # Route E: Col2 RIGHT → Byte Col1 (WRITE_CLK_0-3) — direct wires
+    # Route E: Col2 RIGHT -> Byte Col1 (WRITE_CLK_0-3)
     # ================================================================
     route_e_base_x = snap(col2_x + col2_w + 2 * GRID)
     route_e_sp = GRID
@@ -1744,11 +784,8 @@ def generate_root_sheet():
         b.add_wire(rx, dst_y, dst_x, dst_y)
 
     # ================================================================
-    # Route F: Col2 RIGHT → Byte Col2 (WRITE_CLK_4-7) — direct wires
+    # Route F: Col2 RIGHT -> Byte Col2 (WRITE_CLK_4-7)
     # ================================================================
-    # Route via transit Y above all blocks to avoid crossing hierarchy pins.
-    # Use base_y - 1*GRID so the lowest transit wire stays inside the
-    # A2 page border (~10mm from the top edge).
     transit_y_base = snap(base_y - 1 * GRID)
     route_f_gap1_x = [snap(route_e_base_x + (4 + i) * route_e_sp)
                       for i in range(4)]
@@ -1773,9 +810,7 @@ def generate_root_sheet():
         b.add_wire(g2x, dst_y, dst_x, dst_y)
 
     # ================================================================
-    # BUF_OE_0-7: labels (roe RIGHT pin Y values systematically
-    # coincide with byte D-signal and WRITE_CLK pin Y values,
-    # making direct wires impractical without net merges)
+    # BUF_OE_0-7: labels
     # ================================================================
     for i in range(8):
         sig = f"BUF_OE_{i}"
@@ -1797,10 +832,9 @@ def count_components(builders):
     """Count total ICs, LEDs, resistors across all sheets."""
     totals = {"U": 0, "D": 0, "R": 0, "C": 0, "#PWR": 0, "J": 0, "#FLG": 0}
     for name, builder in builders.items():
-        # The byte sheet is instantiated 8 times
         multiplier = 8 if name == "byte" else 1
         for prefix, count in builder._ref_counters.items():
-            actual = count - 1  # counter is next-to-allocate
+            actual = count - 1
             if prefix in totals:
                 totals[prefix] += actual * multiplier
             else:
@@ -1809,24 +843,10 @@ def count_components(builders):
 
 
 def fix_instance_paths(builders):
-    """Fix sub-sheet symbol instance paths and assign globally unique references.
-
-    KiCad requires:
-    1. Symbol instances in child sheets use the full hierarchical path from root:
-       /{root_uuid}/{sheet_block_uuid} — NOT the child sheet's own UUID.
-    2. ALL reference designators are globally unique across the entire design.
-
-    This function processes sheets in hierarchy order, maintaining a global counter
-    per reference prefix (U, R, D, #PWR, #FLG) so every symbol gets a unique ref.
-
-    IMPORTANT: The original local instance path (/{sheet_uuid}/) is preserved so
-    that sub-sheets pass ERC when opened standalone.  The hierarchy path is appended
-    alongside it.  KiCad uses whichever path matches the current context.
-    """
+    """Fix sub-sheet symbol instance paths and assign globally unique references."""
     root_sch = builders["ram"].sch
     root_uuid = root_sch.uuid
 
-    # Global reference counters — start after root sheet's refs
     global_counters = {}
     for sym in root_sch.schematicSymbols:
         for p in sym.properties:
@@ -1837,31 +857,24 @@ def fix_instance_paths(builders):
                 global_counters[prefix] = max(global_counters.get(prefix, 0), num)
                 break
 
-    # Process each hierarchy sheet in order (determines reference assignment order)
     for sheet in root_sch.sheets:
         fname = sheet.fileName.value
         sheet_block_uuid = sheet.uuid
         hier_path = f"/{root_uuid}/{sheet_block_uuid}"
 
-        # Find the builder for this filename
         builder_name = fname.replace(".kicad_sch", "")
         if builder_name not in builders:
             continue
         builder = builders[builder_name]
 
-        # Check if this is a multi-instance sheet (multiple hierarchy blocks
-        # reference the same filename). If so, only process on the FIRST one
-        # and build all instance paths at once.
         all_sheet_blocks = [s for s in root_sch.sheets if s.fileName.value == fname]
         is_first_instance = (sheet is all_sheet_blocks[0])
         is_multi_instance = len(all_sheet_blocks) > 1
 
         if is_multi_instance and not is_first_instance:
-            continue  # Already handled on first encounter
+            continue
 
         if is_multi_instance:
-            # Multi-instance sheet (byte.kicad_sch used 8 times)
-            # Keep local path, append one hierarchy path per instance
             for sym in builder.sch.schematicSymbols:
                 prefix = ""
                 for p in sym.properties:
@@ -1869,7 +882,6 @@ def fix_instance_paths(builders):
                         prefix = p.value.rstrip("0123456789")
                         break
 
-                # Append hierarchy paths to the existing instance's path list
                 existing = sym.instances[0] if sym.instances else None
                 if existing is None:
                     existing = SymbolProjectInstance(name=PROJECT_NAME, paths=[])
@@ -1885,7 +897,6 @@ def fix_instance_paths(builders):
                         unit=1,
                     ))
         else:
-            # Single-instance sub-sheet: keep local path, append hierarchy path
             for sym in builder.sch.schematicSymbols:
                 prefix = ""
                 for p in sym.properties:
@@ -1913,40 +924,34 @@ def main():
     print("Discrete NES - 8-Byte RAM Prototype Schematic Generator")
     print("=" * 60)
 
-    # Generate all sub-sheets first (they reference lib symbols)
+    # Ensure pin offsets are discovered using BOARD_DIR for temp files
+    get_pin_offsets(board_dir=BOARD_DIR)
+
     print("\nGenerating sub-sheets...")
 
     builders = {}
 
-    # Address decoder
     builders["address_decoder"] = generate_address_decoder()
     print("  [+] address_decoder.kicad_sch")
 
-    # Control logic
     builders["control_logic"] = generate_control_logic()
     print("  [+] control_logic.kicad_sch")
 
-    # Write clock gen
     builders["write_clk_gen"] = generate_write_clk_gen()
     print("  [+] write_clk_gen.kicad_sch")
 
-    # Read OE gen
     builders["read_oe_gen"] = generate_read_oe_gen()
     print("  [+] read_oe_gen.kicad_sch")
 
-    # Single byte sheet (reused for all 8 byte instances)
     builders["byte"] = generate_byte_sheet()
     print("  [+] byte.kicad_sch (shared by all 8 byte instances)")
 
-    # Root sheet
     builders["ram"] = generate_root_sheet()
     print("  [+] ram.kicad_sch (root)")
 
-    # Fix sub-sheet symbol instance paths to use correct hierarchical paths
     fix_instance_paths(builders)
     print("  [*] Fixed hierarchical instance paths")
 
-    # Save all files
     print("\nSaving files...")
     saved_paths = []
     for name, builder in builders.items():
@@ -1955,7 +960,6 @@ def main():
         saved_paths.append(filepath)
         print(f"  Saved: {filepath}")
 
-    # Component count summary
     totals = count_components(builders)
     print("\n" + "=" * 60)
     print("Component Summary")
@@ -1970,17 +974,14 @@ def main():
     print(f"  Total BOM parts: {total_parts}")
     print()
 
-    # Breakdown by IC type
     ic_types = {}
     for name, builder in builders.items():
         multiplier = 8 if name == "byte" else 1
         for sym in builder.sch.schematicSymbols:
             if sym.properties and sym.properties[0].value.startswith("U") or \
                (len(sym.properties) > 0 and any(p.key == "Reference" and p.value.startswith("U") for p in sym.properties)):
-                # Get the lib ID to identify IC type
                 lib_id = sym.libId if hasattr(sym, 'libId') else sym.entryName
                 if lib_id:
-                    # Strip library prefix if present (e.g. "74xGxx:74LVC1G08" -> "74LVC1G08")
                     base_id = lib_id.split(":")[-1] if ":" in lib_id else lib_id
                     if base_id.startswith("74LVC"):
                         ic_types[base_id] = ic_types.get(base_id, 0) + multiplier
