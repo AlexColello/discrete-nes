@@ -203,6 +203,41 @@ SYMBOL_LIB_MAP = {
 }
 
 
+# ==============================================================
+# PCB generation constants
+# ==============================================================
+
+# Map symbol base names to their footprint library:footprint
+FOOTPRINT_MAP = {
+    "74LVC1G00": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G02": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G04": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G07": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G08": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G11": "DSBGA_Packages:DSBGA-6_NumericPads",
+    "74LVC1G32": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G79": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G86": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "74LVC1G125": "DSBGA_Packages:DSBGA-5_NumericPads",
+    "R_Small": "Resistor_SMD:R_0402_1005Metric",
+    "LED_Small": "LED_SMD:LED_0402_1005Metric",
+    "Conn_01x16": "Connector_PinHeader_2.54mm:PinHeader_1x16_P2.54mm_Vertical",
+}
+
+# DSBGA pin number to BGA ball name mapping (TI convention)
+DSBGA5_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "A2", "4": "C1", "5": "C2"}
+DSBGA6_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "A2", "4": "C1", "5": "C2", "6": "B2"}
+
+# Reverse: ball name to pin number
+DSBGA5_BALL_TO_PIN = {v: k for k, v in DSBGA5_PIN_TO_BALL.items()}
+DSBGA6_BALL_TO_PIN = {v: k for k, v in DSBGA6_PIN_TO_BALL.items()}
+
+# KiCad footprint library paths
+KICAD_FP_DIR = r"C:\Program Files\KiCad\9.0\share\kicad\footprints"
+STOCK_DSBGA5_FP = "Package_BGA.pretty/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.kicad_mod"
+STOCK_DSBGA6_FP = "Package_BGA.pretty/Texas_DSBGA-6_0.9x1.4mm_Layout2x3_P0.5mm.kicad_mod"
+
+
 def uid():
     """Generate a new UUID string."""
     return str(_uuid.uuid4())

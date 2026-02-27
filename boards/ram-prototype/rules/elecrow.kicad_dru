@@ -1,0 +1,25 @@
+(version 1)
+
+(rule "Elecrow Min Clearance"
+    (constraint clearance (min 0.2mm))
+)
+
+(rule "Elecrow Min Track Width"
+    (constraint track_width (min 0.2mm))
+)
+
+(rule "Elecrow Min Via"
+    (condition "A.Type == 'Via'")
+    (constraint via_diameter (min 0.8mm))
+    (constraint hole_size (min 0.3mm))
+)
+
+(rule "Elecrow Board Edge Clearance"
+    (constraint edge_clearance (min 0.3mm))
+)
+
+(rule "Elecrow Min Silkscreen"
+    (constraint silk_clearance (min 0.15mm))
+    (constraint text_height (min 1.0mm))
+    (constraint text_thickness (min 0.15mm))
+)

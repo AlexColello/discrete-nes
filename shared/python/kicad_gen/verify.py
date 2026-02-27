@@ -1049,6 +1049,113 @@ def run_erc(sch_path, output_dir, label=None, standalone=False):
 
 
 # ==============================================================
+# DRC via kicad-cli
+# ==============================================================
+
+def run_drc(pcb_path, output_dir, label=None, custom_rules_path=None,
+            skip_types=None):
+    """Run kicad-cli PCB DRC.
+
+    Optionally installs a custom .kicad_dru rules file temporarily.
+
+    Args:
+        pcb_path: Path to the .kicad_pcb file
+        output_dir: Directory for output files
+        label: Label for output filenames (default: derived from pcb_path)
+        custom_rules_path: Optional path to a .kicad_dru file to use
+        skip_types: Set of violation type strings to filter out (e.g.,
+                    {"unconnected_items", "lib_footprint_mismatch"})
+
+    Returns (issues_list, error_count, warning_count).
+    """
+    if skip_types is None:
+        skip_types = set()
+    if label is None:
+        label = os.path.splitext(os.path.basename(pcb_path))[0]
+
+    drc_json = os.path.join(output_dir, f"drc_{label}.json")
+
+    if not os.path.exists(KICAD_CLI):
+        return [f"  kicad-cli not found at {KICAD_CLI}"], 0, 0
+
+    # If custom rules provided, temporarily install them
+    project_dir = os.path.dirname(pcb_path)
+    project_name = os.path.splitext(os.path.basename(pcb_path))[0]
+    dru_path = os.path.join(project_dir, f"{project_name}.kicad_dru")
+    backup_dru = None
+
+    try:
+        if custom_rules_path:
+            # Back up existing .kicad_dru if present
+            if os.path.exists(dru_path):
+                backup_dru = dru_path + ".bak"
+                import shutil
+                shutil.copy2(dru_path, backup_dru)
+            # Install custom rules
+            import shutil
+            shutil.copy2(custom_rules_path, dru_path)
+
+        subprocess.run(
+            [KICAD_CLI, "pcb", "drc", "--format", "json",
+             "--severity-all", "--output", drc_json, pcb_path],
+            capture_output=True, text=True,
+        )
+    finally:
+        # Restore original rules
+        if custom_rules_path:
+            if backup_dru and os.path.exists(backup_dru):
+                import shutil
+                shutil.move(backup_dru, dru_path)
+            elif os.path.exists(dru_path):
+                os.remove(dru_path)
+
+    issues = []
+    real_errors = 0
+    warnings = 0
+
+    if os.path.exists(drc_json):
+        with open(drc_json) as f:
+            data = json.load(f)
+
+        # DRC violations can be in multiple sections
+        filtered_count = 0
+        for section_key in ("violations", "unconnected_items", "schematic_parity"):
+            for v in data.get(section_key, []):
+                severity = v.get("severity", "error")
+                vtype = v.get("type", "unknown")
+                desc = v.get("description", "")
+
+                if vtype in skip_types:
+                    filtered_count += 1
+                    continue
+
+                items_desc = "; ".join(
+                    it.get("description", "")
+                    for it in v.get("items", [])
+                )
+
+                if severity == "error":
+                    real_errors += 1
+                    issues.append(
+                        f"  ERROR [{vtype}]: {desc} ({items_desc})"
+                    )
+                elif severity == "warning":
+                    warnings += 1
+                    issues.append(
+                        f"  WARN [{vtype}]: {desc} ({items_desc})"
+                    )
+
+        if filtered_count > 0:
+            issues.append(
+                f"  (filtered {filtered_count} expected violation(s))"
+            )
+    else:
+        issues.append("  DRC JSON output not generated")
+
+    return issues, real_errors, warnings
+
+
+# ==============================================================
 # Union-Find (for board-specific netlist checks)
 # ==============================================================
 

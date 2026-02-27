@@ -24,7 +24,11 @@
       "Bash(venv/Scripts/python boards/ram-prototype/scripts/generate_ram.py 2>&1 && \"/c/Program Files/KiCad/9.0/bin/kicad-cli\" sch erc --format json --severity-all --exit-code-violations -o /c/Users/alexl/Documents/Github/discrete-nes/boards/ram-prototype/erc_report.json /c/Users/alexl/Documents/Github/discrete-nes/boards/ram-prototype/ram.kicad_sch 2>&1)",
       "Bash(venv/Scripts/python boards/ram-prototype/scripts/generate_ram.py 2>&1 | tail -5 && \"/c/Program Files/KiCad/9.0/bin/kicad-cli\" sch erc --format json --severity-all --exit-code-violations -o /c/Users/alexl/Documents/Github/discrete-nes/boards/ram-prototype/erc_report.json /c/Users/alexl/Documents/Github/discrete-nes/boards/ram-prototype/ram.kicad_sch 2>&1)",
       "Bash(venv/Scripts/python boards/ram-prototype/scripts/generate_ram.py 2>&1 | tail -3 && \"/c/Program Files/KiCad/9.0/bin/kicad-cli\" sch erc --format json --severity-all --exit-code-violations -o /c/Users/alexl/Documents/Github/discrete-nes/boards/ram-prototype/erc_report.json /c/Users/alexl/Documents/Github/discrete-nes/boards/ram-prototype/ram.kicad_sch 2>&1)",
-      "Bash(cd \"C:\\\\Users\\\\alexl\\\\Documents\\\\Github\\\\discrete-nes\" && python -m boards.ram-prototype.scripts.generate_ram 2>&1 || python \"boards/ram-prototype/scripts/generate_ram.py\" 2>&1)"
+      "Bash(cd \"C:\\\\Users\\\\alexl\\\\Documents\\\\Github\\\\discrete-nes\" && python -m boards.ram-prototype.scripts.generate_ram 2>&1 || python \"boards/ram-prototype/scripts/generate_ram.py\" 2>&1)",
+      "WebFetch(domain:docs.kicad.org)",
+      "WebFetch(domain:www.pcbway.com)",
+      "WebFetch(domain:www.elecrow.com)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

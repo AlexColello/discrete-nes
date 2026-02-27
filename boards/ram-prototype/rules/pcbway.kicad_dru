@@ -1,0 +1,23 @@
+(version 1)
+
+(rule "PCBWay Min Clearance"
+    (constraint clearance (min 0.1mm))
+)
+
+(rule "PCBWay Min Track Width"
+    (constraint track_width (min 0.1mm))
+)
+
+(rule "PCBWay Min Via"
+    (condition "A.Type == 'Via'")
+    (constraint via_diameter (min 0.4mm))
+    (constraint hole_size (min 0.2mm))
+)
+
+(rule "PCBWay Min Annular Ring"
+    (constraint annular_width (min 0.1mm))
+)
+
+(rule "PCBWay Board Edge Clearance"
+    (constraint edge_clearance (min 0.25mm))
+)
