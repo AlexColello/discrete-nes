@@ -93,7 +93,7 @@ python scripts/verify_schematics.py
 1. Regenerate: `python scripts/generate_*.py`
 2. Verify: `python scripts/verify_schematics.py`
 3. Fix any errors before considering the change complete
-4. Target: **0 errors**. Warnings (lib_symbol_mismatch, T-junctions) are acceptable
+4. Target: **0 errors, 0 warnings**. Both errors and warnings cause verification failure
 
 The verification script catches bugs that are invisible in KiCad's GUI and that ERC alone misses — especially wire overlaps (silent net merges) and wire-through-pin (valid but unintended connections). See "Verification Script Architecture" section below for details on what each check does and how to adapt the script for new boards.
 
@@ -244,7 +244,7 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - Pin library coordinates use Y-up; apply Y negation + rotation for schematic space
 
 **Known limitations:**
-- `lib_symbol_mismatch` warnings are a kiutils serialization artifact — harmless, fix with "Update symbols from library" in KiCad
+- Embedded lib_symbols are post-processed to match library files exactly (kiutils drops `exclude_from_sim`, property/pin `hide` flags) — see `_fix_lib_symbols()` in `generate_ram.py`
 - Use `round(v, 2)` on all coordinates to eliminate floating-point noise (e.g., `83.82000000000001`)
 
 ### Verification Script Architecture
@@ -410,7 +410,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
    - write_clk_gen.kicad_sch — 8 NANDs for per-byte write clocks
    - read_oe_gen.kicad_sch — 8 NANDs for per-byte buffer OE
    - byte.kicad_sch — 8 DFFs + 8 tri-state buffers (shared by all 8 instances)
-3. Passes KiCad 9 ERC with 0 real errors (only harmless `lib_symbol_mismatch` warnings)
+3. Passes KiCad 9 ERC with 0 errors and 0 warnings
 
 **Step 3: PCB Layout**
 1. Use kiutils to place DSBGA components in grid pattern (3-4mm pitch)

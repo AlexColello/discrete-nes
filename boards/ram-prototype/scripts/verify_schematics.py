@@ -1335,11 +1335,6 @@ def run_erc(sch_path, output_dir, label=None, standalone=False):
                 vtype = v["type"]
                 desc = v["description"]
 
-                # lib_symbol_mismatch is a known harmless kiutils artifact
-                if vtype == "lib_symbol_mismatch":
-                    warnings += 1
-                    continue
-
                 # Filter standalone artifacts for sub-sheet ERC
                 if standalone and _is_standalone_artifact(v):
                     filtered_count += 1
@@ -1356,10 +1351,9 @@ def run_erc(sch_path, output_dir, label=None, standalone=False):
                     )
                 elif severity == "warning":
                     warnings += 1
-                    if vtype != "lib_symbol_mismatch":
-                        issues.append(
-                            f"  WARN [{path}] {vtype}: {desc}"
-                        )
+                    issues.append(
+                        f"  WARN [{path}] {vtype}: {desc}"
+                    )
     else:
         issues.append("  ERC JSON output not generated")
 
@@ -1496,8 +1490,7 @@ def main():
             total_errors += erc_errors
             total_warnings += erc_warnings
             print(
-                f"  ERC: {erc_errors} error(s), {erc_warnings} warning(s) "
-                f"(lib_symbol_mismatch excluded from errors)"
+                f"  ERC: {erc_errors} error(s), {erc_warnings} warning(s)"
             )
 
         # Per-sub-sheet standalone ERC
@@ -1560,15 +1553,16 @@ def main():
             f.write("\n")
 
     # -- Summary --
+    total_issues = total_errors + total_warnings
     print(f"\n{'=' * 60}")
-    if total_errors > 0:
+    if total_issues > 0:
         print(f"FAILED: {total_errors} error(s), {total_warnings} warning(s)")
     else:
-        print(f"PASSED: 0 errors, {total_warnings} warning(s)")
+        print(f"PASSED: 0 errors, 0 warnings")
     print(f"Report: {report_path}")
     print(f"{'=' * 60}")
 
-    return 1 if total_errors > 0 else 0
+    return 1 if total_issues > 0 else 0
 
 
 if __name__ == "__main__":

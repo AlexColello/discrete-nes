@@ -142,9 +142,37 @@ def _parse_pin_hide_flags(lib_path, wanted):
     return result
 
 
+def _extract_raw_symbol(text, sym_name):
+    """Extract the raw s-expression block for a symbol from library file text.
+
+    Returns the block as a string (one-tab indent, matching the library file
+    format), or None if not found.
+    """
+    pat = re.compile(r'^\t\(symbol "' + re.escape(sym_name) + r'"', re.MULTILINE)
+    m = pat.search(text)
+    if not m:
+        return None
+    depth = 0
+    for i in range(m.start(), len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[m.start():i + 1]
+    return None
+
+
 def load_lib_symbols():
-    """Load symbol definitions from KiCad stock libraries."""
+    """Load symbol definitions from KiCad stock libraries.
+
+    Also extracts the raw s-expression text for each symbol so that
+    ``SchematicBuilder.save()`` can replace kiutils' lossy serialization
+    with exact library text (fixing exclude_from_sim, property/pin hide
+    flags, and other attributes that kiutils drops).
+    """
     symbols = {}
+    raw_texts = {}  # sym_name -> raw s-expression text from library file
 
     kicad_sym_dir = r"C:\Program Files\KiCad\9.0\share\kicad\symbols"
     stock_libs = {
@@ -163,8 +191,30 @@ def load_lib_symbols():
                 f"KiCad stock library not found: {lib_path}\n"
                 "Install KiCad 9.0 or adjust kicad_sym_dir path."
             )
-        # Parse raw file for pin hide flags that kiutils doesn't read
+        lib_text = open(lib_path, "r", encoding="utf-8").read()
+        lib_prefix = ""
+        # Determine the library prefix from SYMBOL_LIB_MAP
+        for sn in wanted:
+            if sn in SYMBOL_LIB_MAP:
+                lib_prefix = SYMBOL_LIB_MAP[sn]
+                break
+
+        # Extract raw text and parse pin hide flags
         hide_flags = _parse_pin_hide_flags(lib_path, wanted)
+        for sn in wanted:
+            raw = _extract_raw_symbol(lib_text, sn)
+            if raw:
+                # Re-key with the "lib:name" prefix used in schematics
+                qualified = f"{lib_prefix}:{sn}" if lib_prefix else sn
+                # Replace the library indent with schematic indent (4 spaces)
+                # and rename the symbol to include the library prefix
+                fixed = raw.replace(
+                    f'(symbol "{sn}"',
+                    f'(symbol "{qualified}"',
+                    1,
+                )
+                raw_texts[sn] = fixed
+
         lib = SymbolLib.from_file(lib_path)
         for sym in lib.symbols:
             if sym.libId in wanted:
@@ -175,17 +225,23 @@ def load_lib_symbols():
                     sym.pinNamesHide = True
                 symbols[sym.libId] = sym
 
-    return symbols
+    return symbols, raw_texts
 
 
-ALL_SYMBOLS = None  # lazy-loaded
+ALL_SYMBOLS = None   # lazy-loaded
+RAW_LIB_TEXTS = None  # lazy-loaded: {sym_name: raw s-expression text}
 
 
 def get_lib_symbols():
-    global ALL_SYMBOLS
+    global ALL_SYMBOLS, RAW_LIB_TEXTS
     if ALL_SYMBOLS is None:
-        ALL_SYMBOLS = load_lib_symbols()
+        ALL_SYMBOLS, RAW_LIB_TEXTS = load_lib_symbols()
     return ALL_SYMBOLS
+
+
+def get_raw_lib_texts():
+    get_lib_symbols()  # ensure loaded
+    return RAW_LIB_TEXTS
 
 
 # --------------------------------------------------------------
@@ -707,8 +763,65 @@ class SchematicBuilder:
 
     # -- save --
 
+    @staticmethod
+    def _fix_lib_symbols(filepath):
+        """Replace kiutils-serialized lib_symbol blocks with exact library text.
+
+        kiutils drops several attributes when serializing library symbols:
+        - ``exclude_from_sim no``
+        - ``(hide yes)`` on properties (Footprint, Datasheet, etc.)
+        - ``(hide yes)`` on pins (e.g., 74LVC1G04 NC pin)
+        - ``(embedded_fonts no)``
+
+        This post-processing step replaces each embedded lib_symbol block
+        with the raw s-expression text extracted from the KiCad stock library
+        files, ensuring a byte-exact match and eliminating lib_symbol_mismatch
+        ERC warnings.
+        """
+        raw_texts = get_raw_lib_texts()
+        text = open(filepath, "r", encoding="utf-8").read()
+
+        for sym_name, raw_block in raw_texts.items():
+            qualified = SYMBOL_LIB_MAP.get(sym_name, "")
+            qualified = f"{qualified}:{sym_name}" if qualified else sym_name
+
+            # Find the kiutils-generated block for this symbol
+            pat = re.compile(
+                r'^(\s*)\(symbol "' + re.escape(qualified) + r'"',
+                re.MULTILINE,
+            )
+            m = pat.search(text)
+            if not m:
+                continue
+
+            # Find the end of this block by matching parens
+            depth = 0
+            start = m.start()
+            end = start
+            for i in range(start, len(text)):
+                if text[i] == "(":
+                    depth += 1
+                elif text[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+
+            # Determine the indentation of the block in the schematic
+            indent = m.group(1)
+            # Re-indent the raw library block to match (library uses one tab)
+            fixed = raw_block.replace("\n\t", "\n" + indent)
+            # Fix the first line indent too
+            if fixed.startswith("\t"):
+                fixed = indent + fixed.lstrip("\t")
+
+            text = text[:start] + fixed + text[end:]
+
+        open(filepath, "w", encoding="utf-8").write(text)
+
     def save(self, filepath):
         self.sch.to_file(filepath)
+        self._fix_lib_symbols(filepath)
         return filepath
 
 
