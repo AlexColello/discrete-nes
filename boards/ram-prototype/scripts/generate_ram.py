@@ -759,14 +759,22 @@ def generate_address_decoder():
         b.add_wire(base_x, trunk_top_y, addr_trunk_x[i], trunk_top_y)
 
     # -- Three inverters for complemented address bits --
-    # Offset inverter Y by +4*GRID so NEITHER the inverter center Y NOR
-    # the NC pin Y (= inv_y - 2.54) coincides with any AND gate pin Y.
-    # AND pins sit at row_y + {0, ±5.08}. Forbidden offsets (mod 25.4):
-    #   0, ±2.54, ±5.08, 7.62  →  first safe grid-aligned offset = 4*GRID.
+    # Offset inverter Y by +5*GRID, with LED drop=4*GRID, satisfying:
+    #   1. Pin coincidence: center Y and NC pin Y (center - 2.54) must not
+    #      coincide with any AND gate pin Y (mod 25.4: {0, ±5.08}).
+    #      Forbidden center offsets: 0, ±2.54, ±5.08, 7.62.
+    #   2. Body overlap: inverter body bbox (±6.35mm Y from center) must not
+    #      overlap branch wire Y values at AND pin positions.
+    #      +4*GRID body range [3.81, 16.51] overlaps 5.08 → FAIL.
+    #      +5*GRID body range [6.35, 19.05] clears all → OK.
+    #   3. LED GND endpoint: inverter LED GND wire at center + drop + 2*GRID
+    #      must not coincide with AND pin Y values.
+    #      +5*GRID, drop=3*GRID → GND at +5+3+2=+10*GRID ≡ 0 mod 25.4 → FAIL.
+    #      +5*GRID, drop=4*GRID → GND at +5+4+2=+11*GRID ≡ 2.54 mod 25.4 → OK.
     inv_in_pins = []   # inverter input pin positions
     inv_out_pins = []  # inverter output pin positions
     for i in range(3):
-        y = base_y + i * SYM_SPACING_Y + 4 * GRID
+        y = base_y + i * SYM_SPACING_Y + 5 * GRID
         _, pins = b.place_symbol("74LVC1G04", inv_x, y)
         b.connect_power(pins)
         inv_in_pins.append(pins["2"])
@@ -822,8 +830,10 @@ def generate_address_decoder():
         # Wire from inverter output to trunk (split at LED junction point)
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], trunk_x, out_pin[1])
-        # LED branches down from a point on this wire
-        b.place_led_below(led_jct_x, out_pin[1])
+        # LED branches down from a point on this wire.
+        # drop=4*GRID so the GND wire endpoint (drop + 2*GRID = 6*GRID below)
+        # doesn't coincide with AND gate branch wire Y values.
+        b.place_led_below(led_jct_x, out_pin[1], drop=4 * GRID)
 
         # Collect AND gate inputs using inverted signal
         branch_targets = []

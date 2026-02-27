@@ -7,13 +7,15 @@ Checks for common issues that have caused ERC failures or visual problems:
 2. Wire overlaps (same-direction wires sharing ranges silently merge nets)
 3. Dangling wire endpoints (not connected to any pin, wire, label, junction)
 4. Wires passing through component pins (unintended connections)
+4b. Wires passing through component bodies (bbox-based)
 5. T-junctions without explicit junction dots (visual issue)
-6. Component overlap (non-power parts placed on top of each other)
-7. Content drawn on top of hierarchical sheet blocks
-8. Content outside the page drawing border
-9. Power symbol orientation (VCC pointing up, GND pointing down)
-10. Netlist connectivity (hierarchy pin connections match expected topology)
-11. ERC via kicad-cli on the root schematic
+6. Wire overlaps pin stub (wire doubling a pin's built-in stub line)
+7. Component overlap (bbox intersection for non-power parts)
+8. Content drawn on top of hierarchical sheet blocks (bbox-based)
+9. Content outside the page drawing border (bbox-based)
+10. Power symbol orientation (VCC pointing up, GND pointing down)
+11. Netlist connectivity (hierarchy pin connections match expected topology)
+12. ERC via kicad-cli on the root schematic
 
 Results are written to verify_output/ directory (gitignored).
 SVGs are exported to verify_output/svg/ for visual inspection.
@@ -93,61 +95,78 @@ def _extract_lib_pins(lib_sym):
     return pins
 
 
-def _compute_lib_bbox(lib_sym):
-    """Compute bounding box of a library symbol in library space (Y-up).
+def _collect_lib_geometry(lib_sym):
+    """Collect graphical and pin geometry from a library symbol.
 
-    Returns (min_x, min_y, max_x, max_y) or None if no geometry found.
-    Includes graphical items (polylines, rectangles, circles, arcs) and
-    pin tip/body-end positions.
+    Returns (gfx_x, gfx_y, pin_x, pin_y) — four lists of coordinates.
+    gfx covers polylines, rectangles, circles, arcs.
+    pin covers pin tip and body-end positions.
     """
-    all_x = []
-    all_y = []
+    gfx_x, gfx_y = [], []
+    pin_x, pin_y = [], []
 
-    # Iterate sub-symbols (try 'symbols' first, then 'units')
     sub_syms = getattr(lib_sym, 'symbols', []) or []
     if not sub_syms:
         sub_syms = getattr(lib_sym, 'units', []) or []
 
     for sub_sym in sub_syms:
-        # Graphical items
         for item in getattr(sub_sym, 'graphicItems', []):
             cls_name = type(item).__name__
             if cls_name == 'SyPolyLine':
                 for pt in getattr(item, 'points', []):
-                    all_x.append(pt.X)
-                    all_y.append(pt.Y)
+                    gfx_x.append(pt.X)
+                    gfx_y.append(pt.Y)
             elif cls_name == 'SyRect':
-                all_x.extend([item.start.X, item.end.X])
-                all_y.extend([item.start.Y, item.end.Y])
+                gfx_x.extend([item.start.X, item.end.X])
+                gfx_y.extend([item.start.Y, item.end.Y])
             elif cls_name == 'SyCircle':
                 r = getattr(item, 'radius', 0) or 0
-                all_x.extend([item.center.X - r, item.center.X + r])
-                all_y.extend([item.center.Y - r, item.center.Y + r])
+                gfx_x.extend([item.center.X - r, item.center.X + r])
+                gfx_y.extend([item.center.Y - r, item.center.Y + r])
             elif cls_name == 'SyArc':
                 for attr in ('start', 'mid', 'end'):
                     pt = getattr(item, attr, None)
                     if pt:
-                        all_x.append(pt.X)
-                        all_y.append(pt.Y)
+                        gfx_x.append(pt.X)
+                        gfx_y.append(pt.Y)
 
-        # Pins: include both the tip and the body end of each pin
         for pin in getattr(sub_sym, 'pins', []):
             px, py = pin.position.X, pin.position.Y
             pa = getattr(pin.position, 'angle', 0) or 0
             pl = getattr(pin, 'length', 2.54) or 2.54
-            # Pin tip (connection point)
-            all_x.append(px)
-            all_y.append(py)
-            # Pin body end: tip + (tip→body direction) * length
-            # Pin angle is direction from tip toward IC body
+            pin_x.append(px)
+            pin_y.append(py)
             rad = math.radians(pa)
-            all_x.append(px + math.cos(rad) * pl)
-            all_y.append(py + math.sin(rad) * pl)
+            pin_x.append(px + math.cos(rad) * pl)
+            pin_y.append(py + math.sin(rad) * pl)
 
+    return gfx_x, gfx_y, pin_x, pin_y
+
+
+def _compute_lib_bbox(lib_sym):
+    """Compute full bounding box of a library symbol in library space (Y-up).
+
+    Returns (min_x, min_y, max_x, max_y) or None if no geometry found.
+    Includes graphical items AND pin tip/body-end positions.
+    """
+    gfx_x, gfx_y, pin_x, pin_y = _collect_lib_geometry(lib_sym)
+    all_x = gfx_x + pin_x
+    all_y = gfx_y + pin_y
     if not all_x:
         return None
-
     return (min(all_x), min(all_y), max(all_x), max(all_y))
+
+
+def _compute_lib_body_bbox(lib_sym):
+    """Compute bounding box of a library symbol's graphical body only.
+
+    Excludes pin stubs — only covers polylines, rectangles, circles, arcs.
+    Returns (min_x, min_y, max_x, max_y) or None if no geometry found.
+    """
+    gfx_x, gfx_y, _, _ = _collect_lib_geometry(lib_sym)
+    if not gfx_x:
+        return None
+    return (min(gfx_x), min(gfx_y), max(gfx_x), max(gfx_y))
 
 
 def _lib_bbox_to_schematic(lib_bbox, cx, cy, angle):
@@ -227,14 +246,19 @@ def parse_schematic(filepath):
     # -- Library symbol pin map and bounding boxes --
     lib_pin_map = {}  # lib_id -> [(pin_num, lib_x, lib_y, pin_angle, pin_length)]
     lib_bboxes = {}   # lib_name -> (min_x, min_y, max_x, max_y) in library space
+    lib_body_bboxes = {}  # lib_name -> body-only bbox (no pin stubs)
     for lib_sym in sch.libSymbols:
         lib_pin_map[lib_sym.libId] = _extract_lib_pins(lib_sym)
         bbox = _compute_lib_bbox(lib_sym)
         if bbox:
             lib_bboxes[lib_sym.libId] = bbox
-            # Also key by short name for component lookup
             short = lib_sym.libId.split(":")[-1] if ":" in lib_sym.libId else lib_sym.libId
             lib_bboxes[short] = bbox
+        body_bbox = _compute_lib_body_bbox(lib_sym)
+        if body_bbox:
+            lib_body_bboxes[lib_sym.libId] = body_bbox
+            short = lib_sym.libId.split(":")[-1] if ":" in lib_sym.libId else lib_sym.libId
+            lib_body_bboxes[short] = body_bbox
 
     # -- Component instances and pin positions --
     pins = {}          # (x,y) -> (ref, pin_num, pin_type_or_name)
@@ -347,6 +371,7 @@ def parse_schematic(filepath):
         'page_size': (page_w, page_h),
         'components': components,
         'lib_bboxes': lib_bboxes,
+        'lib_body_bboxes': lib_body_bboxes,
     }
 
 
@@ -559,6 +584,99 @@ def check_wire_through_pins(data):
     return issues
 
 
+def _wire_segment_intersects_bbox(x1, y1, x2, y2, bbox):
+    """Check if an orthogonal wire segment intersects a bounding box.
+
+    The wire must be horizontal or vertical.  Returns True if any part of
+    the wire's interior (excluding endpoints) passes through the bbox.
+    """
+    bmin_x, bmin_y, bmax_x, bmax_y = bbox
+
+    if abs(y1 - y2) < TOLERANCE:
+        # Horizontal wire — check if wire Y is within bbox Y range
+        # and wire X range overlaps bbox X range (interior only)
+        wy = y1
+        if wy <= bmin_y + TOLERANCE or wy >= bmax_y - TOLERANCE:
+            return False
+        wxmin, wxmax = min(x1, x2), max(x1, x2)
+        # Interior of wire must overlap bbox X range
+        return wxmin + TOLERANCE < bmax_x and wxmax - TOLERANCE > bmin_x
+    elif abs(x1 - x2) < TOLERANCE:
+        # Vertical wire — check if wire X is within bbox X range
+        # and wire Y range overlaps bbox Y range (interior only)
+        wx = x1
+        if wx <= bmin_x + TOLERANCE or wx >= bmax_x - TOLERANCE:
+            return False
+        wymin, wymax = min(y1, y2), max(y1, y2)
+        return wymin + TOLERANCE < bmax_y and wymax - TOLERANCE > bmin_y
+
+    return False
+
+
+def check_wire_through_body(data):
+    """Check for wires passing through component graphical bodies.
+
+    A wire that crosses through a component's graphical body (polylines,
+    rectangles, circles, arcs — excluding pin stubs) obscures the
+    schematic and indicates a routing error.  Wires that connect to a
+    pin of the component are excluded (their endpoints touch the
+    component intentionally).
+
+    Uses the body-only bounding box (no pin stubs) to avoid false
+    positives from wires that merely cross through a pin stub area.
+    """
+    wires = data['wires']
+    comps = data['components']
+    lib_body_bboxes = data.get('lib_body_bboxes', {})
+    pins = data['pins']  # (x,y) -> (ref, pin_num, lib_name)
+    issues = []
+
+    # Build lookup: ref -> set of pin positions
+    ref_pins = {}
+    for (px, py), (ref, _pnum, _lib) in pins.items():
+        ref_pins.setdefault(ref, set()).add((px, py))
+
+    # Pre-compute schematic body bboxes per component
+    comp_body_bboxes = []
+    for ref, lib_name, cx, cy, angle in comps:
+        if ref.startswith("#"):
+            comp_body_bboxes.append(None)
+            continue
+        body_bbox = lib_body_bboxes.get(lib_name)
+        if body_bbox:
+            comp_body_bboxes.append(
+                _lib_bbox_to_schematic(body_bbox, cx, cy, angle))
+        else:
+            comp_body_bboxes.append(None)
+
+    for w_idx, ((x1, y1), (x2, y2)) in enumerate(wires):
+        for c_idx, (ref, lib_name, cx, cy, angle) in enumerate(comps):
+            bbox = comp_body_bboxes[c_idx]
+            if bbox is None:
+                continue
+
+            if not _wire_segment_intersects_bbox(x1, y1, x2, y2, bbox):
+                continue
+
+            # Exclude wires that connect to a pin of this component
+            comp_pins = ref_pins.get(ref, set())
+            ep1 = (x1, y1)
+            ep2 = (x2, y2)
+            connects = any(
+                pts_close(ep, pp) for ep in (ep1, ep2) for pp in comp_pins)
+            if connects:
+                continue
+
+            issues.append(
+                f"  Wire #{w_idx} ({x1},{y1})->({x2},{y2}) "
+                f"passes through body of {ref} ({lib_name}) "
+                f"bbox [{bbox[0]:.2f},{bbox[1]:.2f}]-"
+                f"[{bbox[2]:.2f},{bbox[3]:.2f}]"
+            )
+
+    return issues
+
+
 def check_tjunctions_without_dots(data):
     """Find T-junctions missing explicit junction dots.
 
@@ -609,14 +727,29 @@ def check_tjunctions_without_dots(data):
     return issues
 
 
-def check_component_overlap(data):
-    """Check for non-power components placed too close together.
+def _get_schematic_bbox(ref, lib_name, cx, cy, angle, lib_bboxes):
+    """Return schematic-space bbox for a component, or None."""
+    lib_bbox = lib_bboxes.get(lib_name)
+    if lib_bbox:
+        return _lib_bbox_to_schematic(lib_bbox, cx, cy, angle)
+    return None
 
-    Two components whose centers are within a minimum clearance distance
-    are almost certainly overlapping visually.  This catches layout bugs
-    where LEDs, resistors, or other parts are placed on top of each other.
+
+def _bboxes_overlap(a, b):
+    """Return True if two (min_x, min_y, max_x, max_y) rectangles overlap."""
+    return (a[0] < b[2] - TOLERANCE and a[2] > b[0] + TOLERANCE and
+            a[1] < b[3] - TOLERANCE and a[3] > b[1] + TOLERANCE)
+
+
+def check_component_overlap(data):
+    """Check for non-power components whose bounding boxes overlap.
+
+    Uses library symbol bounding boxes (graphical items + pins) transformed
+    to schematic space for each instance.  Falls back to a center-to-center
+    distance check when bbox data is unavailable.
     """
     comps = data['components']
+    lib_bboxes = data.get('lib_bboxes', {})
     issues = []
 
     # Skip power symbols (#PWR...) and connectors (Conn pins are close by design)
@@ -626,20 +759,39 @@ def check_component_overlap(data):
         if not ref.startswith("#") and not lib.startswith("Conn")
     ]
 
-    # Minimum center-to-center distance (mm).  Two small components
-    # (R_Small, LED_Small) with centers closer than this are overlapping.
+    # Pre-compute schematic bboxes
+    sch_bboxes = []
+    for ref, lib, cx, cy, angle in non_power:
+        sch_bboxes.append(_get_schematic_bbox(ref, lib, cx, cy, angle, lib_bboxes))
+
+    # Minimum center-to-center fallback distance when no bbox available
     MIN_DIST = 1.5
 
     for i in range(len(non_power)):
         ref_a, lib_a, ax, ay, _aa = non_power[i]
+        bbox_a = sch_bboxes[i]
         for j in range(i + 1, len(non_power)):
             ref_b, lib_b, bx, by, _ab = non_power[j]
-            dist = math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
-            if dist < MIN_DIST:
-                issues.append(
-                    f"  {ref_a} ({lib_a}) and {ref_b} ({lib_b}) overlap: "
-                    f"centers ({ax},{ay}) and ({bx},{by}) dist={dist:.2f}mm"
-                )
+            bbox_b = sch_bboxes[j]
+
+            if bbox_a and bbox_b:
+                if _bboxes_overlap(bbox_a, bbox_b):
+                    issues.append(
+                        f"  {ref_a} ({lib_a}) bbox "
+                        f"[{bbox_a[0]:.2f},{bbox_a[1]:.2f}]-"
+                        f"[{bbox_a[2]:.2f},{bbox_a[3]:.2f}] overlaps "
+                        f"{ref_b} ({lib_b}) bbox "
+                        f"[{bbox_b[0]:.2f},{bbox_b[1]:.2f}]-"
+                        f"[{bbox_b[2]:.2f},{bbox_b[3]:.2f}]"
+                    )
+            else:
+                # Fallback: center-to-center distance
+                dist = math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
+                if dist < MIN_DIST:
+                    issues.append(
+                        f"  {ref_a} ({lib_a}) and {ref_b} ({lib_b}) overlap: "
+                        f"centers ({ax},{ay}) and ({bx},{by}) dist={dist:.2f}mm"
+                    )
 
     return issues
 
@@ -650,6 +802,10 @@ def check_content_on_sheet_blocks(data):
     Sheet blocks are rectangular regions representing hierarchical sub-sheets.
     Wires, components, and labels should not be placed inside these regions
     (except for the sheet's own pins, which sit on the edges).
+
+    Uses component bounding boxes when available so that any part of a
+    component body intruding into a sheet block is detected, not just
+    its center point.
     """
     sheet_blocks = data.get('sheet_blocks', [])
     if not sheet_blocks:
@@ -657,6 +813,7 @@ def check_content_on_sheet_blocks(data):
 
     wires = data['wires']
     comps = data['components']
+    lib_bboxes = data.get('lib_bboxes', {})
     issues = []
 
     def _inside_block(px, py, bx, by, bw, bh):
@@ -664,19 +821,35 @@ def check_content_on_sheet_blocks(data):
         return (bx + TOLERANCE < px < bx + bw - TOLERANCE and
                 by + TOLERANCE < py < by + bh - TOLERANCE)
 
+    def _bbox_intrudes_block(comp_bbox, bx, by, bw, bh):
+        """True if component bbox overlaps the sheet block interior."""
+        block_bbox = (bx, by, bx + bw, by + bh)
+        return _bboxes_overlap(comp_bbox, block_bbox)
+
     # Collect sheet pin positions (these are allowed on block edges)
     sheet_pin_set = data.get('sheet_pins', set())
 
-    # Check component centers
+    # Check component bounding boxes (fall back to center point)
     for ref, lib_name, cx, cy, angle in comps:
         if ref.startswith("#"):
             continue  # power symbols can overlap
+        comp_bbox = _get_schematic_bbox(ref, lib_name, cx, cy, angle, lib_bboxes)
         for sname, bx, by, bw, bh in sheet_blocks:
-            if _inside_block(cx, cy, bx, by, bw, bh):
-                issues.append(
-                    f"  {ref} ({lib_name}) at ({cx},{cy}) inside "
-                    f"sheet block \"{sname}\" [{bx},{by} {bw}x{bh}]"
-                )
+            if comp_bbox:
+                if _bbox_intrudes_block(comp_bbox, bx, by, bw, bh):
+                    issues.append(
+                        f"  {ref} ({lib_name}) bbox "
+                        f"[{comp_bbox[0]:.2f},{comp_bbox[1]:.2f}]-"
+                        f"[{comp_bbox[2]:.2f},{comp_bbox[3]:.2f}] "
+                        f"intrudes into sheet block \"{sname}\" "
+                        f"[{bx},{by} {bw}x{bh}]"
+                    )
+            else:
+                if _inside_block(cx, cy, bx, by, bw, bh):
+                    issues.append(
+                        f"  {ref} ({lib_name}) at ({cx},{cy}) inside "
+                        f"sheet block \"{sname}\" [{bx},{by} {bw}x{bh}]"
+                    )
 
     # Check wire segments — flag if both endpoints inside the same block,
     # or if a wire crosses through a block interior.
@@ -1245,6 +1418,11 @@ def main():
         through = check_wire_through_pins(data)
         if through:
             file_results.append(("Wire Through Pin", through, True))
+
+        # 4b. Wires through component bodies
+        through_body = check_wire_through_body(data)
+        if through_body:
+            file_results.append(("Wire Through Body", through_body, True))
 
         # 5. T-junctions without dots (warning only)
         tjuncs = check_tjunctions_without_dots(data)
