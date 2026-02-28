@@ -66,6 +66,9 @@ build/
 # Verification output
 **/verify_output/
 
+# Downloaded tools (FreeRouting JAR, etc.)
+tools/freerouting/
+
 # OS
 .DS_Store
 Thumbs.db

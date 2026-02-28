@@ -3,8 +3,9 @@
 Generate KiCad PCB layout for the 8-byte discrete RAM prototype.
 
 Places all 512 components (161 ICs, 175 LEDs, 175 resistors, 1 connector)
-in a grouped layout matching the schematic hierarchy. No trace routing --
-that will be done manually in KiCad.
+in a grouped layout matching the schematic hierarchy.  After placement,
+pre-routes repetitive local connections (power vias, IC→R→LED chains,
+DFF Q→Buffer A) to reduce autorouter workload.
 
 Layout:
   +------+-----------+-----------+-----------+
@@ -254,6 +255,297 @@ def compute_group_size(placements):
 
 
 # --------------------------------------------------------------
+# Pre-routing
+# --------------------------------------------------------------
+
+# Via and trace sizing
+VIA_SIZE = 0.6       # mm outer diameter
+VIA_DRILL = 0.3      # mm drill (KiCad default min)
+POWER_TRACE_W = 0.3  # mm trace width for power stubs
+SIGNAL_TRACE_W = 0.2 # mm trace width for signals
+VIA_OFFSET = 0.6     # mm offset from pad center to via center
+
+
+def _build_net_pad_index(pcb):
+    """Build mapping of net_number -> [(ref, pad_number, abs_x, abs_y), ...].
+
+    Also returns ref_to_part: {ref -> part_name} for identifying IC types.
+    """
+    import math
+
+    net_to_pads = defaultdict(list)
+
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        fp_x, fp_y = fp.position.X, fp.position.Y
+        angle_rad = math.radians(fp.position.angle or 0)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+
+        for pad in fp.pads:
+            if pad.net and pad.net.number and pad.net.number > 0:
+                px, py = pad.position.X, pad.position.Y
+                # KiCad uses clockwise rotation (positive angle = CW in Y-down)
+                abs_x = round(fp_x + px * cos_a + py * sin_a, 2)
+                abs_y = round(fp_y - px * sin_a + py * cos_a, 2)
+                net_to_pads[pad.net.number].append(
+                    (ref, pad.number, abs_x, abs_y, pad.net.name))
+
+    return net_to_pads
+
+
+def preroute_power_vias(pcb):
+    """Drop vias from every IC GND/VCC pad and LED cathode to inner planes.
+
+    - IC pin 3 (GND) -> via to In1.Cu (GND plane)
+    - IC pin 5 (VCC) -> via to In2.Cu (VCC plane)
+    - LED/R GND pads  -> via to In1.Cu (GND plane)
+
+    Via offset direction:
+    - DSBGA ICs: away from IC center (outward from body)
+    - LEDs/Rs: downward (+Y direction) into the gap between rows
+
+    Returns (via_count, trace_count).
+    """
+    import math
+
+    gnd_net = pcb.get_net_number("GND")
+    vcc_net = pcb.get_net_number("VCC")
+    if gnd_net is None or vcc_net is None:
+        print("  WARNING: GND or VCC net not found, skipping power vias")
+        return 0, 0
+
+    vias = 0
+    traces = 0
+
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        lib_id = fp.libId or ""
+        fp_x, fp_y = fp.position.X, fp.position.Y
+        angle_rad = math.radians(fp.position.angle or 0)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+
+        is_dsbga = "DSBGA" in lib_id
+        is_led = "LED" in lib_id
+        is_resistor = "Resistor" in lib_id
+
+        if not (is_dsbga or is_led or is_resistor):
+            continue
+
+        for pad in fp.pads:
+            if not (pad.net and pad.net.name in ("GND", "VCC")):
+                continue
+
+            net_name = pad.net.name
+            net_num = pad.net.number
+
+            px, py = pad.position.X, pad.position.Y
+            # KiCad uses clockwise rotation (positive angle = CW in Y-down)
+            abs_x = round(fp_x + px * cos_a + py * sin_a, 2)
+            abs_y = round(fp_y - px * sin_a + py * cos_a, 2)
+
+            if net_name == "GND":
+                target_layers = ["F.Cu", "In1.Cu"]
+            else:  # VCC
+                target_layers = ["F.Cu", "In2.Cu"]
+
+            if is_dsbga:
+                # DSBGA: offset away from IC center (into row gap)
+                dx = abs_x - fp_x
+                dy = abs_y - fp_y
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist > 0.01:
+                    via_x = round(abs_x + (dx / dist) * VIA_OFFSET, 2)
+                    via_y = round(abs_y + (dy / dist) * VIA_OFFSET, 2)
+                else:
+                    via_x = abs_x
+                    via_y = round(abs_y + VIA_OFFSET, 2)
+            else:
+                # LEDs and Rs: offset downward to avoid crossing into
+                # next column's IC courtyard
+                via_x = abs_x
+                via_y = round(abs_y + VIA_OFFSET, 2)
+
+            # Short stub trace from pad to via
+            pcb.add_trace((abs_x, abs_y), (via_x, via_y),
+                          net_num, POWER_TRACE_W, "F.Cu")
+            traces += 1
+
+            # Via to inner plane
+            pcb.add_via((via_x, via_y), net_num,
+                        VIA_SIZE, VIA_DRILL, target_layers)
+            vias += 1
+
+    return vias, traces
+
+
+def preroute_r_to_led(pcb, netlist_data):
+    """Route R LED-side pad -> LED anode for every IC+R+LED cell.
+
+    Only routes the R-to-LED connection (safe: clear space between R and LED).
+    Does NOT route IC output->R (crosses DSBGA pins at 0.5mm pitch).
+
+    Uses net-based matching to find paired components.
+
+    Returns number of trace segments added.
+    """
+    net_to_pads = _build_net_pad_index(pcb)
+
+    traces = 0
+
+    # For each IC, find its nearest R on the output net, then route R->LED
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if not ref.startswith("U"):
+            continue
+
+        # Get IC output pin (pin 4) net
+        ic_out_net = pcb.get_pad_net(ref, "4")
+        if ic_out_net is None or ic_out_net == 0:
+            continue
+
+        # IC position for proximity filtering
+        ic_x, ic_y = fp.position.X, fp.position.Y
+
+        # Find nearest R pad on the same net (within IC_CELL_W distance)
+        pads_on_net = net_to_pads.get(ic_out_net, [])
+        r_ref = None
+        r_pad_num = None
+        best_dist = float("inf")
+        for pad_ref, pad_num, px, py, pnet in pads_on_net:
+            if pad_ref.startswith("R"):
+                dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
+                if dist < IC_CELL_W and dist < best_dist:
+                    best_dist = dist
+                    r_ref = pad_ref
+                    r_pad_num = pad_num
+
+        if r_ref is None:
+            continue
+
+        # Find R's other pad (LED side) and its net
+        r_other_pad = "2" if r_pad_num == "1" else "1"
+        r_led_net = pcb.get_pad_net(r_ref, r_other_pad)
+        if r_led_net is None or r_led_net == 0:
+            continue
+
+        # Find nearest LED anode on the R-LED net (within IC_CELL_W of R)
+        r_pos = pcb.get_pad_position(r_ref, r_pad_num)
+        led_ref = None
+        led_pad_num = None
+        best_dist = float("inf")
+        for pad_ref, pad_num, px, py, pnet in net_to_pads.get(r_led_net, []):
+            if pad_ref.startswith("D"):
+                dist = math.sqrt((px - r_pos[0])**2 + (py - r_pos[1])**2)
+                if dist < IC_CELL_W and dist < best_dist:
+                    best_dist = dist
+                    led_ref = pad_ref
+                    led_pad_num = pad_num
+
+        if led_ref is None:
+            continue
+
+        # Route R LED-side pad -> LED anode (horizontal first: safe route
+        # through clear space between R and LED, no components in between)
+        r_led_pos = pcb.get_pad_position(r_ref, r_other_pad)
+        led_anode_pos = pcb.get_pad_position(led_ref, led_pad_num)
+
+        segs = pcb.add_l_trace(r_led_pos, led_anode_pos, r_led_net,
+                               SIGNAL_TRACE_W, "F.Cu", horizontal_first=True)
+        traces += len(segs)
+
+    return traces
+
+
+def preroute_dff_to_buffer(pcb, netlist_data):
+    """Route DFF Q output to Buffer A input on B.Cu (back copper).
+
+    DFF pin 4 (Q) and Buffer pin 2 (A) share a net.  Routing on F.Cu
+    is unsafe (traces cross DSBGA pins at 0.5mm pitch).  Instead:
+      - Via down from DFF pin 4 area
+      - Trace on B.Cu to below Buffer pin 2
+      - Via up to Buffer pin 2 area
+
+    Returns number of trace segments added.
+    """
+    ref_to_part = {}
+    for comp in netlist_data["components"]:
+        ref_to_part[comp["ref"]] = comp["part"]
+
+    traces = 0
+    vias = 0
+
+    net_to_pads = _build_net_pad_index(pcb)
+
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        part = ref_to_part.get(ref, "")
+        if part != "74LVC1G79":
+            continue
+
+        # DFF Q output net (pin 4)
+        q_net = pcb.get_pad_net(ref, "4")
+        if q_net is None or q_net == 0:
+            continue
+
+        # Find Buffer (74LVC1G125) pin 2 on the same net
+        pads_on_net = net_to_pads.get(q_net, [])
+        buf_ref = None
+        for pad_ref, pad_num, px, py, pnet in pads_on_net:
+            if (pad_ref.startswith("U") and
+                    ref_to_part.get(pad_ref) == "74LVC1G125" and
+                    pad_num == "2"):
+                buf_ref = pad_ref
+                break
+
+        if buf_ref is None:
+            continue
+
+        # Get pad positions
+        dff_q_pos = pcb.get_pad_position(ref, "4")
+        buf_a_pos = pcb.get_pad_position(buf_ref, "2")
+
+        # DFF pin 4 at (-0.25, +0.5) relative to DFF center
+        # Place via to the RIGHT of DFF pin 4 to clear IC body
+        # (pin 5/VCC is at +0.25,+0.5 so go further right to +0.75)
+        dff_via_x = round(dff_q_pos[0] + 1.0, 2)  # 1mm right of pin 4
+        dff_via_y = round(dff_q_pos[1], 2)
+
+        # Buffer pin 2 at (-0.25, 0) relative to Buffer center
+        # Place via to the RIGHT of Buffer pin 2
+        buf_via_x = round(buf_a_pos[0] + 1.0, 2)
+        buf_via_y = round(buf_a_pos[1], 2)
+
+        # F.Cu: DFF pin 4 -> via point (short horizontal escape)
+        pcb.add_trace(dff_q_pos, (dff_via_x, dff_via_y),
+                      q_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Via down to B.Cu at DFF side
+        pcb.add_via((dff_via_x, dff_via_y), q_net,
+                    VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"])
+        vias += 1
+
+        # B.Cu: route from DFF via to Buffer via
+        pcb.add_l_trace((dff_via_x, dff_via_y), (buf_via_x, buf_via_y),
+                        q_net, SIGNAL_TRACE_W, "B.Cu", horizontal_first=False)
+        traces += 2  # L-trace = 2 segments typically
+
+        # Via up to F.Cu at Buffer side
+        pcb.add_via((buf_via_x, buf_via_y), q_net,
+                    VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"])
+        vias += 1
+
+        # F.Cu: via point -> Buffer pin 2 (short horizontal)
+        pcb.add_trace((buf_via_x, buf_via_y), buf_a_pos,
+                      q_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+    return traces
+
+
+# --------------------------------------------------------------
 # Main
 # --------------------------------------------------------------
 
@@ -263,13 +555,13 @@ def main():
     print("=" * 60)
 
     # Step 1: Create custom DSBGA footprints
-    print("\n[1/6] Creating custom DSBGA footprints...")
+    print("\n[1/7] Creating custom DSBGA footprints...")
     fp5_path, fp6_path = create_dsbga_footprints(SHARED_FP_DIR)
     print(f"  Created: {os.path.basename(fp5_path)}")
     print(f"  Created: {os.path.basename(fp6_path)}")
 
     # Step 2: Export netlist from schematic
-    print("\n[2/6] Exporting netlist from schematic...")
+    print("\n[2/7] Exporting netlist from schematic...")
     sch_path = os.path.join(BOARD_DIR, "ram.kicad_sch")
     net_path = os.path.join(BOARD_DIR, "ram.xml")
     export_netlist(sch_path, net_path)
@@ -278,13 +570,13 @@ def main():
     print(f"  Nets: {len(netlist_data['nets'])}")
 
     # Step 3: Group components by hierarchy
-    print("\n[3/6] Grouping components by hierarchy...")
+    print("\n[3/7] Grouping components by hierarchy...")
     groups = group_components(netlist_data)
     for name, comps in sorted(groups.items()):
         print(f"  {name}: {len(comps)} components")
 
     # Step 4: Initialize PCB builder
-    print("\n[4/6] Initializing PCB...")
+    print("\n[4/7] Initializing PCB...")
     pcb = PCBBuilder(title="8-Byte Discrete RAM Prototype")
     pcb.add_fp_lib_path("DSBGA_Packages", SHARED_FP_DIR)
 
@@ -295,7 +587,7 @@ def main():
     pcb.set_4layer_stackup()
 
     # Step 5: Place components
-    print("\n[5/6] Placing components...")
+    print("\n[5/7] Placing components...")
 
     # Layout:
     #   Column 0: Connector (root) on the left
@@ -450,8 +742,25 @@ def main():
 
     print(f"  Total components placed: {total_placed}")
 
-    # Step 6: Board outline and power planes
-    print("\n[6/6] Adding board outline and power planes...")
+    # Step 6: Pre-route local connections
+    print("\n[6/7] Pre-routing local connections...")
+    pcb.build_ref_index()
+
+    pwr_vias, pwr_traces = preroute_power_vias(pcb)
+    print(f"  Power vias: {pwr_vias} vias, {pwr_traces} stub traces")
+
+    led_traces = preroute_r_to_led(pcb, netlist_data)
+    print(f"  R->LED chains: {led_traces} trace segments")
+
+    # DFF->Buffer routing disabled: escape traces from DSBGA pin 4 cross
+    # pin 5 (VCC) at the same Y.  Needs obstacle-aware routing.
+    dff_traces = 0
+
+    total_traces = pwr_traces + led_traces + dff_traces
+    print(f"  Total pre-routed: {pwr_vias} vias + {total_traces} traces")
+
+    # Step 7: Board outline and power planes
+    print("\n[7/7] Adding board outline and power planes...")
 
     # Compute board dimensions from pad + courtyard extents
     if pcb.board.footprints:
@@ -530,9 +839,9 @@ def main():
     print("PCB Generation Complete")
     print(f"{'=' * 60}")
     print(f"  Components: {total_placed}")
+    print(f"  Pre-routed: {pwr_vias} vias + {total_traces} traces")
     print(f"  Board size: {board_w} x {board_h} mm")
     print(f"  Layers: 4 (F.Cu, In1.Cu=GND, In2.Cu=VCC, B.Cu)")
-    print(f"  Routing: MANUAL (open in KiCad to route traces)")
     print()
 
     return 0

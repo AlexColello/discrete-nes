@@ -178,6 +178,14 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - Footprint courtyard layer is `F.CrtYd` (not `F.Courtyard`) in kiutils layer names
 - `Net` is from `kiutils.items.common`, not `kiutils.items.brditems`
 
+**KiCad pad position rotation (CRITICAL — DO NOT use standard math rotation):**
+- KiCad uses **clockwise** rotation (positive angle = clockwise in Y-down screen coords)
+- Correct formula: `abs_x = fp_x + px*cos(θ) + py*sin(θ)`, `abs_y = fp_y - px*sin(θ) + py*cos(θ)`
+- Standard math CCW formula (`abs_x = fp_x + px*cos(θ) - py*sin(θ)`, `abs_y = fp_y + px*sin(θ) + py*cos(θ)`) is WRONG
+- The difference is invisible at 0° and 180° (sin=0) but flips pad positions at 90°/270° (sin=±1)
+- This means the bug only manifests for R_Small components (placed at 90°), not ICs (0°) or LEDs (180°)
+- Symptom: traces starting from wrong pad → DRC "shorting_items" errors on every R→LED connection
+
 **Custom DSBGA footprints (pin numbering mismatch):**
 - KiCad 74xGxx symbols use numeric pin numbers (1-5) but stock DSBGA footprints use BGA ball names (A1/B1/C1/C2)
 - Solution: create custom footprints with numeric pads via `create_dsbga_footprints()` in `pcb.py`

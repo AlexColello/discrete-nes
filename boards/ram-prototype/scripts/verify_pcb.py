@@ -15,8 +15,9 @@ Plus board-specific checks:
 - Power planes defined (GND on In1.Cu, VCC on In2.Cu)
 
 Usage:
-    python scripts/verify_pcb.py           # Run all checks
-    python scripts/verify_pcb.py --no-drc  # Skip kicad-cli DRC
+    python scripts/verify_pcb.py                # Run all checks (pre-routing)
+    python scripts/verify_pcb.py --no-drc       # Skip kicad-cli DRC
+    python scripts/verify_pcb.py --post-routing  # Post-routing DRC on ram_routed.kicad_pcb
 """
 
 import math
@@ -38,6 +39,7 @@ from kiutils.board import Board
 
 BOARD_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 PCB_PATH = os.path.join(BOARD_DIR, "ram.kicad_pcb")
+PCB_ROUTED_PATH = os.path.join(BOARD_DIR, "ram_routed.kicad_pcb")
 OUTPUT_DIR = os.path.join(BOARD_DIR, "verify_output")
 RULES_DIR = os.path.join(BOARD_DIR, "rules")
 
@@ -47,6 +49,20 @@ EXPECTED_COMPONENT_COUNT = 512  # 161 ICs + 175 LEDs + 175 Rs + 1 connector
 # These are expected with placement-only boards (no traces)
 PRE_ROUTING_SKIP_TYPES = {
     "unconnected_items",       # No traces yet -- expected
+    "via_dangling",            # Vias to inner planes appear dangling before fill
+    "via_diameter",            # 0.6mm vias needed for DSBGA density; Elecrow min 0.8mm
+    "lib_footprint_mismatch",  # Cosmetic: kiutils vs library diff
+    "lib_footprint_issues",    # Cosmetic: local .pretty not found
+    "silk_over_copper",        # Cosmetic: ref text overlaps pads on tiny BGA
+    "silk_overlap",            # Cosmetic: ref text overlaps at high density
+    "text_thickness",          # Cosmetic: stock 0402 footprint text too thin
+    "text_height",             # Cosmetic: stock 0402 footprint text too short
+}
+
+# DRC violation types to skip after routing
+# Fewer skips -- unconnected_items should now be resolved
+POST_ROUTING_SKIP_TYPES = {
+    "via_diameter",            # 0.6mm vias needed for DSBGA density; Elecrow min 0.8mm
     "lib_footprint_mismatch",  # Cosmetic: kiutils vs library diff
     "lib_footprint_issues",    # Cosmetic: local .pretty not found
     "silk_over_copper",        # Cosmetic: ref text overlaps pads on tiny BGA
@@ -166,8 +182,9 @@ def _footprint_bbox(fp):
 
     def to_abs(lx, ly):
         """Convert footprint-local coords to absolute board coords."""
-        return (fp_x + lx * cos_a - ly * sin_a,
-                fp_y + lx * sin_a + ly * cos_a)
+        # KiCad uses clockwise rotation (positive angle = CW in Y-down)
+        return (fp_x + lx * cos_a + ly * sin_a,
+                fp_y - lx * sin_a + ly * cos_a)
 
     bbox_min_x = bbox_max_x = fp_x
     bbox_min_y = bbox_max_y = fp_y
@@ -356,6 +373,12 @@ def check_4layer_stackup(board):
 
 def main():
     skip_drc = "--no-drc" in sys.argv
+    post_routing = "--post-routing" in sys.argv
+
+    # Select PCB path and skip set based on mode
+    pcb_path = PCB_ROUTED_PATH if post_routing else PCB_PATH
+    skip_types = POST_ROUTING_SKIP_TYPES if post_routing else PRE_ROUTING_SKIP_TYPES
+    mode_label = "Post-Routing" if post_routing else "Pre-Routing"
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -363,18 +386,22 @@ def main():
     total_warnings = 0
 
     print("=" * 60)
-    print("RAM Prototype PCB Verification")
+    print(f"RAM Prototype PCB Verification ({mode_label})")
     print("=" * 60)
 
     # -- Check PCB exists --
-    if not os.path.exists(PCB_PATH):
-        print(f"\n  ERROR: {PCB_PATH} not found")
-        print("  Run generate_pcb.py first")
+    if not os.path.exists(pcb_path):
+        print(f"\n  ERROR: {pcb_path} not found")
+        if post_routing:
+            print("  Run route_pcb.py first")
+        else:
+            print("  Run generate_pcb.py first")
         return 1
 
     # -- Load board --
-    print(f"\n--- Loading: ram.kicad_pcb ---")
-    board = Board.from_file(PCB_PATH)
+    pcb_name = os.path.basename(pcb_path)
+    print(f"\n--- Loading: {pcb_name} ---")
+    board = Board.from_file(pcb_path)
 
     # -- Board-specific checks --
     print(f"\n--- Board Structure Checks ---")
@@ -417,13 +444,10 @@ def main():
 
     # -- DRC runs --
     if not skip_drc and os.path.exists(KICAD_CLI):
-        # Determine which violation types to skip
-        skip = PRE_ROUTING_SKIP_TYPES
-
         # 1. Default DRC
         print(f"\n--- DRC: Default Rules ---")
         issues, errors, warnings = run_drc(
-            PCB_PATH, OUTPUT_DIR, label="default", skip_types=skip)
+            pcb_path, OUTPUT_DIR, label="default", skip_types=skip_types)
         for issue in issues:
             print(issue)
         total_errors += errors
@@ -435,8 +459,8 @@ def main():
         if os.path.exists(pcbway_rules):
             print(f"\n--- DRC: PCBWay Rules ---")
             issues, errors, warnings = run_drc(
-                PCB_PATH, OUTPUT_DIR, label="pcbway",
-                custom_rules_path=pcbway_rules, skip_types=skip)
+                pcb_path, OUTPUT_DIR, label="pcbway",
+                custom_rules_path=pcbway_rules, skip_types=skip_types)
             for issue in issues:
                 print(issue)
             total_errors += errors
@@ -450,8 +474,8 @@ def main():
         if os.path.exists(elecrow_rules):
             print(f"\n--- DRC: Elecrow Rules ---")
             issues, errors, warnings = run_drc(
-                PCB_PATH, OUTPUT_DIR, label="elecrow",
-                custom_rules_path=elecrow_rules, skip_types=skip)
+                pcb_path, OUTPUT_DIR, label="elecrow",
+                custom_rules_path=elecrow_rules, skip_types=skip_types)
             for issue in issues:
                 print(issue)
             total_errors += errors

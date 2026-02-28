@@ -28,7 +28,10 @@
       "WebFetch(domain:docs.kicad.org)",
       "WebFetch(domain:www.pcbway.com)",
       "WebFetch(domain:www.elecrow.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:freerouting.org)",
+      "WebFetch(domain:dev-docs.kicad.org)",
+      "WebFetch(domain:forum.kicad.info)"
     ],
     "deny": [],
     "ask": []

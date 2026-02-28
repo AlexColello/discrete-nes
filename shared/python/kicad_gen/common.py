@@ -185,6 +185,14 @@ SYM_SPACING_Y = 10 * GRID    # vertical spacing between symbol rows (gates)
 # kicad-cli path (auto-detect from Program Files)
 KICAD_CLI = r"C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
 
+# KiCad's bundled Python (has pcbnew module for Specctra DSN/SES export/import)
+KICAD_PYTHON = r"C:\Program Files\KiCad\9.0\bin\python.exe"
+
+# FreeRouting JAR default path (downloaded on first use by route_pcb.py)
+FREEROUTING_JAR = os.path.normpath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "..",
+    "tools", "freerouting", "freerouting-2.0.1.jar"))
+
 # Map symbol base names to their KiCad library name prefix
 SYMBOL_LIB_MAP = {
     "74LVC1G00": "74xGxx",

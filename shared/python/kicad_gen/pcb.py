@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from kiutils.board import Board
 from kiutils.footprint import Footprint
-from kiutils.items.brditems import GeneralSettings, LayerToken, SetupData
+from kiutils.items.brditems import GeneralSettings, LayerToken, Segment, SetupData, Via
 from kiutils.items.common import Net, Position
 from kiutils.items.zones import FillSettings, Hatch, Zone, ZonePolygon
 
@@ -463,6 +463,187 @@ class PCBBuilder:
         zone.polygons = [polygon]
 
         self.board.zones.append(zone)
+
+    # ----------------------------------------------------------
+    # Routing helpers
+    # ----------------------------------------------------------
+
+    def build_ref_index(self):
+        """Build reference-to-footprint lookup from placed footprints.
+
+        Call once after all components are placed and before routing.
+        """
+        self._ref_index: Dict[str, Footprint] = {}
+        for fp in self.board.footprints:
+            ref = fp.properties.get("Reference", "")
+            if ref:
+                self._ref_index[ref] = fp
+
+    def get_pad_position(self, ref: str, pad_number: str) -> Tuple[float, float]:
+        """Get absolute board position of a component pad.
+
+        Args:
+            ref: Reference designator (e.g., "U34")
+            pad_number: Pad number as string (e.g., "4")
+
+        Returns:
+            (x, y) absolute position in mm, rounded to 2 decimals.
+        """
+        import math
+
+        fp = self._ref_index.get(ref)
+        if fp is None:
+            raise ValueError(f"Reference {ref} not found in board")
+
+        fp_x, fp_y = fp.position.X, fp.position.Y
+        angle_rad = math.radians(fp.position.angle or 0)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+
+        for pad in fp.pads:
+            if pad.number == pad_number:
+                px, py = pad.position.X, pad.position.Y
+                # KiCad uses clockwise rotation (positive angle = CW in Y-down coords)
+                abs_x = fp_x + px * cos_a + py * sin_a
+                abs_y = fp_y - px * sin_a + py * cos_a
+                return (round(abs_x, 2), round(abs_y, 2))
+
+        raise ValueError(f"Pad {pad_number} not found on {ref}")
+
+    def get_pad_net(self, ref: str, pad_number: str) -> Optional[int]:
+        """Get the net number assigned to a component pad.
+
+        Args:
+            ref: Reference designator
+            pad_number: Pad number as string
+
+        Returns:
+            Net number (int), or None if no net assigned.
+        """
+        fp = self._ref_index.get(ref)
+        if fp is None:
+            return None
+        for pad in fp.pads:
+            if pad.number == pad_number:
+                if pad.net and pad.net.number:
+                    return pad.net.number
+                return None
+        return None
+
+    def get_net_number(self, net_name: str) -> Optional[int]:
+        """Look up net number by name.
+
+        Returns:
+            Net number, or None if not found.
+        """
+        net_obj = self._nets.get(net_name)
+        return net_obj.number if net_obj else None
+
+    def add_trace(
+        self,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        net: int,
+        width: float = 0.2,
+        layer: str = "F.Cu",
+    ) -> Segment:
+        """Add a copper trace segment.
+
+        Args:
+            start: (x, y) start position in mm
+            end: (x, y) end position in mm
+            net: Net number (int)
+            width: Trace width in mm
+            layer: Copper layer name
+
+        Returns:
+            The created Segment.
+        """
+        seg = Segment(
+            start=Position(X=round(start[0], 2), Y=round(start[1], 2)),
+            end=Position(X=round(end[0], 2), Y=round(end[1], 2)),
+            width=width,
+            layer=layer,
+            net=net,
+            tstamp=uid(),
+        )
+        self.board.traceItems.append(seg)
+        return seg
+
+    def add_via(
+        self,
+        position: Tuple[float, float],
+        net: int,
+        size: float = 0.6,
+        drill: float = 0.3,
+        layers: Optional[List[str]] = None,
+    ) -> Via:
+        """Add a via.
+
+        Args:
+            position: (x, y) in mm
+            net: Net number (int)
+            size: Via outer diameter in mm
+            drill: Drill diameter in mm
+            layers: Layer pair (default ["F.Cu", "B.Cu"])
+
+        Returns:
+            The created Via.
+        """
+        if layers is None:
+            layers = ["F.Cu", "B.Cu"]
+        v = Via(
+            position=Position(X=round(position[0], 2), Y=round(position[1], 2)),
+            size=size,
+            drill=drill,
+            layers=layers,
+            net=net,
+            tstamp=uid(),
+        )
+        self.board.traceItems.append(v)
+        return v
+
+    def add_l_trace(
+        self,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        net: int,
+        width: float = 0.2,
+        layer: str = "F.Cu",
+        horizontal_first: bool = True,
+    ) -> List[Segment]:
+        """Add an L-shaped trace (1-2 segments) between non-aligned pads.
+
+        If start and end are aligned on one axis, creates a single segment.
+
+        Args:
+            start: (x, y) start position
+            end: (x, y) end position
+            net: Net number
+            width: Trace width in mm
+            layer: Copper layer
+            horizontal_first: If True, route horizontal then vertical
+
+        Returns:
+            List of created Segments (1 or 2).
+        """
+        sx, sy = round(start[0], 2), round(start[1], 2)
+        ex, ey = round(end[0], 2), round(end[1], 2)
+
+        # Aligned — single segment
+        if abs(sx - ex) < 0.01 or abs(sy - ey) < 0.01:
+            return [self.add_trace((sx, sy), (ex, ey), net, width, layer)]
+
+        # L-shape
+        if horizontal_first:
+            mid = (ex, sy)
+        else:
+            mid = (sx, ey)
+
+        return [
+            self.add_trace((sx, sy), mid, net, width, layer),
+            self.add_trace(mid, (ex, ey), net, width, layer),
+        ]
 
     def save(self, filepath: str):
         """Save the PCB to a file.
