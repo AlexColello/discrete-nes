@@ -62,6 +62,8 @@ LED_OFFSET_X2 = 4.5 # LED center offset from IC center
 GROUP_GAP_X = 10.0   # horizontal gap between groups
 GROUP_GAP_Y = 12.0   # vertical gap between group rows
 BOARD_MARGIN = 6.0   # margin from board edge to components
+SHEET_BORDER = 13.0  # minimum distance from sheet edge to board outline
+PLACEMENT_ORIGIN = SHEET_BORDER + BOARD_MARGIN  # components start here
 
 # Connector dimensions
 CONN_PIN_PITCH = 2.54  # mm between connector pins
@@ -371,13 +373,13 @@ def main():
     total_placed = 0
 
     # Column 0: Connector (root group) on the far left
-    col0_x = BOARD_MARGIN
-    col0_y = BOARD_MARGIN
+    col0_x = PLACEMENT_ORIGIN
+    col0_y = PLACEMENT_ORIGIN
     root_w, root_h = group_sizes.get("root", (0, 0))
 
     # Column 1: addr_decoder stacked above control_logic
     col1_x = col0_x + root_w + GROUP_GAP_X
-    col1_y = BOARD_MARGIN
+    col1_y = PLACEMENT_ORIGIN
     dec_w, dec_h = group_sizes.get("addr_decoder", (0, 0))
     ctrl_w, ctrl_h = group_sizes.get("control_logic", (0, 0))
     col1_w = max(dec_w, ctrl_w)
@@ -386,7 +388,7 @@ def main():
     #   Col 0: byte_0, byte_1, byte_2, byte_3
     #   Col 1: byte_4, byte_5, byte_6, byte_7
     ram_x = col1_x + col1_w + GROUP_GAP_X
-    ram_y = BOARD_MARGIN
+    ram_y = PLACEMENT_ORIGIN
 
     byte_col0 = ["byte_0", "byte_1", "byte_2", "byte_3"]
     byte_col1 = ["byte_4", "byte_5", "byte_6", "byte_7"]
@@ -400,9 +402,9 @@ def main():
     ram_total_h = 4 * byte_row_h + 3 * GROUP_GAP_Y
 
     # Vertically center connector and decode/ctrl column with RAM area
-    col0_y = BOARD_MARGIN + max(0, (ram_total_h - root_h) / 2)
+    col0_y = PLACEMENT_ORIGIN + max(0, (ram_total_h - root_h) / 2)
     # Stack decoder + ctrl to fill the height next to RAM
-    col1_y = BOARD_MARGIN
+    col1_y = PLACEMENT_ORIGIN
 
     # Place connector (root)
     if "root" in group_layouts:
@@ -451,22 +453,49 @@ def main():
     # Step 6: Board outline and power planes
     print("\n[6/6] Adding board outline and power planes...")
 
-    # Compute board dimensions from placed components
+    # Compute board dimensions from pad + courtyard extents
     if pcb.board.footprints:
-        all_x = [fp.position.X for fp in pcb.board.footprints]
-        all_y = [fp.position.Y for fp in pcb.board.footprints]
-        min_x = min(all_x) - BOARD_MARGIN
-        min_y = min(all_y) - BOARD_MARGIN
-        max_x = max(all_x) + BOARD_MARGIN + IC_CELL_W
-        max_y = max(all_y) + BOARD_MARGIN + IC_CELL_H
+        comp_min_x = comp_min_y = float('inf')
+        comp_max_x = comp_max_y = float('-inf')
 
-        # Round up to nearest mm
-        board_w = math.ceil(max_x - min_x)
-        board_h = math.ceil(max_y - min_y)
+        for fp in pcb.board.footprints:
+            fp_x, fp_y = fp.position.X, fp.position.Y
+            angle = math.radians(fp.position.angle or 0)
+            cos_a, sin_a = math.cos(angle), math.sin(angle)
 
-        # Use origin at min_x, min_y
-        origin_x = math.floor(min_x)
-        origin_y = math.floor(min_y)
+            for pad in fp.pads:
+                px, py = pad.position.X, pad.position.Y
+                abs_x = fp_x + px * cos_a - py * sin_a
+                abs_y = fp_y + px * sin_a + py * cos_a
+                radius = max(pad.size.X, pad.size.Y) / 2 if pad.size else 0
+                comp_min_x = min(comp_min_x, abs_x - radius)
+                comp_max_x = max(comp_max_x, abs_x + radius)
+                comp_min_y = min(comp_min_y, abs_y - radius)
+                comp_max_y = max(comp_max_y, abs_y + radius)
+
+            # Include courtyard graphics (F.CrtYd / B.CrtYd)
+            for gi in fp.graphicItems:
+                layer = getattr(gi, 'layer', '')
+                if 'CrtYd' not in layer:
+                    continue
+                for attr in ('start', 'end'):
+                    pt = getattr(gi, attr, None)
+                    if pt is None:
+                        continue
+                    abs_x = fp_x + pt.X * cos_a - pt.Y * sin_a
+                    abs_y = fp_y + pt.X * sin_a + pt.Y * cos_a
+                    comp_min_x = min(comp_min_x, abs_x)
+                    comp_max_x = max(comp_max_x, abs_x)
+                    comp_min_y = min(comp_min_y, abs_y)
+                    comp_max_y = max(comp_max_y, abs_y)
+
+        # Add margin around component extents, ensuring the outline
+        # stays within the sheet border (A4 landscape = 297x210mm,
+        # with SHEET_BORDER minimum margin from the sheet edge).
+        origin_x = max(math.floor(comp_min_x - BOARD_MARGIN), SHEET_BORDER)
+        origin_y = max(math.floor(comp_min_y - BOARD_MARGIN), SHEET_BORDER)
+        board_w = math.ceil(comp_max_x + BOARD_MARGIN - origin_x)
+        board_h = math.ceil(comp_max_y + BOARD_MARGIN - origin_y)
     else:
         board_w, board_h = 80, 100
         origin_x, origin_y = 0, 0

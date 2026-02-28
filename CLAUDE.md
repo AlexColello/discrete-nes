@@ -49,7 +49,7 @@ discrete-nes/
 │       │   ├── symbols.py  # Library loading, raw text extraction, pin offset discovery
 │       │   ├── schematic.py # SchematicBuilder class (place, wire, LED, labels, save)
 │       │   ├── verify.py   # parse_schematic, 11 general checks, run_erc, UnionFind
-│       │   └── pcb.py      # PCB layout generation with kiutils (stub)
+│       │   └── pcb.py      # PCBBuilder, DSBGA footprints, netlist export/parse
 │       └── hdl_parser/     # Verilog to discrete gates conversion
 │           └── verilog_to_gates.py
 ├── boards/
@@ -139,6 +139,59 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - Use kiutils for component placement in grid patterns
 - Manual routing initially (better control for prototype)
 - Can revisit automation after validating approach
+
+### PCB Layout Preferences & Lessons
+
+**User's preferred RAM board layout (connector → decode → RAM → control):**
+```
++------+-----------+-----------+-----------+
+|      | ADDR DEC  | BYTE 0    | BYTE 4    |
+|      |           | BYTE 1    | BYTE 5    |
+| CONN +-----------+ BYTE 2    | BYTE 6    |
+|      | CTRL LOGIC| BYTE 3    | BYTE 7    |
++------+-----------+-----------+-----------+
+                   | WRITE CLK | READ OE   |
+                   +-----------+-----------+
+```
+- **Connector** on the far left
+- **Address decoder + control logic** stacked vertically to the right of the connector
+- **RAM bytes** in a grid to the right, organized by bytes in column-major order (down first, then right)
+- **Write/Read control logic** below the RAM
+- Each byte is a **line of 8 bits** (8 DFFs in one row, 8 buffers below)
+
+**Connector bus indicator LEDs:**
+- Each bus indicator R+LED pair must be positioned at the exact Y of its matching connector pin (1:1 mapping)
+- Match R to connector pin via shared signal net (exclude GND/VCC from net matching — LEDs have GND which matches pin 1)
+- R at fixed X offset right of connector, LED at slightly further X offset
+
+**Board outline computation — use pad + courtyard extents:**
+- NEVER compute board outline from component center positions alone — this underestimates the space needed for large components like connectors (PinHeader_1x16 spans 40mm vertically)
+- Compute bounding box from each footprint's pad positions (rotated to absolute coords) and courtyard graphics (`F.CrtYd`/`B.CrtYd`)
+- Add BOARD_MARGIN around that bounding box
+- The verify check (`check_components_inside_outline`) must also use pad+courtyard extents, not just center positions
+
+**kiutils PCB API gotchas:**
+- `Footprint.properties` is a `dict` (key→value strings), NOT a list of Property objects. Use `fp.properties["Reference"]`, not `prop.key`
+- `GrLine` uses `width=0.05`, NOT `stroke=Stroke(...)`
+- `FillSettings` uses `yes=True, mode=None` for solid fill, NOT `fillType`
+- `Board.create_new()` defaults to version 20211014 (KiCad 6). Override to `board.version = 20241229` for KiCad 9
+- Footprint courtyard layer is `F.CrtYd` (not `F.Courtyard`) in kiutils layer names
+- `Net` is from `kiutils.items.common`, not `kiutils.items.brditems`
+
+**Custom DSBGA footprints (pin numbering mismatch):**
+- KiCad 74xGxx symbols use numeric pin numbers (1-5) but stock DSBGA footprints use BGA ball names (A1/B1/C1/C2)
+- Solution: create custom footprints with numeric pads via `create_dsbga_footprints()` in `pcb.py`
+- Pin-to-ball mapping: `{1:A1, 2:B1, 3:A2, 4:C1, 5:C2}` (5-ball), add `6:B2` for 6-ball
+
+**Netlist parsing for hierarchy grouping:**
+- Use `kicad-cli sch export netlist --format kicadxml` to get XML netlist
+- Extract `<sheetpath names="...">` from each component for hierarchy identification
+- Group components by sheetpath to organize placement by functional block
+
+**DRC filtering for pre-routing boards:**
+- Before routing, many DRC violations are expected: `unconnected_items`, `lib_footprint_mismatch`, `lib_footprint_issues`, `silk_over_copper`, `silk_overlap`, `text_thickness`, `text_height`
+- Use `skip_types` parameter in `run_drc()` to filter these
+- Target: 0 errors, 0 warnings AFTER filtering
 
 ### kiutils + KiCad 9 ERC Lessons
 
@@ -453,7 +506,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 - [x] `schematic.py` — `SchematicBuilder` class (place, wire, LED, labels, trunks, power, save, lib fixup)
 - [x] `verify.py` — `parse_schematic`, 11 general checks, `run_all_checks`, `run_erc`, `UnionFind`
 - [x] `__init__.py` — re-exports key public API
-- [ ] `pcb.py` — PCB layout generation (stub, pending Phase 2 Step 3)
+- [x] `pcb.py` — PCBBuilder class, DSBGA footprints, netlist parsing
 
 **KiCad symbol/footprint libraries (still needed):**
 - SN74LVC1G00, 1G02, 1G04, 1G08, 1G32, 1G86 (logic gates)
@@ -568,8 +621,8 @@ After RAM prototype success:
 
 **Phase 1 COMPLETE** (including migration to TI Little Logic DSBGA)
 **Phase 2 Steps 1-2 COMPLETE** (schematic generation with ERC-clean output)
-**Phase 3 Python library COMPLETE** (shared kicad_gen extracted from RAM prototype scripts)
-**Next: Phase 2 Step 3 - PCB Layout**
+**Phase 2 Step 3 IN PROGRESS** (PCB generation working — 512 components placed, 0 DRC errors; manual routing next)
+**Phase 3 Python library COMPLETE** (shared kicad_gen with SchematicBuilder, PCBBuilder, verify)
 
 ## Important Notes for Future Sessions
 

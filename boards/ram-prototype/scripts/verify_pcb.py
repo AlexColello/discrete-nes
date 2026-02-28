@@ -9,6 +9,7 @@ Runs three DRC passes:
 
 Plus board-specific checks:
 - Board outline present and reasonable size
+- Board outline within sheet border (12mm margin)
 - All components within board outline
 - All netlist components placed
 - Power planes defined (GND on In1.Cu, VCC on In2.Cu)
@@ -18,6 +19,7 @@ Usage:
     python scripts/verify_pcb.py --no-drc  # Skip kicad-cli DRC
 """
 
+import math
 import os
 import sys
 
@@ -150,8 +152,69 @@ def check_power_planes(board):
     return issues
 
 
+def _footprint_bbox(fp):
+    """Compute bounding box of a footprint from pads and all graphic items.
+
+    Considers pad positions+sizes and ALL footprint graphic items (courtyard,
+    silkscreen, fab layer) to get the full physical extent.
+
+    Returns (min_x, min_y, max_x, max_y) in absolute board coordinates.
+    """
+    fp_x, fp_y = fp.position.X, fp.position.Y
+    angle = math.radians(fp.position.angle or 0)
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+
+    def to_abs(lx, ly):
+        """Convert footprint-local coords to absolute board coords."""
+        return (fp_x + lx * cos_a - ly * sin_a,
+                fp_y + lx * sin_a + ly * cos_a)
+
+    bbox_min_x = bbox_max_x = fp_x
+    bbox_min_y = bbox_max_y = fp_y
+
+    def expand(ax, ay):
+        nonlocal bbox_min_x, bbox_max_x, bbox_min_y, bbox_max_y
+        bbox_min_x = min(bbox_min_x, ax)
+        bbox_max_x = max(bbox_max_x, ax)
+        bbox_min_y = min(bbox_min_y, ay)
+        bbox_max_y = max(bbox_max_y, ay)
+
+    # Pads (with size)
+    for pad in fp.pads:
+        ax, ay = to_abs(pad.position.X, pad.position.Y)
+        radius = max(pad.size.X, pad.size.Y) / 2 if pad.size else 0
+        expand(ax - radius, ay - radius)
+        expand(ax + radius, ay + radius)
+
+    # All graphic items: FpLine, FpRect, FpText, FpCircle, FpArc, etc.
+    for gi in fp.graphicItems:
+        # FpLine / FpRect / FpArc — have start and end
+        for attr in ('start', 'end'):
+            pt = getattr(gi, attr, None)
+            if pt is None:
+                continue
+            ax, ay = to_abs(pt.X, pt.Y)
+            expand(ax, ay)
+        # FpText / FpCircle — have position
+        pos = getattr(gi, 'position', None)
+        if pos is not None:
+            ax, ay = to_abs(pos.X, pos.Y)
+            expand(ax, ay)
+        # FpCircle — expand by radius (end point is on circumference)
+        center = getattr(gi, 'center', None)
+        end_pt = getattr(gi, 'end', None)
+        if center is not None and end_pt is not None:
+            cx, cy = to_abs(center.X, center.Y)
+            ex, ey = to_abs(end_pt.X, end_pt.Y)
+            r = math.hypot(ex - cx, ey - cy)
+            expand(cx - r, cy - r)
+            expand(cx + r, cy + r)
+
+    return bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y
+
+
 def check_components_inside_outline(board):
-    """Check that all components are placed within the board outline."""
+    """Check that all components (pads, silkscreen, fab, courtyard) are within the board outline."""
     issues = []
 
     # Extract board outline bounding box from Edge.Cuts
@@ -170,26 +233,104 @@ def check_components_inside_outline(board):
             ys.append(end.Y)
 
     if not xs or not ys:
-        # No outline to check against (check_board_outline will catch this)
         return issues
 
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
+    outline_min_x, outline_max_x = min(xs), max(xs)
+    outline_min_y, outline_max_y = min(ys), max(ys)
 
     outside = []
     for fp in board.footprints:
-        x, y = fp.position.X, fp.position.Y
-        if x < min_x or x > max_x or y < min_y or y > max_y:
-            ref = "?"
-            if "Reference" in fp.properties:
-                ref = fp.properties["Reference"]
-            outside.append(f"{ref} at ({x:.1f}, {y:.1f})")
+        fp_min_x, fp_min_y, fp_max_x, fp_max_y = _footprint_bbox(fp)
+        if (fp_min_x < outline_min_x or fp_max_x > outline_max_x or
+                fp_min_y < outline_min_y or fp_max_y > outline_max_y):
+            ref = fp.properties.get("Reference", "?")
+            overshoot_x = max(0, outline_min_x - fp_min_x,
+                              fp_max_x - outline_max_x)
+            overshoot_y = max(0, outline_min_y - fp_min_y,
+                              fp_max_y - outline_max_y)
+            overshoot = max(overshoot_x, overshoot_y)
+            outside.append(
+                f"  {ref} extends {overshoot:.1f}mm outside board outline"
+                f" (bbox [{fp_min_x:.1f},{fp_min_y:.1f}]-"
+                f"[{fp_max_x:.1f},{fp_max_y:.1f}])")
 
     if outside:
         for desc in outside:
-            issues.append(f"  Component outside board outline: {desc}")
+            issues.append(desc)
     else:
         print(f"  All components within board outline")
+
+    return issues
+
+
+PAPER_SIZES = {
+    "A4": (297.0, 210.0),   # landscape: width x height
+    "A3": (420.0, 297.0),
+    "A2": (594.0, 420.0),
+    "A1": (841.0, 594.0),
+    "A0": (1189.0, 841.0),
+}
+
+SHEET_BORDER_MARGIN = 13  # mm — board outline must be inside this margin (12mm border + 1mm clearance)
+
+
+def check_outline_within_sheet(board):
+    """Check that the board outline is within the sheet border by 12mm."""
+    issues = []
+
+    # Determine sheet size
+    paper = getattr(board, 'paper', None)
+    if paper is None:
+        issues.append("  No paper size defined — cannot check sheet border")
+        return issues
+
+    paper_name = getattr(paper, 'paperSize', None)
+    if paper_name not in PAPER_SIZES:
+        issues.append(f"  Unknown paper size '{paper_name}' — cannot check sheet border")
+        return issues
+
+    sheet_w, sheet_h = PAPER_SIZES[paper_name]
+    if getattr(paper, 'portrait', False):
+        sheet_w, sheet_h = sheet_h, sheet_w
+
+    # Collect board outline bounding box from Edge.Cuts
+    xs, ys = [], []
+    for item in board.graphicItems:
+        layer = getattr(item, 'layer', None)
+        if layer != "Edge.Cuts":
+            continue
+        for attr in ('start', 'end'):
+            pt = getattr(item, attr, None)
+            if pt:
+                xs.append(pt.X)
+                ys.append(pt.Y)
+
+    if not xs or not ys:
+        return issues  # No outline — handled by check_board_outline
+
+    outline_min_x, outline_max_x = min(xs), max(xs)
+    outline_min_y, outline_max_y = min(ys), max(ys)
+
+    margin = SHEET_BORDER_MARGIN
+    if outline_min_x < margin:
+        issues.append(
+            f"  Board outline left edge ({outline_min_x:.1f}mm) is less than "
+            f"{margin}mm from the sheet border")
+    if outline_min_y < margin:
+        issues.append(
+            f"  Board outline top edge ({outline_min_y:.1f}mm) is less than "
+            f"{margin}mm from the sheet border")
+    if outline_max_x > sheet_w - margin:
+        issues.append(
+            f"  Board outline right edge ({outline_max_x:.1f}mm) exceeds "
+            f"sheet width minus {margin}mm ({sheet_w - margin:.1f}mm)")
+    if outline_max_y > sheet_h - margin:
+        issues.append(
+            f"  Board outline bottom edge ({outline_max_y:.1f}mm) exceeds "
+            f"sheet height minus {margin}mm ({sheet_h - margin:.1f}mm)")
+
+    if not issues:
+        print(f"  Board outline within sheet border (>={margin}mm margin)")
 
     return issues
 
@@ -249,6 +390,12 @@ def main():
         for issue in outline_issues:
             print(issue)
         total_errors += len(outline_issues)
+
+    sheet_issues = check_outline_within_sheet(board)
+    if sheet_issues:
+        for issue in sheet_issues:
+            print(issue)
+        total_errors += len(sheet_issues)
 
     comp_issues = check_components_placed(board)
     if comp_issues:
