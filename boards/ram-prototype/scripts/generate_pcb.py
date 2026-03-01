@@ -60,7 +60,7 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 
 # Cell layout dimensions (mm)
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
-IC_CELL_W = 7.0     # horizontal spacing between IC centers (IC+R+LED ~6.4mm)
+IC_CELL_W = 7.5     # horizontal spacing between IC centers (IC+R+LED ~6.4mm)
 IC_CELL_H = 4.5     # vertical spacing between IC rows (DSBGA courtyard ~3.4mm)
 LED_OFFSET_X = 2.5  # R center offset from IC center
 LED_OFFSET_X2 = 4.5 # LED center offset from IC center

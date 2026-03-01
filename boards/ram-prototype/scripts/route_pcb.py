@@ -139,7 +139,7 @@ def run_freerouting(jar_path, dsn_path, ses_path, max_passes=20):
         "-de", dsn_path,       # design input (DSN)
         "-do", ses_path,       # design output (SES)
         "-mp", str(max_passes),  # max passes
-        "-mt", "4",            # threads
+        "-mt", "1",            # single-threaded (multi-threaded optimization is broken)
         "-da",                 # detail autorouter after global
     ]
 

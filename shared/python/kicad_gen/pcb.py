@@ -407,11 +407,11 @@ class PCBBuilder:
         if LAYER_IN1CU not in layer_ordinals:
             self.board.layers.append(
                 LayerToken(ordinal=LAYER_IN1CU, name="In1.Cu",
-                           type="signal", userName=None))
+                           type="power", userName=None))
         if LAYER_IN2CU not in layer_ordinals:
             self.board.layers.append(
                 LayerToken(ordinal=LAYER_IN2CU, name="In2.Cu",
-                           type="signal", userName=None))
+                           type="power", userName=None))
 
         # Sort layers by ordinal for clean output
         self.board.layers.sort(key=lambda l: l.ordinal)
