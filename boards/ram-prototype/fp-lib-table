@@ -1,6 +1,4 @@
 (fp_lib_table
   (version 7)
   (lib (name "DSBGA_Packages")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/footprints/DSBGA_Packages.pretty")(options "")(descr "DSBGA (NanoFree/YZP) packages for TI Little Logic"))
-  (lib (name "LED_SMD")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/footprints/LED_SMD.pretty")(options "")(descr "0402 SMD LED footprints"))
-  (lib (name "Connectors_Discrete")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/footprints/Connectors_Discrete.pretty")(options "")(descr "Connectors for board-to-board connections"))
 )

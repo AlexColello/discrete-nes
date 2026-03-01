@@ -272,8 +272,8 @@ def compute_group_size(placements):
 # --------------------------------------------------------------
 
 # Via and trace sizing
-VIA_SIZE = 0.6       # mm outer diameter
-VIA_DRILL = 0.3      # mm drill (KiCad default min)
+VIA_SIZE = 0.8       # mm outer diameter (Elecrow minimum)
+VIA_DRILL = 0.4      # mm drill
 POWER_TRACE_W = 0.3  # mm trace width for power stubs
 SIGNAL_TRACE_W = 0.2 # mm trace width for signals
 VIA_OFFSET = 0.6     # mm offset from pad center to via center

@@ -8,6 +8,7 @@ Provides:
 
 import copy
 import os
+import re
 import subprocess
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
@@ -68,6 +69,7 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str]:
     fp5.tstamp = uid()
     dsbga5_path = os.path.join(output_dir, "DSBGA-5_NumericPads.kicad_mod")
     fp5.to_file(dsbga5_path)
+    _fix_footprint_file(dsbga5_path, stock5_path)
 
     # --- DSBGA-6 ---
     stock6_path = os.path.join(KICAD_FP_DIR, STOCK_DSBGA6_FP)
@@ -86,6 +88,7 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str]:
     fp6.tstamp = uid()
     dsbga6_path = os.path.join(output_dir, "DSBGA-6_NumericPads.kicad_mod")
     fp6.to_file(dsbga6_path)
+    _fix_footprint_file(dsbga6_path, stock6_path)
 
     return dsbga5_path, dsbga6_path
 
@@ -734,6 +737,194 @@ class PCBBuilder:
             filepath: Path to .kicad_pcb file
         """
         self.board.to_file(filepath)
+        self._fix_footprints(filepath)
+
+    def _fix_footprints(self, filepath: str):
+        """Post-process saved PCB to fix kiutils footprint serialization.
+
+        kiutils drops property position/layer/effects metadata and
+        ``(embedded_fonts no)`` when round-tripping footprints.  This causes
+        ``lib_footprint_mismatch`` DRC warnings.  Fix by reading the original
+        .kicad_mod files and injecting correct property definitions.
+        """
+        text = open(filepath, "r", encoding="utf-8").read()
+
+        # Collect unique library footprint references used in the PCB
+        lib_fp_refs = set(re.findall(r'\(footprint "([^"]+)"', text))
+
+        # For each library footprint, load the raw .kicad_mod and extract
+        # property definitions and embedded_fonts presence.
+        lib_info = {}  # lib_fp -> {props: {name: sexp}, embedded_fonts: bool}
+        for lib_fp in lib_fp_refs:
+            try:
+                mod_path = self._resolve_footprint_path(lib_fp)
+            except Exception:
+                continue
+            if not os.path.isfile(mod_path):
+                continue
+
+            raw = open(mod_path, "r", encoding="utf-8").read().replace("\r", "")
+            info = {
+                "props": {},
+                "embedded_fonts": "(embedded_fonts" in raw,
+                "has_tedit": bool(re.search(r"\(tedit\s", raw)),
+            }
+
+            for prop_name in ("Reference", "Value"):
+                sexp = _extract_balanced_sexp(raw, f'(property "{prop_name}"')
+                # Only store if the library has multi-line metadata (position,
+                # layer, effects).  Bare single-line properties don't need
+                # fixing (e.g., kiutils-generated custom footprints).
+                if sexp and "\n" in sexp:
+                    info["props"][prop_name] = sexp
+
+            lib_info[lib_fp] = info
+
+        if not any(info["props"] or info["embedded_fonts"]
+                   for info in lib_info.values()):
+            return  # Nothing to fix
+
+        # Process the PCB text line-by-line
+        lines = text.split("\n")
+        result = []
+        current_lib = None
+
+        for line in lines:
+            # Track which footprint block we are inside
+            fp_m = re.match(r'(\s*)\(footprint "([^"]+)"', line)
+            if fp_m:
+                current_lib = fp_m.group(2)
+
+            info = lib_info.get(current_lib) if current_lib else None
+
+            # --- Remove (tedit ...) if library doesn't have it ---
+            if info and not info.get("has_tedit") and "(tedit " in line:
+                line = re.sub(r"\(tedit [0-9a-f]+\)\s*", "", line)
+
+            # --- Fix bare property lines ---
+            if info and info["props"]:
+                prop_m = re.match(
+                    r'(\s+)\(property "(Reference|Value)" "([^"]*)"\)\s*$',
+                    line,
+                )
+                if prop_m:
+                    indent = prop_m.group(1)
+                    prop_name = prop_m.group(2)
+                    actual_value = prop_m.group(3)
+                    template = info["props"].get(prop_name)
+                    if template:
+                        fixed = _reindent_sexp(template, indent)
+                        # Substitute the actual value for the template value
+                        fixed = re.sub(
+                            r'(property "' + prop_name + r'" ")[^"]*"',
+                            r"\g<1>" + re.escape(actual_value) + '"',
+                            fixed,
+                            count=1,
+                        )
+                        result.append(fixed)
+                        continue
+
+            # --- Insert (embedded_fonts no) before (model ---
+            if info and info["embedded_fonts"] and "(model " in line:
+                # Only insert if not already present nearby
+                if not any("embedded_fonts" in r for r in result[-5:]):
+                    ef_indent = re.match(r"(\s*)", line).group(1)
+                    result.append(f"{ef_indent}(embedded_fonts no)")
+
+            result.append(line)
+
+        open(filepath, "w", encoding="utf-8").write("\n".join(result))
+
+
+def _extract_balanced_sexp(text: str, prefix: str) -> Optional[str]:
+    """Extract a balanced s-expression starting with *prefix* from *text*.
+
+    Returns the full s-expression string (from opening ``(`` to matching
+    ``)``), or ``None`` if *prefix* is not found.
+    """
+    idx = text.find(prefix)
+    if idx == -1:
+        return None
+    depth = 0
+    for i in range(idx, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[idx : i + 1]
+    return None
+
+
+def _reindent_sexp(sexp: str, base_indent: str) -> str:
+    """Re-indent an s-expression to start at *base_indent*.
+
+    Strips all leading whitespace (tabs or spaces) and re-adds it
+    proportionally: the first line gets *base_indent*, and subsequent
+    lines get *base_indent* plus the extra whitespace they had relative
+    to the first line (converted to spaces, 2 per tab level).
+    """
+    lines = sexp.split("\n")
+    if not lines:
+        return sexp
+
+    # Measure leading whitespace width of the first line
+    first_ws = len(lines[0]) - len(lines[0].lstrip())
+
+    result = []
+    for line in lines:
+        ws = len(line) - len(line.lstrip())
+        extra = max(0, ws - first_ws)
+        result.append(base_indent + " " * extra + line.lstrip())
+
+    return "\n".join(result)
+
+
+def _fix_footprint_file(fp_path: str, stock_path: str):
+    """Post-process a kiutils-saved .kicad_mod to restore metadata from stock.
+
+    Fixes property position/layer/effects and ``(embedded_fonts no)`` that
+    kiutils drops when round-tripping footprints.  Used by
+    :func:`create_dsbga_footprints` to keep custom library files correct.
+    """
+    raw_stock = open(stock_path, "r", encoding="utf-8").read().replace("\r", "")
+    text = open(fp_path, "r", encoding="utf-8").read()
+
+    for prop_name in ("Reference", "Value"):
+        stock_sexp = _extract_balanced_sexp(raw_stock, f'(property "{prop_name}"')
+        if stock_sexp is None or "\n" not in stock_sexp:
+            continue
+
+        # Find the bare property in the generated file
+        pat = re.compile(
+            r'([ \t]*)\(property "' + prop_name + r'" "([^"]*)"\)',
+        )
+        m = pat.search(text)
+        if not m:
+            continue
+
+        indent = m.group(1)
+        actual_value = m.group(2)
+
+        fixed = _reindent_sexp(stock_sexp, indent)
+        # Substitute the actual value for the stock template value
+        fixed = re.sub(
+            r'(property "' + prop_name + r'" ")[^"]*"',
+            r"\g<1>" + re.escape(actual_value) + '"',
+            fixed,
+            count=1,
+        )
+        text = text[: m.start()] + fixed + text[m.end() :]
+
+    # Add (embedded_fonts no) if stock has it and generated file doesn't
+    if "(embedded_fonts" in raw_stock and "(embedded_fonts" not in text:
+        # Insert before (model line
+        model_m = re.search(r"^(\s*)\(model ", text, re.MULTILINE)
+        if model_m:
+            ef_line = f"{model_m.group(1)}(embedded_fonts no)\n"
+            text = text[: model_m.start()] + ef_line + text[model_m.start() :]
+
+    open(fp_path, "w", encoding="utf-8").write(text)
 
 
 def get_footprint_for_part(part_name: str) -> Optional[str]:
