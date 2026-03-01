@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Keeping This File Current
 
 **This is the most important task.** Update CLAUDE.md whenever you:
+
 - Discover something unexpected (a KiCad quirk, a kiutils gotcha, a routing rule violation)
 - Learn a new user preference or workflow pattern
 - Fix a bug whose root cause should be documented so it never recurs
@@ -17,6 +18,7 @@ Don't wait — update immediately when the insight is fresh. A lesson not record
 **Discrete NES** - A discrete logic NES implementation where EVERY gate output and EVERY memory bit has a visible LED indicator. Built with TI Little Logic (SN74LVC1G) in DSBGA packages — the bare silicon die is visible on top of each IC, creating a sea of visible silicon interspersed with glowing LEDs.
 
 **Scale:**
+
 - Estimated 10,000+ LEDs across all boards
 - Thousands of single-gate ICs (TI Little Logic SN74LVC1G series, DSBGA)
 - Multiple PCBs with SMD assembly (solder paste + hot air reflow)
@@ -97,6 +99,7 @@ python scripts/verify_schematics.py
 ```
 
 **IMPORTANT:** After ANY change to a generate script, you MUST:
+
 1. Regenerate: `python scripts/generate_*.py`
 2. Verify: `python scripts/verify_schematics.py`
 3. Fix any errors before considering the change complete
@@ -113,12 +116,15 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 ### KiCad Scripting - Why kiutils?
 
 **Official KiCad Status (2025):**
+
 - KiCad provides Python bindings ONLY for PCB layout (pcbnew module)
 - NO official API for schematic manipulation (eeschema)
 - Expected to change in KiCad 9, but not available yet
 
 **Why kiutils over alternatives:**
+
 1. **kiutils** - CHOSEN
+
    - Directly parses/generates KiCad S-expression files
    - Works for both schematics (.kicad_sch) and PCBs (.kicad_pcb)
    - Python dataclass-based API
@@ -126,6 +132,7 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
    - Docs: https://pypi.org/project/kiutils/
 
 2. SKiDL (NOT used)
+
    - High-level circuit description language
    - Generates netlists, not direct schematics
    - Would require manual schematic creation
@@ -136,6 +143,7 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
    - Can use as fallback if kiutils routing is too tedious
 
 **PCB Layout Strategy:**
+
 - Use kiutils for component placement in grid patterns
 - Manual routing initially (better control for prototype)
 - Can revisit automation after validating approach
@@ -143,6 +151,7 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 ### PCB Layout Preferences & Lessons
 
 **User's preferred RAM board layout (connector → decode → RAM → control):**
+
 ```
 +------+-----------+-----------+-----------+
 |      | ADDR DEC  | BYTE 0    | BYTE 4    |
@@ -153,6 +162,7 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
                    | WRITE CLK | READ OE   |
                    +-----------+-----------+
 ```
+
 - **Connector** on the far left
 - **Address decoder + control logic** stacked vertically to the right of the connector
 - **RAM bytes** in a grid to the right, organized by bytes in column-major order (down first, then right)
@@ -160,17 +170,20 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - Each byte is a **line of 8 bits** (8 DFFs in one row, 8 buffers below)
 
 **Connector bus indicator LEDs:**
+
 - Each bus indicator R+LED pair must be positioned at the exact Y of its matching connector pin (1:1 mapping)
 - Match R to connector pin via shared signal net (exclude GND/VCC from net matching — LEDs have GND which matches pin 1)
 - R at fixed X offset right of connector, LED at slightly further X offset
 
 **Board outline computation — use pad + courtyard extents:**
+
 - NEVER compute board outline from component center positions alone — this underestimates the space needed for large components like connectors (PinHeader_1x16 spans 40mm vertically)
 - Compute bounding box from each footprint's pad positions (rotated to absolute coords) and courtyard graphics (`F.CrtYd`/`B.CrtYd`)
 - Add BOARD_MARGIN around that bounding box
 - The verify check (`check_components_inside_outline`) must also use pad+courtyard extents, not just center positions
 
 **kiutils PCB API gotchas:**
+
 - `Footprint.properties` is a `dict` (key→value strings), NOT a list of Property objects. Use `fp.properties["Reference"]`, not `prop.key`
 - `GrLine` uses `width=0.05`, NOT `stroke=Stroke(...)`
 - `FillSettings` uses `yes=True, mode=None` for solid fill, NOT `fillType`
@@ -178,12 +191,31 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - Footprint courtyard layer is `F.CrtYd` (not `F.Courtyard`) in kiutils layer names
 - `Net` is from `kiutils.items.common`, not `kiutils.items.brditems`
 
+**Pad orientation in rotated footprints (CRITICAL for lib_footprint_mismatch DRC):**
+
+- KiCad stores pad orientation as `pad_local_angle + parent_rotation` (historical convention)
+- `GetFPRelativeOrientation()` computes `stored_angle - parent_rotation`
+- When placing a footprint at angle θ, MUST set each pad's position angle to θ so that `GetFPRelativeOrientation() = θ - θ = 0`, matching the library (which has angle 0 at rotation 0)
+- Without this: pad relative orientation = `0 - θ = -θ`, which doesn't match library's `0`, triggering "Pad N orientation differs" DRC warning
+- The `place_component()` method in `PCBBuilder` handles this automatically
+- For existing KiCad-saved PCBs: `fix_pcb_drc()` post-processes the file to add pad angles
+- Possibly related to: https://gitlab.com/kicad/code/kicad/-/issues/21459
+
+**kiutils `remove_unused_layers` bug:**
+
+- KiCad's `(remove_unused_layers no)` is misread by kiutils as boolean `True` (presence = true)
+- kiutils then serializes it as bare `(remove_unused_layers)` without the `no` value
+- This causes `lib_footprint_mismatch` on through-hole footprints (e.g., PinHeader connectors)
+- Fix: `_fix_footprints()` post-processes `(remove_unused_layers)` → `(remove_unused_layers no)`
+
 **PCB trace routing style:**
+
 - Use **45-degree angle traces** wherever possible — avoid 90-degree bends
 - Route as: horizontal/vertical → 45° diagonal → horizontal/vertical (chamfered L-shape)
 - This improves signal integrity and is standard PCB design practice
 
 **KiCad pad position rotation (CRITICAL — DO NOT use standard math rotation):**
+
 - KiCad uses **clockwise** rotation (positive angle = clockwise in Y-down screen coords)
 - Correct formula: `abs_x = fp_x + px*cos(θ) + py*sin(θ)`, `abs_y = fp_y - px*sin(θ) + py*cos(θ)`
 - Standard math CCW formula (`abs_x = fp_x + px*cos(θ) - py*sin(θ)`, `abs_y = fp_y + px*sin(θ) + py*cos(θ)`) is WRONG
@@ -192,16 +224,19 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - Symptom: traces starting from wrong pad → DRC "shorting_items" errors on every R→LED connection
 
 **Custom DSBGA footprints (pin numbering mismatch):**
+
 - KiCad 74xGxx symbols use numeric pin numbers (1-5) but stock DSBGA footprints use BGA ball names (A1/B1/C1/C2)
 - Solution: create custom footprints with numeric pads via `create_dsbga_footprints()` in `pcb.py`
 - Pin-to-ball mapping: `{1:A1, 2:B1, 3:A2, 4:C1, 5:C2}` (5-ball), add `6:B2` for 6-ball
 
 **Netlist parsing for hierarchy grouping:**
+
 - Use `kicad-cli sch export netlist --format kicadxml` to get XML netlist
 - Extract `<sheetpath names="...">` from each component for hierarchy identification
 - Group components by sheetpath to organize placement by functional block
 
 **DRC filtering for pre-routing boards:**
+
 - Before routing, many DRC violations are expected: `unconnected_items`, `lib_footprint_mismatch`, `lib_footprint_issues`, `silk_over_copper`, `silk_overlap`, `text_thickness`, `text_height`
 - Use `skip_types` parameter in `run_drc()` to filter these
 - Target: 0 errors, 0 warnings AFTER filtering
@@ -211,28 +246,33 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 Hard-won requirements for generating schematics with kiutils that pass KiCad 9 ERC. The shared `SchematicBuilder` in `shared/python/kicad_gen/schematic.py` implements all of these; board scripts (e.g., `boards/ram-prototype/scripts/generate_ram.py`) import it.
 
 **Format requirements:**
+
 - Set `sch.version = 20250114` (KiCad 9 format) — the kiutils default (20211014, KiCad 6) causes `wire_dangling` on every wire-to-pin connection
 - Set `sch.uuid = uid()` — root UUID is required
 - Set `sch.generator = "eeschema"` — matches KiCad native output
 - Each `SchematicSymbol` needs pin UUIDs: `sym.pins = {"1": uid(), "2": uid(), ...}` — required for KiCad 9 wire connectivity
 
 **Pin position discovery:**
+
 - NEVER calculate pin positions from library symbol data or manual offsets
 - Use ERC-based probing: place one component at (100,100) in a temp schematic, run `kicad-cli sch erc`, parse the JSON to extract pin positions (ERC coordinates × 100 = mm)
 - Cache the results — pin offsets are stable per (symbol, angle) combo
 
 **Hierarchical schematics:**
+
 - Child sheet symbols must use the full hierarchical path: `/{root_uuid}/{sheet_block_uuid}` — NOT `/{child_sheet_uuid}/`
 - Multi-instance sheets (e.g., byte.kicad_sch used 8×) need one path per instance with unique reference designators per path
 - Build all sheets first, then post-process to fix instance paths after the root sheet assigns hierarchy UUIDs
 - Don't mix local and global labels with the same name — use local labels in the root sheet for hierarchy pin connections
 
 **Power symbols:**
+
 - PWR_FLAG should be placed at the root sheet connector power pins (VCC + GND) — marks the connector as the power source
 - Do NOT place PWR_FLAG in sub-sheets — it propagates through global VCC/GND nets from the root
 - Power symbols placed at IC pin positions connect via overlapping pins (no wire needed)
 
 **Wire routing rules (critical for ERC-clean schematics):**
+
 - **Orthogonal wires only** — KiCad doesn't connect diagonal wires. Route as L-shapes (horizontal then vertical)
 - **Segmented trunks required** — A single long vertical wire with junctions doesn't reliably connect T-branches in KiCad 9. Split vertical bus/trunk wires into separate segments between each branch point. Use `SchematicBuilder.add_segmented_trunk()` from `kicad_gen`
 - **Split wires at LED junction points** — When `place_led_below()` adds a junction on a main wire, the main wire MUST be split into two segments at that junction X coordinate
@@ -250,6 +290,7 @@ When routing N signals from a connector to evenly-spaced fan-out Y positions, th
 - With **even** multiplier spacing (e.g., 6\*GRID): `fan_span/2` is on-grid, so `center - span/2` is already half-grid, and `+ GRID/2` **incorrectly** shifts back to on-grid
 
 **Robust pattern** — compute raw, then dynamically ensure half-grid and page bounds:
+
 ```python
 fan_start_y = snap(conn_pin_mid_y - fan_span / 2)
 grid_units = fan_start_y / GRID
@@ -258,6 +299,7 @@ if abs(grid_units - round(grid_units)) < 0.01:  # on-grid?
 while fan_start_y < page_min_y:                   # page border clamp
     fan_start_y = snap(fan_start_y + GRID)        # preserves half-grid
 ```
+
 Adding whole `GRID` increments preserves the half-grid property (GRID = 2 half-grids).
 
 **Why this matters:** A 14-signal fan-out at 6\*GRID spacing spans ~198mm, much larger than the connector pin range (~38mm). The fan-out Y values will sweep through the connector Y range ~5 times. If they're on-grid, overlaps with connector horizontal wires are inevitable. If half-grid, they're structurally impossible.
@@ -267,17 +309,20 @@ Adding whole `GRID` increments preserves the half-grid property (GRID = 2 half-g
 Lessons learned from the RAM prototype root sheet about designing hierarchy sheets that are clear and readable when opened in KiCad.
 
 **Left-to-right signal flow:**
+
 - All hierarchy sheet blocks should have inputs on the LEFT edge and outputs on the RIGHT edge
 - `_add_sheet_block()` accepts a `right_pins` set — pins in this set appear on the RIGHT, all others on LEFT
 - Left and right pins must be indexed separately (separate counters for Y positioning) so a block with 3 left pins and 8 right pins doesn't waste space
 - This creates a clear left-to-right signal flow: connector → control blocks → byte sheets
 
 **Multi-column layout for control blocks:**
+
 - Group related blocks into columns: decoder + control logic in column 1, write_clk + read_oe in column 2
 - Align column tops so input-output pairs are at similar Y positions (e.g., Address Decoder SEL outputs face Write Clk Gen SEL inputs)
-- Leave an inter-column gap (15*GRID) for vertical trunk wires between columns
+- Leave an inter-column gap (15\*GRID) for vertical trunk wires between columns
 
 **When to use labels vs direct wires:**
+
 - **Prefer direct wires** — make a best effort to connect everything with wires, even if perpendicular wires must cross each other. Wire crossings (perpendicular) are fine in KiCad; only parallel wire overlaps cause problems
 - **Labels should be restricted** to cases where direct wires are impractical:
   - High-fanout signals (D0-D7: connector + 8 byte sheets = 9 connections each)
@@ -286,22 +331,26 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - **Y-coincidence hazard**: two horizontal wires at the same Y with overlapping X ranges silently merge nets. This is the main reason to fall back to labels when direct wires don't work
 
 **Vertical trunk routing between columns:**
+
 - Use `add_segmented_trunk()` for multi-destination signals (SEL0-7 fan out to both write_clk and read_oe)
 - Stagger trunk X positions: `sel_trunk_x[i] = base_x - i * GRID` so 8 parallel trunks don't overlap
 - Place single-destination trunks (WRITE_ACTIVE, READ_EN) at X positions BETWEEN the multi-destination trunks and the target column (not on the source side) to avoid horizontal overlap at shared Y values
 
 **PWR_FLAG placement:**
+
 - Place PWR_FLAG at the root sheet connector power pins (VCC + GND) — the connector is the power source for the entire design
 - Do NOT place PWR_FLAG in sub-sheets — the connector-level PWR_FLAG propagates through the hierarchy via global VCC/GND nets
 - Having PWR_FLAG in both root and sub-sheets causes "power output to power output" ERC errors
 
 **Connector design:**
+
 - Include VCC and GND pins on the connector (e.g., 16-pin connector: 14 signals + VCC + GND)
 - VCC at the top of the connector (highest pin number at angle=180), GND at the bottom (pin 1 at angle=180)
 - Signal pins in the middle, grouped logically (address, data, control)
-- Wire power pins to VCC/GND symbols with a short horizontal stub (3*GRID)
+- Wire power pins to VCC/GND symbols with a short horizontal stub (3\*GRID)
 
 **Connector + LED bank layout:**
+
 - Connector and LED bank are vertically centered with the sheet block ensemble (pre-compute `ensemble_center_y` before placing the connector)
 - Each connector pin is wired directly to its LED indicator via staggered turning columns
 - Sort signals by connector Y (ascending) so vertical routing wires don't cross
@@ -314,12 +363,14 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - Each LED indicator is a horizontal chain: R_Small(90°) → LED_Small(180°) → GND
 
 **kiutils API notes:**
+
 - Wire objects use `item.points[0]` and `item.points[1]` (Position objects) — NOT `startPoint`/`endPoint`
 - Check `item.type == 'wire'` to distinguish wires from other graphical items
 - Library sub-symbols have pins: iterate `lib_sym.symbols` then `sub_sym.pins`
 - Pin library coordinates use Y-up; apply Y negation + rotation for schematic space
 
 **Known limitations:**
+
 - Embedded lib_symbols are post-processed to match library files exactly (kiutils drops `exclude_from_sim`, property/pin `hide` flags) — see `SchematicBuilder._fix_lib_symbols()` in `shared/python/kicad_gen/schematic.py`
 - Use `round(v, 2)` on all coordinates to eliminate floating-point noise (e.g., `83.82000000000001`)
 
@@ -328,6 +379,7 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 Verification has two layers: **shared general-purpose checks** in `shared/python/kicad_gen/verify.py` and **board-specific scripts** (e.g., `boards/ram-prototype/scripts/verify_schematics.py`). The shared module is the reusable engine; board scripts import it and add board-specific netlist checks.
 
 **General-purpose checks (in `kicad_gen.verify`, reusable for any board):**
+
 1. **Diagonal wires** — KiCad doesn't connect them; all routing must be orthogonal
 2. **Wire overlaps (NET MERGE)** — same-axis wires with overlapping ranges silently merge nets. This is the #1 cause of hard-to-debug ERC failures
 3. **Dangling wire endpoints** — endpoints not touching any pin, wire, junction, or label
@@ -339,15 +391,18 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 9. **Content on sheet blocks** — wires/components inside hierarchy sheet block areas
 10. **Page boundary** — content outside the drawing border
 11. **Power orientation** — power symbols facing wrong direction
+
 - **ERC via kicad-cli** — `run_erc()` handles full hierarchy + per-sub-sheet standalone (filtering expected standalone artifacts via `_is_standalone_artifact()`)
 - **`run_all_checks(filepath, data)`** — convenience function that runs all 11 checks and returns `[(category, issues, is_error), ...]`
 - **`UnionFind`** class — exported for board-specific netlist connectivity checks
 
 **Board-specific checks (must be customized per board):**
+
 - **Netlist connectivity** — uses `UnionFind` from `kicad_gen.verify` to build nets from wire/label/junction connectivity, then verifies expected connections (e.g., "Address Decoder SEL0 connected to Write Clk Gen SEL0") and signal isolation (e.g., "A0 not merged with A1"). The expected-connections list is the main board-specific part
 - **SCHEMATIC_FILES list** — which .kicad_sch files to check
 
 **Process for new boards:**
+
 1. Create a new `verify_schematics.py` that imports from `kicad_gen.verify` (see `boards/ram-prototype/scripts/verify_schematics.py` as a template — it's only ~340 lines thanks to shared imports)
 2. Define `SCHEMATIC_FILES` for the new board's sheets
 3. Write `check_netlist()` with the new board's expected connections and isolation pairs
@@ -355,6 +410,7 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 5. Call `run_erc()` for kicad-cli ERC
 
 **What the script catches that ERC alone misses:**
+
 - Wire overlaps (KiCad silently merges nets — no ERC error, just wrong connectivity)
 - Wire-through-pin (creates a valid but unintended connection — no ERC error)
 - Page boundary violations (cosmetic but important for printability)
@@ -367,6 +423,7 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the bare silicon die on top. Each IC is a tiny (1.75 x 1.25mm) chip with the actual silicon wafer pattern visible. Combined with 0402 SMD LEDs, this creates a striking visual — thousands of bare silicon dies with LEDs glowing between them.
 
 **SN74LVC1G Key Specs:**
+
 - Supply: 1.65V - 5.5V (using 3.3V for this project)
 - Output drive: up to 24mA (IOH/IOL) — can drive LEDs directly
 - Propagation delay: ~3.5ns typical
@@ -377,6 +434,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 **Assembly:** Solder paste stencil + hot air reflow (user has hot air station).
 
 **Why not 74HC DIP?**
+
 - 74HC DIP packages are ~20mm wide — too large, boring plastic rectangles
 - DSBGA packages show the actual silicon — much more visually interesting
 - Single-gate-per-package eliminates complex gate allocation logic
@@ -385,17 +443,20 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 ### FPGA Reference - MiSTer NES Core
 
 **Primary Reference:** https://github.com/MiSTer-devel/NES_MiSTer
+
 - Based on FPGANES by Ludvig Strigeus
 - Verilog/SystemVerilog
 - Most complete, production-quality, cycle-accurate
 - **User specifically chose this over Brian Bennett's fpga_nes**
 
 **Access Method:**
+
 - NOT included as git submodule (per user request)
 - Manual clone/download when needed
 - See reference/README.md for instructions
 
 **Alternative References:**
+
 - Brian Bennett's fpga_nes: https://github.com/brianbennett/fpga_nes
 - UCR NES_FPGA: https://github.com/UCR-CS179-SUMMER2014/NES_FPGA
 - Visual 6502: http://www.visual6502.org/ (transistor-level)
@@ -407,12 +468,14 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 **Reduced scope: 8 bytes (3 address bits) — validate before scaling to 64 bytes**
 
 **Configuration:**
+
 - **8 bytes total capacity**
 - **3 address bits** (A0-A2) = 8 addressable locations
 - **8-bit data bus** (D0-D7)
 - **Control signals:** Read/Write enable, Chip Select
 
 **Per byte (8 bits):**
+
 - 8x SN74LVC1G79 (D flip-flop, DSBGA) — stores 8 bits
 - 8x SN74LVC1G125 (tri-state buffer, DSBGA) — read gating
 - 1x SN74LVC1G08 (AND, DSBGA) — write clock = decoded_address AND write_enable
@@ -420,11 +483,13 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 - 10x 0402 LED + 10x 0402 resistor (every gate output visible)
 
 **Address decoder (3-to-8):**
+
 - 3x SN74LVC1G04 (inverter) — complemented address bits
 - 8x 3-input AND via 2-gate chains (16x SN74LVC1G08) or 8x SN74LVC1G11
 - ~19 decoder ICs + ~19 LEDs + ~19 resistors
 
 **LED Requirements (EVERY bit visible):**
+
 - **64 LEDs** for RAM cell outputs (one per stored bit)
 - **3 LEDs** for address bus
 - **8 LEDs** for data bus
@@ -432,6 +497,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 - **Total estimate:** ~115 LEDs
 
 **Totals for 8-byte prototype (actual from generate_ram.py):**
+
 - 161 ICs (DSBGA)
 - 175 LEDs (0402 SMD)
 - 175 resistors (0402 SMD)
@@ -441,6 +507,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 **PCB size estimate:** ~60x80mm with 3-4mm pitch
 
 **Power Budget (RAM Prototype):**
+
 - 115 LEDs x 2mA = 0.23A at 3.3V = 0.76W for LEDs
 - Logic power negligible (SN74LVC1G ~10uA per IC)
 - Very manageable power budget at this scale
@@ -456,6 +523,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 - **Total system estimate:** 12A+ at 3.3V = ~40W for LEDs
 
 **Design implications:**
+
 - 3.3V supply (lower than 5V, but LVC works great at 3.3V)
 - Distributed regulation across boards
 - Adequate power traces for SMD board
@@ -477,11 +545,13 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 ### Phase 2: RAM Prototype Board (IN PROGRESS)
 
 **Step 1: Manual Circuit Design (COMPLETED)**
+
 1. ~~Open KiCad and create `boards/ram-prototype/ram.kicad_pro`~~
 2. ~~Design ONE memory cell manually~~
 3. ~~Validate the circuit works~~
 
 **Step 2: Script Development (COMPLETED)**
+
 1. Created `boards/ram-prototype/scripts/generate_ram.py`
 2. Generates ERC-clean hierarchical schematics with direct wire routing:
    - ram.kicad_sch (root) — connector, bus LEDs, hierarchy refs
@@ -493,18 +563,21 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 3. Passes KiCad 9 ERC with 0 errors and 0 warnings
 
 **Step 3: PCB Layout**
+
 1. Use kiutils to place DSBGA components in grid pattern (3-4mm pitch)
 2. Place all ~115 LEDs in organized arrays alongside ICs
 3. Manual routing (start with power/ground)
 4. SMD assembly: solder paste stencil + hot air reflow
 
 **Step 4: Validation**
+
 1. Run DRC/ERC in KiCad
 2. Review power distribution
 3. Cost estimation
 4. Iterate design if needed
 
 **Step 5: Fabrication**
+
 1. Generate gerbers
 2. Generate BOM
 3. Order PCBs + solder paste stencil
@@ -514,6 +587,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 ### Phase 3: Shared Library Development (Parallel to Phase 2)
 
 **Python generation library (`shared/python/kicad_gen/`) — COMPLETED:**
+
 - [x] `common.py` — constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP), snap(), uid(), part lookup, LED resistor calc
 - [x] `symbols.py` — library loading, raw text extraction, ERC-based pin offset discovery, caching
 - [x] `schematic.py` — `SchematicBuilder` class (place, wire, LED, labels, trunks, power, save, lib fixup)
@@ -522,6 +596,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 - [x] `pcb.py` — PCBBuilder class, DSBGA footprints, netlist parsing
 
 **KiCad symbol/footprint libraries (still needed):**
+
 - SN74LVC1G00, 1G02, 1G04, 1G08, 1G32, 1G86 (logic gates)
 - SN74LVC1G79 (D flip-flop, DSBGA), SN74LVC1G74 (D flip-flop, X2SON)
 - SN74LVC1G07, 1G125 (buffers/drivers)
@@ -533,12 +608,14 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 **Goal:** Convert MiSTer Verilog to discrete SN74LVC1G netlists
 
 **Challenges:**
+
 1. Verilog is behavioral, need gate-level synthesis
 2. Must identify ALL internal signals for LED placement
 3. Map Verilog primitives to SN74LVC1G parts
 4. Generate component lists with LED indicators
 
 **Approach:**
+
 1. Study MiSTer NES Verilog structure
 2. Use synthesis tools to generate gate-level netlist
 3. Parse netlist and map gates:
@@ -554,6 +631,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 **Key difference from 74HC:** 1 gate per IC, no gate packing/sharing needed.
 
 **Tool Development:**
+
 - Enhance `shared/python/hdl_parser/verilog_to_gates.py`
 - May need external synthesis tool (Yosys?)
 - Create `tools/hdl_to_schematic/` converter
@@ -561,6 +639,7 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 ### Phase 5: CPU and PPU Boards (Future)
 
 After RAM prototype success:
+
 1. Apply lessons learned (DSBGA reflow, LED density, power)
 2. Scale up to CPU board (~5000 LEDs, ~5000 ICs)
 3. Develop PPU board (~3000 LEDs, ~3000 ICs)
@@ -570,6 +649,7 @@ After RAM prototype success:
 ## Development Workflow
 
 **For any new circuit:**
+
 1. Design first instance manually in KiCad
 2. Validate it works (schematic review)
 3. Document the pattern
@@ -596,6 +676,7 @@ After RAM prototype success:
 ## TI Little Logic Parts Reference
 
 **Logic Gates (1 gate per DSBGA package):**
+
 - SN74LVC1G00 - Single 2-input NAND (YZP, 5-ball)
 - SN74LVC1G02 - Single 2-input NOR (YZP, 5-ball)
 - SN74LVC1G04 - Single Inverter (YZP, 5-ball)
@@ -605,20 +686,24 @@ After RAM prototype success:
 - SN74LVC1G86 - Single 2-input XOR (YZP, 5-ball)
 
 **Flip-Flops:**
+
 - SN74LVC1G79 - Single D flip-flop, Q only (YZP, 5-ball DSBGA) — for RAM cells
 - SN74LVC1G74 - Single D flip-flop, Q/Q-bar/preset/clear (DQE, 8-pin X2SON — NOT DSBGA)
 
 **Buffers/Drivers:**
+
 - SN74LVC1G07 - Single buffer, open drain (YZP, 5-ball) — good for LED drive
 - SN74LVC1G125 - Single tri-state buffer (YZP, 5-ball)
 
 **Package Key:**
+
 - YZP = DSBGA (NanoFree), bare silicon die visible, 1.75 x 1.25mm
 - DQE = X2SON, 1.4 x 1.4mm, 8-pin (NOT bare die — plastic)
 
 ## Resources & References
 
 **External References:**
+
 - MiSTer NES Core: https://github.com/MiSTer-devel/NES_MiSTer
 - OpenTendo (NES reproduction): https://github.com/Redherring32/OpenTendo
 - NES Dev Wiki: https://www.nesdev.org/wiki/
@@ -626,6 +711,7 @@ After RAM prototype success:
 - Ben Eater's Projects: https://eater.net/
 
 **Research Sources:**
+
 - kiutils docs: https://kiutils.readthedocs.io/
 - KiCad developer docs: https://dev-docs.kicad.org/
 - TI Little Logic selection guide: https://www.ti.com/logic-circuit/little-logic/overview.html

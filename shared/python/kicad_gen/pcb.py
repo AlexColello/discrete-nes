@@ -7,6 +7,7 @@ Provides:
 """
 
 import copy
+import json
 import os
 import re
 import subprocess
@@ -347,6 +348,16 @@ class PCBBuilder:
         fp.libId = lib_fp
         fp.tstamp = tstamp or uid()
         fp.path = f"/{tstamp}" if tstamp else ""
+
+        # Set pad orientation to match footprint rotation.
+        # KiCad stores pad orientation as pad_local + parent_rotation (historical).
+        # GetFPRelativeOrientation() = stored_angle - parent_rotation.
+        # For library match: stored_angle must equal parent_rotation so relative = 0.
+        if angle:
+            for pad in fp.pads:
+                pad.position = Position(
+                    X=pad.position.X, Y=pad.position.Y, angle=angle
+                )
 
         # Set reference property
         if "Reference" in fp.properties:
@@ -801,6 +812,18 @@ class PCBBuilder:
             if info and not info.get("has_tedit") and "(tedit " in line:
                 line = re.sub(r"\(tedit [0-9a-f]+\)\s*", "", line)
 
+            # --- Fix unquoted (generator name) → (generator "name") ---
+            # kiutils drops quotes around the generator value; KiCad
+            # native format requires them.
+            gen_m = re.search(
+                r'\(generator ([^)"]\S+)\)', line)
+            if gen_m:
+                bare = gen_m.group(1)
+                line = line.replace(
+                    f"(generator {bare})",
+                    f'(generator "{bare}")',
+                )
+
             # --- Fix bare property lines ---
             if info and info["props"]:
                 prop_m = re.match(
@@ -833,7 +856,153 @@ class PCBBuilder:
 
             result.append(line)
 
-        open(filepath, "w", encoding="utf-8").write("\n".join(result))
+        text = "\n".join(result)
+
+        # --- Fix graphic element attribute ordering ---
+        # kiutils puts (layer) before (stroke)/(fill); KiCad expects it after.
+        text = _fix_graphic_attr_order(text)
+
+        # --- Fix unquoted generator values ---
+        text = _fix_unquoted_generator(text)
+
+        # --- Fix bare (remove_unused_layers) → (remove_unused_layers no) ---
+        # kiutils misinterprets "(remove_unused_layers no)" as boolean True and
+        # serializes it as "(remove_unused_layers)" without value. KiCad sees
+        # this as different from the library's "(remove_unused_layers no)".
+        text = text.replace('(remove_unused_layers)', '(remove_unused_layers no)')
+
+        open(filepath, "w", encoding="utf-8").write(text)
+
+
+def _fix_unquoted_generator(text: str) -> str:
+    """Fix unquoted (generator name) → (generator "name").
+
+    kiutils serializes the generator field without quotes, but KiCad
+    native format requires them.  This mismatch causes
+    ``lib_footprint_mismatch`` DRC warnings.
+    """
+    return re.sub(
+        r'\(generator ([^)"]\S+)\)',
+        lambda m: f'(generator "{m.group(1)}")',
+        text,
+    )
+
+
+def _fix_graphic_attr_order(text: str) -> str:
+    """Fix attribute ordering in footprint graphic elements.
+
+    kiutils serializes ``(layer ...)`` BEFORE ``(stroke ...)`` and
+    ``(fill ...)``, but KiCad native format places ``(layer ...)`` AFTER
+    them.  This ordering difference causes ``lib_footprint_mismatch`` DRC
+    warnings on every footprint.
+
+    Handles fp_line, fp_rect, fp_circle, and fp_poly elements in both
+    single-line and multi-line formats.
+    """
+    # Pattern: find (layer "X") followed by (stroke ...) on the same line.
+    # We need to move (layer "X") to after (stroke ...) and optional (fill ...).
+    #
+    # Works for both single-line and closing lines of multi-line elements:
+    #   Single: (fp_line (start ...) (end ...) (layer "X") (stroke ...))
+    #   Multi:  ) (layer "X") (stroke ...) (fill yes))   [closing line of fp_poly]
+
+    def _reorder_line(line):
+        # Quick skip: only process lines where (layer is followed by (stroke
+        layer_idx = line.find("(layer ")
+        stroke_idx = line.find("(stroke ")
+        if layer_idx == -1 or stroke_idx == -1 or layer_idx > stroke_idx:
+            return line
+
+        # Extract the (layer "X") token
+        layer_m = re.search(r'\(layer\s+"[^"]+"\)', line)
+        if not layer_m:
+            return line
+
+        layer_sexp = layer_m.group(0)
+
+        # Remove (layer "X") from its current position (and trailing space)
+        before = line[:layer_m.start()]
+        after = line[layer_m.end():]
+        combined = before.rstrip() + " " + after.lstrip()
+
+        # Find where to re-insert: after (stroke ...) and optional (fill ...)
+        # Find the end of (stroke ...) by counting balanced parens
+        s_idx = combined.find("(stroke ")
+        if s_idx == -1:
+            return line  # Shouldn't happen
+        depth = 0
+        insert_after = s_idx
+        for i in range(s_idx, len(combined)):
+            if combined[i] == "(":
+                depth += 1
+            elif combined[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    insert_after = i + 1
+                    break
+
+        # Check for (fill ...) immediately after stroke
+        rest = combined[insert_after:].lstrip()
+        if rest.startswith("(fill "):
+            fill_m = re.match(r'\(fill\s+\w+\)', rest)
+            if fill_m:
+                insert_after = combined.index(rest, insert_after) + fill_m.end()
+
+        # Re-insert (layer "X") at the found position
+        return (combined[:insert_after] + " " + layer_sexp
+                + combined[insert_after:])
+
+    lines = text.split("\n")
+    result = []
+    for line in lines:
+        result.append(_reorder_line(line))
+    return "\n".join(result)
+
+
+def _fix_font_sizes(text: str) -> Tuple[str, int]:
+    """Fix font sizes changed by KiCad from 1mm to 1.27mm.
+
+    KiCad auto-applies 1.27mm font sizes when opening/saving a board.
+    Stock library footprints use 1mm.  This difference causes
+    ``lib_footprint_mismatch`` and ``silk_overlap`` DRC warnings.
+
+    Returns:
+        (fixed_text, count) tuple.
+    """
+    count = text.count("(size 1.27 1.27)")
+    return text.replace("(size 1.27 1.27)", "(size 1 1)"), count
+
+
+def _remove_extra_properties(text: str) -> Tuple[str, int]:
+    """Remove Datasheet and Description properties auto-added by KiCad.
+
+    KiCad adds these to footprints that don't have them in the stock
+    library.  Their presence causes ``lib_footprint_mismatch`` warnings.
+
+    Returns:
+        (fixed_text, count_removed)
+    """
+    count = 0
+    for prop_name in ("Datasheet", "Description"):
+        result_lines = []
+        lines = text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if re.match(r'\s*\(property\s+"' + re.escape(prop_name) + r'"\s',
+                        line):
+                # Found property start -- skip until balanced
+                depth = line.count('(') - line.count(')')
+                while depth > 0 and i + 1 < len(lines):
+                    i += 1
+                    depth += lines[i].count('(') - lines[i].count(')')
+                count += 1
+                i += 1
+                continue
+            result_lines.append(line)
+            i += 1
+        text = '\n'.join(result_lines)
+    return text, count
 
 
 def _extract_balanced_sexp(text: str, prefix: str) -> Optional[str]:
@@ -924,7 +1093,159 @@ def _fix_footprint_file(fp_path: str, stock_path: str):
             ef_line = f"{model_m.group(1)}(embedded_fonts no)\n"
             text = text[: model_m.start()] + ef_line + text[model_m.start() :]
 
+    # Fix graphic element attribute ordering (layer before stroke)
+    text = _fix_graphic_attr_order(text)
+
+    # Fix unquoted generator values
+    text = _fix_unquoted_generator(text)
+
     open(fp_path, "w", encoding="utf-8").write(text)
+
+
+def _fix_pad_orientations(text: str) -> Tuple[str, int]:
+    """Fix pad orientations to match their parent footprint rotation.
+
+    KiCad stores pad orientation as pad_local_angle + parent_rotation (historical).
+    GetFPRelativeOrientation() = stored_angle - parent_rotation.
+    For pads to match the library, stored_angle must equal parent_rotation
+    so that the relative orientation = 0.
+
+    Without this fix, rotated footprints trigger lib_footprint_mismatch DRC
+    warnings with "Pad N orientation differs."
+
+    Returns:
+        (fixed_text, count_of_pads_fixed)
+    """
+    lines = text.split("\n")
+    result = []
+    fp_angle = 0.0  # current footprint rotation
+    got_fp_at = False  # whether we've seen the footprint's own (at ...)
+    in_pad = False  # currently inside a (pad ...) block
+    fix_count = 0
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Detect footprint start — reset state
+        if stripped.startswith("(footprint "):
+            fp_angle = 0.0
+            got_fp_at = False
+            in_pad = False
+
+        # Capture ONLY the footprint-level (at x y angle).
+        # This is the first (at ...) after (footprint ...) and before any (pad ...).
+        if not got_fp_at and not in_pad and stripped.startswith("(at "):
+            m = re.match(r'\(at\s+[-\d.]+\s+[-\d.]+(?:\s+([-\d.]+))?\)', stripped)
+            if m:
+                fp_angle = float(m.group(1)) if m.group(1) else 0.0
+                got_fp_at = True
+
+        # Track entry into pad blocks
+        if stripped.startswith("(pad "):
+            in_pad = True
+
+        # Fix pad (at x y) -> (at x y fp_angle) inside pad blocks
+        if in_pad and fp_angle != 0 and stripped.startswith("(at "):
+            m = re.match(r'(\s*)\(at\s+([-\d.]+)\s+([-\d.]+)\)(\s*)$', line)
+            if m:
+                indent, x, y, trail = m.group(1), m.group(2), m.group(3), m.group(4)
+                result.append(f"{indent}(at {x} {y} {fp_angle:g}){trail}")
+                fix_count += 1
+                continue
+
+        # Also handle single-line pads: (pad ... (at X Y) (size ...) ...)
+        if in_pad and fp_angle != 0 and "(at " in stripped and "(size " in stripped:
+            def fix_pad_at(match):
+                nonlocal fix_count
+                fix_count += 1
+                return f"(at {match.group(1)} {match.group(2)} {fp_angle:g})"
+
+            new_line = re.sub(
+                r'\(at\s+([-\d.]+)\s+([-\d.]+)\)(?=\s*\(size\b)',
+                fix_pad_at,
+                line,
+            )
+            if new_line != line:
+                result.append(new_line)
+                in_pad = False
+                continue
+
+        # Detect end of pad block
+        if in_pad and stripped == ")":
+            in_pad = False
+
+        result.append(line)
+
+    return "\n".join(result), fix_count
+
+
+def fix_pcb_drc(filepath: str) -> dict:
+    """Apply DRC fixes to an existing PCB file (e.g., after manual routing).
+
+    Fixes:
+    - Pad orientations to match footprint rotation (lib_footprint_mismatch)
+    - Graphic element attribute ordering (layer before stroke)
+    - Font sizes changed by KiCad (1.27mm -> 1mm)
+    - Extra Datasheet/Description properties added by KiCad
+
+    Args:
+        filepath: Path to .kicad_pcb file
+
+    Returns:
+        dict with counts of fixes applied.
+    """
+    text = open(filepath, "r", encoding="utf-8").read()
+    stats = {}
+
+    # Fix pad orientations (must match footprint rotation)
+    text, n = _fix_pad_orientations(text)
+    stats["pad_orientations"] = n
+
+    # Note: KiCad adds remove_unused_layers/keep_end_layers/zone_layer_connections
+    # to thru-hole pads on multi-layer boards. These cause lib_footprint_mismatch
+    # on the connector but are needed for correct DRC on internal layers.
+    # The single connector mismatch is acceptable.
+
+    # Fix font sizes (KiCad auto-changes 1mm to 1.27mm on save)
+    text, n = _fix_font_sizes(text)
+    stats["font_fixes"] = n
+
+    # Remove extra Datasheet/Description properties
+    text, n = _remove_extra_properties(text)
+    stats["props_removed"] = n
+
+    # Fix graphic element attribute ordering
+    old = text
+    text = _fix_graphic_attr_order(text)
+    stats["attr_reordered"] = sum(
+        1 for a, b in zip(old.split("\n"), text.split("\n")) if a != b
+    )
+
+    # Fix unquoted generator values
+    old = text
+    text = _fix_unquoted_generator(text)
+    stats["generator_fixed"] = sum(
+        1 for a, b in zip(old.split("\n"), text.split("\n")) if a != b
+    )
+
+    open(filepath, "w", encoding="utf-8").write(text)
+    return stats
+
+
+def _patch_project_severity(pro_path: str, rule: str, severity: str) -> bool:
+    """Set a DRC rule severity in a .kicad_pro file, handling duplicates."""
+    with open(pro_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    severities = (
+        data.get("board", {}).get("design_settings", {}).get("rule_severities", {})
+    )
+    if severities.get(rule) == severity:
+        return False  # already correct
+    severities[rule] = severity
+    with open(pro_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    return True
 
 
 def get_footprint_for_part(part_name: str) -> Optional[str]:

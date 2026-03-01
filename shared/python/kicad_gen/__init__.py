@@ -16,6 +16,7 @@ from .verify import (
 from .pcb import (
     PCBBuilder, create_dsbga_footprints,
     export_netlist, parse_netlist, get_footprint_for_part,
+    fix_pcb_drc,
 )
 from .common import (
     snap, uid, GRID, SYM_SPACING_Y, KICAD_CLI, SYMBOL_LIB_MAP,

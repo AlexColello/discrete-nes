@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(
 from kicad_gen.pcb import (
     PCBBuilder, create_dsbga_footprints,
     export_netlist, parse_netlist, get_footprint_for_part,
+    fix_pcb_drc,
 )
 from kicad_gen.common import FOOTPRINT_MAP
 
@@ -1032,6 +1033,19 @@ def main():
     # Cleanup netlist
     if os.path.exists(net_path):
         os.remove(net_path)
+
+    # Fix routed board if it exists (apply same DRC fixes for KiCad
+    # modifications: font sizes, extra properties, graphic element ordering)
+    routed_path = os.path.join(BOARD_DIR, "ram_routed.kicad_pcb")
+    if os.path.isfile(routed_path):
+        print("\nApplying DRC fixes to routed board...")
+        stats = fix_pcb_drc(routed_path)
+        print(f"  Pad orientations fixed: {stats['pad_orientations']}")
+        print(f"  Font sizes fixed: {stats['font_fixes']}")
+        print(f"  Extra properties removed: {stats['props_removed']}")
+        print(f"  Graphic attr reordered: {stats['attr_reordered']}")
+        print(f"  Generator values quoted: {stats['generator_fixed']}")
+        print(f"  Saved: {routed_path}")
 
     # Summary
     print(f"\n{'=' * 60}")
