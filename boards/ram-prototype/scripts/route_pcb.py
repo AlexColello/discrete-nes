@@ -243,6 +243,100 @@ def fill_zones(pcb_path):
 
 
 # --------------------------------------------------------------
+# Step 5b: Remove dangling track stubs
+# --------------------------------------------------------------
+
+def cleanup_dangling_tracks(pcb_path):
+    """Remove short dangling track stubs left by the autorouter.
+
+    Pre-routing creates fanout stubs past the LED bank. The autorouter
+    may connect partway along a stub, leaving a short dangling remnant.
+    This step removes those remnants using pcbnew's DRC connectivity.
+    """
+    script = textwrap.dedent(f"""\
+        import pcbnew
+        board = pcbnew.LoadBoard(r"{pcb_path}")
+
+        # Build connectivity to identify dangling ends
+        board.BuildConnectivity()
+        connectivity = board.GetConnectivity()
+
+        removed = 0
+        for track in list(board.GetTracks()):
+            if not isinstance(track, pcbnew.PCB_TRACK):
+                continue
+            # Skip vias
+            if isinstance(track, pcbnew.PCB_VIA):
+                continue
+            length_mm = track.GetLength() / 1e6  # nanometers to mm
+            if length_mm > 1.0:
+                continue  # only check short segments
+
+            start = track.GetStart()
+            end = track.GetEnd()
+
+            # Check connectivity at both endpoints
+            start_items = connectivity.GetConnectedPadsAndVias(track)
+            start_connected = len(start_items) > 0
+
+            # Count tracks sharing each endpoint
+            start_tracks = 0
+            end_tracks = 0
+            for other in board.GetTracks():
+                if other == track or isinstance(other, pcbnew.PCB_VIA):
+                    continue
+                if other.GetLayer() != track.GetLayer():
+                    continue
+                os = other.GetStart()
+                oe = other.GetEnd()
+                if os == start or oe == start:
+                    start_tracks += 1
+                if os == end or oe == end:
+                    end_tracks += 1
+
+            # Dangling: one end has no connections (no other tracks, no pads/vias)
+            if (start_tracks == 0 and not any(
+                    p.GetPosition() == start for p in start_items)):
+                board.Remove(track)
+                removed += 1
+            elif (end_tracks == 0 and not any(
+                    p.GetPosition() == end for p in start_items)):
+                board.Remove(track)
+                removed += 1
+
+        if removed > 0:
+            board.Save(r"{pcb_path}")
+        print(f"Removed {{removed}} dangling track stub(s)")
+    """)
+
+    result = subprocess.run(
+        [KICAD_PYTHON, "-c", script],
+        capture_output=True, text=True, timeout=120,
+    )
+
+    if result.stdout.strip():
+        for line in result.stdout.strip().splitlines():
+            print(f"  {line}")
+
+    if result.returncode != 0:
+        print(f"  STDERR: {result.stderr.strip()}")
+        print("  WARNING: Dangling track cleanup failed (non-fatal)")
+
+
+# --------------------------------------------------------------
+# Step 5c: Hide footprint text
+# --------------------------------------------------------------
+
+def hide_text(pcb_path):
+    """Hide all footprint reference/value text to eliminate silk warnings."""
+    sys.path.insert(0, os.path.normpath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "shared", "python")))
+    from kicad_gen.pcb import hide_footprint_text
+    count = hide_footprint_text(pcb_path)
+    print(f"  Hidden {count} footprint text items")
+
+
+# --------------------------------------------------------------
 # Step 6: Post-route verification
 # --------------------------------------------------------------
 
@@ -306,6 +400,14 @@ def main():
     # Step 5: Fill zones (GND/VCC power planes)
     print(f"\n--- Step 5: Fill All Zones ---")
     fill_zones(PCB_ROUTED)
+
+    # Step 5b: Remove dangling track stubs
+    print(f"\n--- Step 5b: Cleanup Dangling Tracks ---")
+    cleanup_dangling_tracks(PCB_ROUTED)
+
+    # Step 5c: Hide footprint text (silk/fab)
+    print(f"\n--- Step 5c: Hide Footprint Text ---")
+    hide_text(PCB_ROUTED)
 
     # Step 6: Verify
     if not args.skip_verify:

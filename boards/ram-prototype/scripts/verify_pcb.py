@@ -64,7 +64,6 @@ PRE_ROUTING_SKIP_TYPES = {
 # Fewer skips -- unconnected_items should now be resolved
 POST_ROUTING_SKIP_TYPES = {
     "via_diameter",            # 0.6mm vias needed for DSBGA density; Elecrow min 0.8mm
-    "track_dangling",          # Unused fanout stubs from pre-routing
     "courtyards_overlap",      # Cosmetic: tight DSBGA+LED cells in non-byte groups
     "lib_footprint_mismatch",  # Cosmetic: kiutils vs library diff
     "lib_footprint_issues",    # Cosmetic: local .pretty not found

@@ -806,6 +806,71 @@ class PCBBuilder:
 
         return segs
 
+    # ----------------------------------------------------------
+    # Silkscreen helpers
+    # ----------------------------------------------------------
+
+    def add_silkscreen_rect(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        layer: str = "F.SilkS",
+        stroke_width: float = 0.15,
+    ):
+        """Add a silkscreen rectangle.
+
+        Args:
+            x, y: Top-left corner position in mm
+            width: Rectangle width in mm
+            height: Rectangle height in mm
+            layer: Silkscreen layer ("F.SilkS" or "B.SilkS")
+            stroke_width: Line width in mm
+        """
+        from kiutils.items.gritems import GrRect
+
+        rect = GrRect(
+            start=Position(X=round(x, 2), Y=round(y, 2)),
+            end=Position(X=round(x + width, 2), Y=round(y + height, 2)),
+            layer=layer,
+            width=stroke_width,
+            tstamp=uid(),
+        )
+        self.board.graphicItems.append(rect)
+
+    def add_silkscreen_text(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float = 1.0,
+        layer: str = "F.SilkS",
+    ):
+        """Add silkscreen text.
+
+        Args:
+            text: Text string to display
+            x, y: Position in mm
+            size: Font height and width in mm
+            layer: Silkscreen layer ("F.SilkS" or "B.SilkS")
+        """
+        from kiutils.items.gritems import GrText
+        from kiutils.items.common import Effects
+
+        effects = Effects()
+        effects.font.height = size
+        effects.font.width = size
+
+        gr_text = GrText(
+            text=text,
+            position=Position(X=round(x, 2), Y=round(y, 2)),
+            layer=layer,
+            effects=effects,
+            tstamp=uid(),
+        )
+        self.board.graphicItems.append(gr_text)
+
     def save(self, filepath: str):
         """Save the PCB to a file.
 
@@ -1295,6 +1360,76 @@ def fix_pcb_drc(filepath: str) -> dict:
 
     open(filepath, "w", encoding="utf-8").write(text)
     return stats
+
+
+def hide_footprint_text(filepath: str) -> int:
+    """Hide all footprint Reference/Value text and fab text in a PCB file.
+
+    Adds ``(hide yes)`` to effects blocks of:
+    - ``(property "Reference" ...)`` on F.SilkS
+    - ``(property "Value" ...)`` on F.SilkS
+    - ``(fp_text user ...)`` on F.Fab
+
+    This eliminates silk_over_copper and silk_overlap DRC warnings caused
+    by tiny 0402/DSBGA reference text overlapping at high density.
+
+    Args:
+        filepath: Path to .kicad_pcb file (modified in place)
+
+    Returns:
+        Number of text items hidden.
+    """
+    text = open(filepath, "r", encoding="utf-8").read()
+    count = 0
+
+    # Hide (property "Reference"/"Value" ...) blocks that have (effects ...)
+    # Insert (hide yes) after (font ...) inside (effects ...)
+    def _hide_property(match):
+        nonlocal count
+        block = match.group(0)
+        if "(hide yes)" in block:
+            return block  # already hidden
+        # Insert (hide yes) after the closing paren of (font ...)
+        # Find the (effects block and add hide after font
+        font_end = block.rfind(")")  # last ) is the property close
+        effects_end = block.rfind(")", 0, font_end)  # second-to-last ) is effects close
+        if effects_end > 0:
+            count += 1
+            return block[:effects_end] + "\n                (hide yes)\n            " + block[effects_end:]
+        return block
+
+    # Match property blocks with effects (multiline)
+    text = re.sub(
+        r'\(property\s+"(?:Reference|Value)"\s+"[^"]*"[^)]*'
+        r'\(effects\s*\n[^)]*\(font[^)]*\)[^)]*\)',
+        _hide_property,
+        text,
+        flags=re.DOTALL,
+    )
+
+    # Hide (fp_text ...) blocks on F.Fab
+    def _hide_fp_text(match):
+        nonlocal count
+        block = match.group(0)
+        if "(hide yes)" in block:
+            return block
+        font_end = block.rfind(")")
+        effects_end = block.rfind(")", 0, font_end)
+        if effects_end > 0:
+            count += 1
+            return block[:effects_end] + "\n                (hide yes)\n            " + block[effects_end:]
+        return block
+
+    text = re.sub(
+        r'\(fp_text\s+\w+\s+"[^"]*"[^)]*\(layer\s+"F\.Fab"\)[^)]*'
+        r'\(effects\s*\n[^)]*\(font[^)]*\)[^)]*\)',
+        _hide_fp_text,
+        text,
+        flags=re.DOTALL,
+    )
+
+    open(filepath, "w", encoding="utf-8").write(text)
+    return count
 
 
 def _patch_project_severity(pro_path: str, rule: str, severity: str) -> bool:

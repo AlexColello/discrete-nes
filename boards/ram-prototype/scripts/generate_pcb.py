@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(
 from kicad_gen.pcb import (
     PCBBuilder, create_dsbga_footprints,
     export_netlist, parse_netlist, get_footprint_for_part,
-    fix_pcb_drc,
+    fix_pcb_drc, hide_footprint_text,
 )
 from kicad_gen.common import FOOTPRINT_MAP
 
@@ -918,6 +918,13 @@ def main():
             max_cols = 3
 
         ic_cells, standalone, others = sort_components_for_placement(comps)
+
+        # Reverse bit order within byte groups: MSB (D7) on the left
+        if name.startswith("byte"):
+            dff_cells = [c for c in ic_cells if c[0]["part"] == "74LVC1G79"]
+            buf_cells = [c for c in ic_cells if c[0]["part"] == "74LVC1G125"]
+            ic_cells = list(reversed(dff_cells)) + list(reversed(buf_cells))
+
         placements = compute_group_layout(ic_cells, standalone, max_cols)
 
         # Add connector and other non-IC components
@@ -935,7 +942,8 @@ def main():
                 pin_y_by_net = {}
                 for pin_num, net_name in j1["pins"].items():
                     if net_name not in ("GND", "VCC"):
-                        pin_y_by_net[net_name] = (int(pin_num) - 1) * CONN_PIN_PITCH
+                        # At 180°, pins extend upward (negative Y direction)
+                        pin_y_by_net[net_name] = -(int(pin_num) - 1) * CONN_PIN_PITCH
 
                 # Clear standalone placements and rebuild aligned to pins
                 placements = []
@@ -962,6 +970,13 @@ def main():
                         placements.append((r_comp, r_x, 0.0))
                         if led_comp:
                             placements.append((led_comp, led_x, 0.0))
+
+                # Normalize: shift so minimum Y is 0 (connector at 180°
+                # has negative Y offsets; shifting keeps everything in
+                # positive territory for board outline computation)
+                min_rel_y = min(y for _, _, y in placements)
+                if min_rel_y < 0:
+                    placements = [(c, x, y - min_rel_y) for c, x, y in placements]
             else:
                 for i, comp in enumerate(others):
                     placements.append((comp, 0.0, i * CONN_PIN_PITCH))
@@ -1026,15 +1041,43 @@ def main():
             total_placed += 1
 
     # Place RAM bytes: column-major (down first, then right)
+    # Track absolute positions for silkscreen annotation
+    byte_bounds = {}  # name -> (min_x, min_y, max_x, max_y)
     for col_idx, byte_col in enumerate([byte_col0, byte_col1]):
         bx = ram_x + col_idx * (byte_col_w + GROUP_GAP_X)
         for row_idx, name in enumerate(byte_col):
             if name not in group_layouts:
                 continue
             by = ram_y + row_idx * (byte_row_h + GROUP_GAP_Y)
+            abs_positions = []
             for comp, rel_x, rel_y in group_layouts[name]:
-                _place_component(pcb, comp, bx + rel_x, by + rel_y, netlist_data)
+                abs_x = bx + rel_x
+                abs_y = by + rel_y
+                _place_component(pcb, comp, abs_x, abs_y, netlist_data)
                 total_placed += 1
+                abs_positions.append((abs_x, abs_y))
+
+            if abs_positions:
+                xs = [p[0] for p in abs_positions]
+                ys = [p[1] for p in abs_positions]
+                byte_bounds[name] = (min(xs), min(ys), max(xs), max(ys))
+
+    # Add silkscreen rectangles and address labels for each byte
+    SILK_MARGIN = 3.0  # mm margin around component centers
+    for name, (bmin_x, bmin_y, bmax_x, bmax_y) in byte_bounds.items():
+        # Rectangle around the byte group
+        rx = round(bmin_x - SILK_MARGIN, 2)
+        ry = round(bmin_y - SILK_MARGIN, 2)
+        rw = round(bmax_x - bmin_x + 2 * SILK_MARGIN, 2)
+        rh = round(bmax_y - bmin_y + 2 * SILK_MARGIN, 2)
+        pcb.add_silkscreen_rect(rx, ry, rw, rh)
+
+        # Address label to the left of the box
+        byte_idx = int(name.split("_")[1])
+        label = f"0x{byte_idx}"
+        pcb.add_silkscreen_text(label, round(rx - 4.0, 2), round(ry + rh / 2, 2), size=1.2)
+
+    print(f"  Silkscreen: {len(byte_bounds)} byte boxes with address labels")
 
     # Place control logic below RAM: write_clk_gen + read_oe_gen
     ctrl_row_y = ram_y + ram_total_h + GROUP_GAP_Y
@@ -1151,7 +1194,9 @@ def main():
     # Save PCB
     pcb_path = os.path.join(BOARD_DIR, "ram.kicad_pcb")
     pcb.save(pcb_path)
+    hidden = hide_footprint_text(pcb_path)
     print(f"\nSaved: {pcb_path}")
+    print(f"  Hidden {hidden} footprint text items (silk/fab)")
 
     # Cleanup netlist
     if os.path.exists(net_path):
@@ -1215,6 +1260,8 @@ def _place_component(pcb, comp, x, y, netlist_data):
         angle = 90  # Vertical orientation for horizontal chain
     elif "74LVC1G" in part:
         angle = 90  # 90° CW: pin 4 (Q) faces right, VCC above Q
+    elif part == "Conn_01x16":
+        angle = 180  # Pins face left toward board edge
 
     pcb.place_component(
         ref=ref,
