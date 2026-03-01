@@ -7,7 +7,8 @@ Pipeline:
   2. Export Specctra DSN from ram.kicad_pcb via KiCad's pcbnew Python
   3. Run FreeRouting CLI (headless) to produce a .ses session file
   4. Import .ses back into KiCad and save as ram_routed.kicad_pcb
-  5. Run verify_pcb.py --post-routing on the result
+  5. Fill all zones (GND/VCC power planes) via pcbnew
+  6. Run verify_pcb.py --post-routing on the result
 
 The unrouted ram.kicad_pcb is never modified — routing output goes to
 ram_routed.kicad_pcb.
@@ -209,7 +210,40 @@ def import_ses(pcb_input, ses_path, pcb_output):
 
 
 # --------------------------------------------------------------
-# Step 5: Post-route verification
+# Step 5: Fill all zones via pcbnew
+# --------------------------------------------------------------
+
+def fill_zones(pcb_path):
+    """Fill all copper zones (GND/VCC power planes) using KiCad's pcbnew."""
+    script = textwrap.dedent(f"""\
+        import pcbnew
+        board = pcbnew.LoadBoard(r"{pcb_path}")
+        filler = pcbnew.ZONE_FILLER(board)
+        zones = board.Zones()
+        zone_list = pcbnew.ZONES()
+        for z in zones:
+            zone_list.append(z)
+        filler.Fill(zone_list)
+        board.Save(r"{pcb_path}")
+        print(f"Filled {{len(zones)}} zone(s)")
+    """)
+
+    result = subprocess.run(
+        [KICAD_PYTHON, "-c", script],
+        capture_output=True, text=True, timeout=120,
+    )
+
+    if result.stdout.strip():
+        for line in result.stdout.strip().splitlines():
+            print(f"  {line}")
+
+    if result.returncode != 0:
+        print(f"  STDERR: {result.stderr.strip()}")
+        print("  WARNING: Zone fill failed (non-fatal)")
+
+
+# --------------------------------------------------------------
+# Step 6: Post-route verification
 # --------------------------------------------------------------
 
 def run_post_route_verify():
@@ -269,15 +303,19 @@ def main():
     print(f"\n--- Step 4: Import SES -> ram_routed.kicad_pcb ---")
     import_ses(PCB_INPUT, SES_PATH, PCB_ROUTED)
 
-    # Step 5: Verify
+    # Step 5: Fill zones (GND/VCC power planes)
+    print(f"\n--- Step 5: Fill All Zones ---")
+    fill_zones(PCB_ROUTED)
+
+    # Step 6: Verify
     if not args.skip_verify:
-        print(f"\n--- Step 5: Post-Routing Verification ---")
+        print(f"\n--- Step 6: Post-Routing Verification ---")
         verify_rc = run_post_route_verify()
         if verify_rc != 0:
             print("\n  WARNING: Post-routing verification reported issues")
             print("  Open ram_routed.kicad_pcb in KiCad to inspect")
     else:
-        print(f"\n--- Step 5: Verification skipped ---")
+        print(f"\n--- Step 6: Verification skipped ---")
 
     print(f"\n{'=' * 60}")
     print(f"  Routed PCB: {PCB_ROUTED}")

@@ -178,6 +178,11 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - Footprint courtyard layer is `F.CrtYd` (not `F.Courtyard`) in kiutils layer names
 - `Net` is from `kiutils.items.common`, not `kiutils.items.brditems`
 
+**PCB trace routing style:**
+- Use **45-degree angle traces** wherever possible — avoid 90-degree bends
+- Route as: horizontal/vertical → 45° diagonal → horizontal/vertical (chamfered L-shape)
+- This improves signal integrity and is standard PCB design practice
+
 **KiCad pad position rotation (CRITICAL — DO NOT use standard math rotation):**
 - KiCad uses **clockwise** rotation (positive angle = clockwise in Y-down screen coords)
 - Correct formula: `abs_x = fp_x + px*cos(θ) + py*sin(θ)`, `abs_y = fp_y - px*sin(θ) + py*cos(θ)`

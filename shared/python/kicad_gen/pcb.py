@@ -611,10 +611,13 @@ class PCBBuilder:
         width: float = 0.2,
         layer: str = "F.Cu",
         horizontal_first: bool = True,
+        chamfer: float = 0.3,
     ) -> List[Segment]:
-        """Add an L-shaped trace (1-2 segments) between non-aligned pads.
+        """Add an L-shaped trace with 45-degree chamfered bend.
 
         If start and end are aligned on one axis, creates a single segment.
+        Otherwise creates 3 segments: straight, 45-degree diagonal, straight.
+        The chamfer is clamped to the shorter leg to avoid overshooting.
 
         Args:
             start: (x, y) start position
@@ -623,9 +626,10 @@ class PCBBuilder:
             width: Trace width in mm
             layer: Copper layer
             horizontal_first: If True, route horizontal then vertical
+            chamfer: 45-degree chamfer length at bend (mm)
 
         Returns:
-            List of created Segments (1 or 2).
+            List of created Segments (1-3).
         """
         sx, sy = round(start[0], 2), round(start[1], 2)
         ex, ey = round(end[0], 2), round(end[1], 2)
@@ -634,16 +638,94 @@ class PCBBuilder:
         if abs(sx - ex) < 0.01 or abs(sy - ey) < 0.01:
             return [self.add_trace((sx, sy), (ex, ey), net, width, layer)]
 
-        # L-shape
-        if horizontal_first:
-            mid = (ex, sy)
-        else:
-            mid = (sx, ey)
+        h_len = abs(ex - sx)
+        v_len = abs(ey - sy)
+        d = min(chamfer, h_len * 0.5, v_len * 0.5)
 
-        return [
-            self.add_trace((sx, sy), mid, net, width, layer),
-            self.add_trace(mid, (ex, ey), net, width, layer),
-        ]
+        sign_h = 1 if ex > sx else -1
+        sign_v = 1 if ey > sy else -1
+
+        if horizontal_first:
+            # horizontal → 45° chamfer → vertical
+            p1 = (round(ex - sign_h * d, 2), sy)
+            p2 = (ex, round(sy + sign_v * d, 2))
+        else:
+            # vertical → 45° chamfer → horizontal
+            p1 = (sx, round(ey - sign_v * d, 2))
+            p2 = (round(sx + sign_h * d, 2), ey)
+
+        segs = []
+        # Only add segment if length > 0
+        if abs(sx - p1[0]) > 0.01 or abs(sy - p1[1]) > 0.01:
+            segs.append(self.add_trace((sx, sy), p1, net, width, layer))
+        segs.append(self.add_trace(p1, p2, net, width, layer))
+        if abs(p2[0] - ex) > 0.01 or abs(p2[1] - ey) > 0.01:
+            segs.append(self.add_trace(p2, (ex, ey), net, width, layer))
+        return segs
+
+    def add_u_trace(
+        self,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        net: int,
+        depth: float,
+        width: float = 0.2,
+        layer: str = "F.Cu",
+        chamfer: float = 0.3,
+    ) -> List[Segment]:
+        """Add a U-shaped trace: vertical down, horizontal, vertical up.
+
+        Used to route around obstacles by going below them.  Both corners
+        get 45-degree chamfers.
+
+        Args:
+            start: (x, y) start position (top-left of U)
+            end: (x, y) end position (top-right of U)
+            depth: How far below start/end the U goes (positive = down in KiCad)
+            net: Net number
+            width: Trace width in mm
+            layer: Copper layer
+            chamfer: 45-degree chamfer length at each bend (mm)
+
+        Returns:
+            List of created Segments (3-5).
+        """
+        sx, sy = round(start[0], 2), round(start[1], 2)
+        ex, ey = round(end[0], 2), round(end[1], 2)
+        bottom_y = round(max(sy, ey) + depth, 2)
+
+        # Clamp chamfer to available leg lengths
+        left_leg = bottom_y - sy
+        right_leg = bottom_y - ey
+        h_span = abs(ex - sx)
+        d = min(chamfer, left_leg * 0.5, right_leg * 0.5, h_span * 0.25)
+        sign_h = 1 if ex > sx else -1
+
+        segs = []
+
+        # Leg 1: vertical down
+        p_v1_end = (sx, round(bottom_y - d, 2))
+        if abs(sy - p_v1_end[1]) > 0.01:
+            segs.append(self.add_trace((sx, sy), p_v1_end, net, width, layer))
+
+        # Chamfer 1: 45° from vertical to horizontal
+        p_c1 = (round(sx + sign_h * d, 2), bottom_y)
+        segs.append(self.add_trace(p_v1_end, p_c1, net, width, layer))
+
+        # Horizontal bottom
+        p_c2_start = (round(ex - sign_h * d, 2), bottom_y)
+        if abs(p_c1[0] - p_c2_start[0]) > 0.01:
+            segs.append(self.add_trace(p_c1, p_c2_start, net, width, layer))
+
+        # Chamfer 2: 45° from horizontal to vertical
+        p_v2_start = (ex, round(bottom_y - d, 2))
+        segs.append(self.add_trace(p_c2_start, p_v2_start, net, width, layer))
+
+        # Leg 2: vertical up
+        if abs(p_v2_start[1] - ey) > 0.01:
+            segs.append(self.add_trace(p_v2_start, (ex, ey), net, width, layer))
+
+        return segs
 
     def save(self, filepath: str):
         """Save the PCB to a file.
