@@ -735,6 +735,123 @@ def preroute_oe_fanout(pcb, netlist_data):
     return traces
 
 
+def preroute_connector_leds(pcb, netlist_data):
+    """Route connector signal pins to bus indicator R+LED chains.
+
+    For each J1 signal pin (excluding GND/VCC):
+      1. L-trace from J1 pad to R signal-side pad (horizontal toward R,
+         short vertical to R pad Y)
+      2. L-trace from R LED-side pad to LED anode
+
+    The J1-to-R horizontal trace (~8mm) doubles as a partial fanout stub,
+    giving the autorouter a head start toward destination blocks.
+    The fanout does NOT extend past the LED bank (LED cathode GND pads
+    would create shorting/clearance violations).
+
+    Returns number of trace segments added.
+    """
+    net_to_pads = _build_net_pad_index(pcb)
+    traces = 0
+
+    # Find connector J1
+    j1_fp = None
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if ref == "J1":
+            j1_fp = fp
+            break
+
+    if j1_fp is None:
+        print("  WARNING: J1 connector not found, skipping connector pre-routing")
+        return 0
+
+    # Iterate over J1 pads, find matching bus indicator R+LED, and route
+    fp_x, fp_y = j1_fp.position.X, j1_fp.position.Y
+    angle_rad = math.radians(j1_fp.position.angle or 0)
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+
+    for pad in j1_fp.pads:
+        if not (pad.net and pad.net.number and pad.net.number > 0):
+            continue
+        if pad.net.name in ("GND", "VCC"):
+            continue
+
+        sig_net = pad.net.number
+
+        # J1 pad absolute position
+        px, py = pad.position.X, pad.position.Y
+        j1_x = round(fp_x + px * cos_a + py * sin_a, 2)
+        j1_y = round(fp_y - px * sin_a + py * cos_a, 2)
+
+        # Find the bus indicator R on this signal net (closest to connector)
+        pads_on_net = net_to_pads.get(sig_net, [])
+        r_ref = None
+        r_sig_pad = None  # pad number on the signal side
+        r_sig_pos = None
+        best_dist = float("inf")
+        for pad_ref, pad_num, pad_x, pad_y, pnet in pads_on_net:
+            if pad_ref.startswith("R") and pad_ref != "":
+                dist = abs(pad_x - j1_x)
+                if dist < 15 and dist < best_dist:  # within 15mm of connector
+                    best_dist = dist
+                    r_ref = pad_ref
+                    r_sig_pad = pad_num
+                    r_sig_pos = (pad_x, pad_y)
+
+        if r_ref is None:
+            continue
+
+        # Find R's other pad (LED side) and its net
+        r_led_pad = "2" if r_sig_pad == "1" else "1"
+        r_led_net = pcb.get_pad_net(r_ref, r_led_pad)
+        r_led_pos = pcb.get_pad_position(r_ref, r_led_pad)
+
+        # Find LED anode on the R-LED net (closest to R)
+        led_ref = None
+        led_anode_pos = None
+        best_dist = float("inf")
+        if r_led_net:
+            for pad_ref, pad_num, pad_x, pad_y, pnet in net_to_pads.get(r_led_net, []):
+                if pad_ref.startswith("D"):
+                    dist = math.sqrt((pad_x - r_led_pos[0])**2 +
+                                     (pad_y - r_led_pos[1])**2)
+                    if dist < 5 and dist < best_dist:
+                        best_dist = dist
+                        led_ref = pad_ref
+                        led_anode_pos = (pad_x, pad_y)
+
+        # Route 1: J1 pad to R signal-side pad (L-trace, vertical first)
+        # Vertical-first avoids clearance violation: horizontal-first would
+        # put the trace at pin_y, only 0.51mm from R pad 2 (LED side) at
+        # (27, pin_y-0.51). Vertical-first lifts to pin_y+0.51 at the
+        # connector, then runs horizontal at R pad 1 Y — 1.02mm from pad 2.
+        segs = pcb.add_l_trace((j1_x, j1_y), r_sig_pos, sig_net,
+                               SIGNAL_TRACE_W, "F.Cu", horizontal_first=False)
+        traces += len(segs)
+
+        # Route 2: R LED-side pad to LED anode (L-trace)
+        if led_ref and led_anode_pos and r_led_net:
+            segs = pcb.add_l_trace(r_led_pos, led_anode_pos, r_led_net,
+                                   SIGNAL_TRACE_W, "F.Cu", horizontal_first=True)
+            traces += len(segs)
+
+        # Route 3: Fanout stub from R pad 1, down past LED then right.
+        # Gives the autorouter a consistent starting point past the LED bank.
+        # Y offset must thread between LED GND via (pin_y+1.0 edge) and
+        # next signal's R pad 2 (pin_y+2.03 center, ~pin_y+1.78 edge).
+        # 1.4mm gives 0.3mm via clearance and 0.28mm pad clearance.
+        if led_ref:
+            led_cathode_pos = pcb.get_pad_position(led_ref, "1")
+            stub_end_x = round(led_cathode_pos[0] + 2.0, 2)
+            stub_y = round(j1_y + 1.4, 2)
+            segs = pcb.add_l_trace(r_sig_pos, (stub_end_x, stub_y), sig_net,
+                                   SIGNAL_TRACE_W, "F.Cu", horizontal_first=False)
+            traces += len(segs)
+
+    return traces
+
+
 # --------------------------------------------------------------
 # Main
 # --------------------------------------------------------------
@@ -773,8 +890,9 @@ def main():
     # Register all nets
     pcb.add_nets_from_netlist(netlist_data)
 
-    # Configure 4-layer stackup
+    # Configure 4-layer stackup with B.Cu as jumper layer
     pcb.set_4layer_stackup()
+    pcb.set_layer_type("B.Cu", "jumper")
 
     # Step 5: Place components
     print("\n[5/7] Placing components...")
@@ -954,8 +1072,11 @@ def main():
     oe_traces = preroute_oe_fanout(pcb, netlist_data)
     print(f"  OE fanout: {oe_traces} trace segments")
 
+    conn_traces = preroute_connector_leds(pcb, netlist_data)
+    print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
+
     total_vias = pwr_vias
-    total_traces = pwr_traces + ic_r_traces + led_traces + dff_buf_traces + clk_traces + oe_traces
+    total_traces = pwr_traces + ic_r_traces + led_traces + dff_buf_traces + clk_traces + oe_traces + conn_traces
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
     # Step 7: Board outline and power planes
@@ -1009,8 +1130,10 @@ def main():
         board_w, board_h = 80, 100
         origin_x, origin_y = 0, 0
 
-    pcb.set_board_outline(board_w, board_h, origin_x, origin_y)
-    print(f"  Board outline: {board_w} x {board_h} mm")
+    CORNER_RADIUS = 3.0  # mm fillet radius for rounded board corners
+    pcb.set_board_outline(board_w, board_h, origin_x, origin_y,
+                          corner_radius=CORNER_RADIUS)
+    print(f"  Board outline: {board_w} x {board_h} mm (r={CORNER_RADIUS}mm corners)")
     print(f"  Origin: ({origin_x}, {origin_y})")
 
     # Power plane zones

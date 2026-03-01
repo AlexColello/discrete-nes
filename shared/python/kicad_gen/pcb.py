@@ -381,34 +381,86 @@ class PCBBuilder:
         height: float,
         origin_x: float = 0,
         origin_y: float = 0,
+        corner_radius: float = 0,
     ):
-        """Set rectangular board outline on Edge.Cuts layer.
+        """Set board outline on Edge.Cuts layer.
 
         Args:
             width: Board width in mm
             height: Board height in mm
             origin_x, origin_y: Top-left corner position
+            corner_radius: Fillet radius for rounded corners (0 = sharp)
         """
-        from kiutils.items.gritems import GrLine
+        import math
+        from kiutils.items.gritems import GrArc, GrLine
 
-        corners = [
-            (origin_x, origin_y),
-            (origin_x + width, origin_y),
-            (origin_x + width, origin_y + height),
-            (origin_x, origin_y + height),
+        ox, oy = origin_x, origin_y
+        w, h = width, height
+        r = min(corner_radius, w / 2, h / 2)  # clamp to half-dimension
+
+        if r < 0.01:
+            # Sharp rectangular corners
+            corners = [
+                (ox, oy), (ox + w, oy),
+                (ox + w, oy + h), (ox, oy + h),
+            ]
+            for i in range(4):
+                x1, y1 = corners[i]
+                x2, y2 = corners[(i + 1) % 4]
+                line = GrLine(
+                    start=Position(X=x1, Y=y1),
+                    end=Position(X=x2, Y=y2),
+                    layer="Edge.Cuts", width=0.05, tstamp=uid(),
+                )
+                self.board.graphicItems.append(line)
+            return
+
+        # Rounded corners: 4 lines + 4 quarter-circle arcs
+        cos45 = math.cos(math.radians(45))
+
+        # Edge lines (shortened by corner radius)
+        edges = [
+            ((ox + r, oy),       (ox + w - r, oy)),       # top
+            ((ox + w, oy + r),   (ox + w, oy + h - r)),   # right
+            ((ox + w - r, oy + h), (ox + r, oy + h)),     # bottom
+            ((ox, oy + h - r),   (ox, oy + r)),           # left
         ]
-
-        for i in range(4):
-            x1, y1 = corners[i]
-            x2, y2 = corners[(i + 1) % 4]
+        for (x1, y1), (x2, y2) in edges:
             line = GrLine(
                 start=Position(X=x1, Y=y1),
                 end=Position(X=x2, Y=y2),
-                layer="Edge.Cuts",
-                width=0.05,
-                tstamp=uid(),
+                layer="Edge.Cuts", width=0.05, tstamp=uid(),
             )
             self.board.graphicItems.append(line)
+
+        # Quarter-circle arcs at each corner
+        # Each arc: (start, mid_on_arc, end) — mid is at 45° on the fillet
+        arcs = [
+            # Top-left: center (ox+r, oy+r)
+            ((ox, oy + r),
+             (ox + r - r * cos45, oy + r - r * cos45),
+             (ox + r, oy)),
+            # Top-right: center (ox+w-r, oy+r)
+            ((ox + w - r, oy),
+             (ox + w - r + r * cos45, oy + r - r * cos45),
+             (ox + w, oy + r)),
+            # Bottom-right: center (ox+w-r, oy+h-r)
+            ((ox + w, oy + h - r),
+             (ox + w - r + r * cos45, oy + h - r + r * cos45),
+             (ox + w - r, oy + h)),
+            # Bottom-left: center (ox+r, oy+h-r)
+            ((ox + r, oy + h),
+             (ox + r - r * cos45, oy + h - r + r * cos45),
+             (ox, oy + h - r)),
+        ]
+        for (sx, sy), (mx, my), (ex, ey) in arcs:
+            arc = GrArc(
+                start=Position(X=round(sx, 4), Y=round(sy, 4)),
+                mid=Position(X=round(mx, 4), Y=round(my, 4)),
+                end=Position(X=round(ex, 4), Y=round(ey, 4)),
+                layer="Edge.Cuts", width=0.05, tstamp=uid(),
+            )
+            self.board.graphicItems.append(arc)
 
     def set_4layer_stackup(self):
         """Configure board for 4 copper layers: F.Cu, In1.Cu, In2.Cu, B.Cu.
@@ -429,6 +481,19 @@ class PCBBuilder:
 
         # Sort layers by ordinal for clean output
         self.board.layers.sort(key=lambda l: l.ordinal)
+
+    def set_layer_type(self, layer_name: str, layer_type: str):
+        """Change a copper layer's type.
+
+        Args:
+            layer_name: Layer name (e.g., "B.Cu")
+            layer_type: One of "signal", "power", "mixed", "jumper"
+        """
+        for layer in self.board.layers:
+            if layer.name == layer_name:
+                layer.type = layer_type
+                return
+        raise ValueError(f"Layer {layer_name!r} not found in board")
 
     def add_zone(
         self,
