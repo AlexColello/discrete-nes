@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(
 from kicad_gen.pcb import (
     PCBBuilder, create_dsbga_footprints,
     export_netlist, parse_netlist, get_footprint_for_part,
-    fix_pcb_drc, hide_footprint_text,
+    fix_pcb_drc,
 )
 from kicad_gen.common import FOOTPRINT_MAP
 
@@ -1191,12 +1191,10 @@ def main():
     print("  Added GND zone on In1.Cu")
     print("  Added VCC zone on In2.Cu")
 
-    # Save PCB
+    # Save PCB (hide all footprint text to avoid silk_overlap/silk_over_copper)
     pcb_path = os.path.join(BOARD_DIR, "ram.kicad_pcb")
-    pcb.save(pcb_path)
-    hidden = hide_footprint_text(pcb_path)
+    pcb.save(pcb_path, hide_text=True)
     print(f"\nSaved: {pcb_path}")
-    print(f"  Hidden {hidden} footprint text items (silk/fab)")
 
     # Cleanup netlist
     if os.path.exists(net_path):

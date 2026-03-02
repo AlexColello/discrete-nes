@@ -251,56 +251,63 @@ def cleanup_dangling_tracks(pcb_path):
 
     Pre-routing creates fanout stubs past the LED bank. The autorouter
     may connect partway along a stub, leaving a short dangling remnant.
-    This step removes those remnants using pcbnew's DRC connectivity.
+    This step finds short tracks (<1mm) where one endpoint has no other
+    track, pad, or via connection and removes them.
     """
     script = textwrap.dedent(f"""\
         import pcbnew
         board = pcbnew.LoadBoard(r"{pcb_path}")
 
-        # Build connectivity to identify dangling ends
-        board.BuildConnectivity()
-        connectivity = board.GetConnectivity()
+        # Collect all track/via endpoints and pad positions for connectivity
+        # Key: (x, y, layer) -> count of items at that point
+        # (vias connect all layers, so use layer=None for them)
+        from collections import defaultdict
+        endpoint_counts = defaultdict(int)
+        pad_positions = set()
 
+        for track in board.GetTracks():
+            if isinstance(track, pcbnew.PCB_VIA):
+                # Vias connect at their position on all layers
+                pos = track.GetPosition()
+                for layer_id in range(64):  # check all copper layers
+                    endpoint_counts[(pos.x, pos.y, layer_id)] += 1
+            else:
+                layer = track.GetLayer()
+                s = track.GetStart()
+                e = track.GetEnd()
+                endpoint_counts[(s.x, s.y, layer)] += 1
+                endpoint_counts[(e.x, e.y, layer)] += 1
+
+        for fp in board.GetFootprints():
+            for pad in fp.Pads():
+                pos = pad.GetPosition()
+                for layer_id in pad.GetLayerSet().CuStack():
+                    pad_positions.add((pos.x, pos.y, layer_id))
+
+        # Find and remove short dangling tracks
         removed = 0
         for track in list(board.GetTracks()):
-            if not isinstance(track, pcbnew.PCB_TRACK):
-                continue
-            # Skip vias
             if isinstance(track, pcbnew.PCB_VIA):
                 continue
-            length_mm = track.GetLength() / 1e6  # nanometers to mm
+            length_mm = track.GetLength() / 1e6
             if length_mm > 1.0:
-                continue  # only check short segments
+                continue
 
-            start = track.GetStart()
-            end = track.GetEnd()
+            layer = track.GetLayer()
+            s = track.GetStart()
+            e = track.GetEnd()
+            sk = (s.x, s.y, layer)
+            ek = (e.x, e.y, layer)
 
-            # Check connectivity at both endpoints
-            start_items = connectivity.GetConnectedPadsAndVias(track)
-            start_connected = len(start_items) > 0
+            # A track contributes 1 to its own endpoints. If the total
+            # count at an endpoint is 1 and no pad is there, it's dangling.
+            start_dangling = (endpoint_counts[sk] <= 1 and sk not in pad_positions)
+            end_dangling = (endpoint_counts[ek] <= 1 and ek not in pad_positions)
 
-            # Count tracks sharing each endpoint
-            start_tracks = 0
-            end_tracks = 0
-            for other in board.GetTracks():
-                if other == track or isinstance(other, pcbnew.PCB_VIA):
-                    continue
-                if other.GetLayer() != track.GetLayer():
-                    continue
-                os = other.GetStart()
-                oe = other.GetEnd()
-                if os == start or oe == start:
-                    start_tracks += 1
-                if os == end or oe == end:
-                    end_tracks += 1
-
-            # Dangling: one end has no connections (no other tracks, no pads/vias)
-            if (start_tracks == 0 and not any(
-                    p.GetPosition() == start for p in start_items)):
-                board.Remove(track)
-                removed += 1
-            elif (end_tracks == 0 and not any(
-                    p.GetPosition() == end for p in start_items)):
+            if start_dangling or end_dangling:
+                # Decrement counts before removing
+                endpoint_counts[sk] -= 1
+                endpoint_counts[ek] -= 1
                 board.Remove(track)
                 removed += 1
 

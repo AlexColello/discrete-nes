@@ -871,22 +871,35 @@ class PCBBuilder:
         )
         self.board.graphicItems.append(gr_text)
 
-    def save(self, filepath: str):
+    def save(self, filepath: str, hide_text: bool = False):
         """Save the PCB to a file.
 
         Args:
             filepath: Path to .kicad_pcb file
+            hide_text: If True, hide all footprint reference/value text
+                       (FpText on F.Fab via kiutils, property text on
+                       F.SilkS via _fix_footprints post-processing)
         """
+        if hide_text:
+            for fp in self.board.footprints:
+                for gi in fp.graphicItems:
+                    if type(gi).__name__ == "FpText" and hasattr(gi, "effects"):
+                        gi.effects.hide = True
         self.board.to_file(filepath)
-        self._fix_footprints(filepath)
+        self._fix_footprints(filepath, hide_text=hide_text)
 
-    def _fix_footprints(self, filepath: str):
+    def _fix_footprints(self, filepath: str, hide_text: bool = False):
         """Post-process saved PCB to fix kiutils footprint serialization.
 
         kiutils drops property position/layer/effects metadata and
         ``(embedded_fonts no)`` when round-tripping footprints.  This causes
         ``lib_footprint_mismatch`` DRC warnings.  Fix by reading the original
         .kicad_mod files and injecting correct property definitions.
+
+        Args:
+            filepath: Path to .kicad_pcb file
+            hide_text: If True, inject ``(hide yes)`` into all property
+                       effects blocks (Reference/Value on F.SilkS)
         """
         text = open(filepath, "r", encoding="utf-8").read()
 
@@ -974,6 +987,14 @@ class PCBBuilder:
                             fixed,
                             count=1,
                         )
+                        # Hide property text if requested
+                        if hide_text and "(hide yes)" not in fixed:
+                            fixed = re.sub(
+                                r'(\(effects\b)',
+                                r'\1 (hide yes)',
+                                fixed,
+                                count=1,
+                            )
                         result.append(fixed)
                         continue
 
@@ -1363,15 +1384,18 @@ def fix_pcb_drc(filepath: str) -> dict:
 
 
 def hide_footprint_text(filepath: str) -> int:
-    """Hide all footprint Reference/Value text and fab text in a PCB file.
+    """Hide all footprint Reference/Value and fab text in a PCB file.
 
-    Adds ``(hide yes)`` to effects blocks of:
-    - ``(property "Reference" ...)`` on F.SilkS
-    - ``(property "Value" ...)`` on F.SilkS
-    - ``(fp_text user ...)`` on F.Fab
+    Hides:
+    - ``(property "Reference" ...)`` on F.SilkS — adds ``(hide yes)`` to effects
+    - ``(property "Value" ...)`` on F.SilkS — adds ``(hide yes)`` to effects
+    - ``(fp_text ...)`` on F.Fab — adds ``(hide yes)`` to effects
 
     This eliminates silk_over_copper and silk_overlap DRC warnings caused
     by tiny 0402/DSBGA reference text overlapping at high density.
+
+    Works on already-saved PCB files (e.g., after routing).  For files
+    being generated, prefer ``PCBBuilder.save(hide_text=True)`` instead.
 
     Args:
         filepath: Path to .kicad_pcb file (modified in place)
@@ -1382,50 +1406,27 @@ def hide_footprint_text(filepath: str) -> int:
     text = open(filepath, "r", encoding="utf-8").read()
     count = 0
 
-    # Hide (property "Reference"/"Value" ...) blocks that have (effects ...)
-    # Insert (hide yes) after (font ...) inside (effects ...)
-    def _hide_property(match):
+    # Hide property text: insert (hide yes) into (effects ...) blocks
+    # inside (property "Reference"/"Value" ...) that don't already have it
+    def _add_hide(m):
         nonlocal count
-        block = match.group(0)
-        if "(hide yes)" in block:
-            return block  # already hidden
-        # Insert (hide yes) after the closing paren of (font ...)
-        # Find the (effects block and add hide after font
-        font_end = block.rfind(")")  # last ) is the property close
-        effects_end = block.rfind(")", 0, font_end)  # second-to-last ) is effects close
-        if effects_end > 0:
-            count += 1
-            return block[:effects_end] + "\n                (hide yes)\n            " + block[effects_end:]
-        return block
+        if "(hide yes)" in m.group(0):
+            return m.group(0)
+        count += 1
+        return m.group(0).replace("(effects", "(effects (hide yes)", 1)
 
-    # Match property blocks with effects (multiline)
     text = re.sub(
-        r'\(property\s+"(?:Reference|Value)"\s+"[^"]*"[^)]*'
-        r'\(effects\s*\n[^)]*\(font[^)]*\)[^)]*\)',
-        _hide_property,
+        r'\(property\s+"(?:Reference|Value)"\s+"[^"]*".*?\(effects\s[^)]*\(font[^)]*\)[^)]*\)',
+        _add_hide,
         text,
         flags=re.DOTALL,
     )
 
-    # Hide (fp_text ...) blocks on F.Fab
-    def _hide_fp_text(match):
-        nonlocal count
-        block = match.group(0)
-        if "(hide yes)" in block:
-            return block
-        font_end = block.rfind(")")
-        effects_end = block.rfind(")", 0, font_end)
-        if effects_end > 0:
-            count += 1
-            return block[:effects_end] + "\n                (hide yes)\n            " + block[effects_end:]
-        return block
-
+    # Hide fp_text: same approach
     text = re.sub(
-        r'\(fp_text\s+\w+\s+"[^"]*"[^)]*\(layer\s+"F\.Fab"\)[^)]*'
-        r'\(effects\s*\n[^)]*\(font[^)]*\)[^)]*\)',
-        _hide_fp_text,
+        r'\(fp_text\s+\w+\s+"[^"]*"[^)]*\(effects\s[^)]*\(font[^)]*\)[^)]*\)',
+        _add_hide,
         text,
-        flags=re.DOTALL,
     )
 
     open(filepath, "w", encoding="utf-8").write(text)
