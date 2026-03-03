@@ -208,6 +208,21 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - This causes `lib_footprint_mismatch` on through-hole footprints (e.g., PinHeader connectors)
 - Fix: `_fix_footprints()` post-processes `(remove_unused_layers)` → `(remove_unused_layers no)`
 
+**Through-vias have copper on ALL layers (CRITICAL for B.Cu routing):**
+
+- Vias with `layers=["F.Cu", "In1.Cu"]` are NOT blind vias in standard fabrication (e.g., Elecrow). The annular ring exists on every layer including B.Cu
+- Do NOT assume B.Cu is clear just because power vias target inner layers — they are through-vias with copper on B.Cu
+- B.Cu traces will short against or violate clearance with any through-via annular they pass near
+- To use B.Cu for signal routing, traces must explicitly avoid all power via positions
+- Board minimum via: 0.8mm diameter, 0.4mm drill (Elecrow). Can't use smaller without changing fab
+
+**D\* data bus prerouting strategy (RAM prototype):**
+
+- Only DFF pin 1 vias are pre-placed (64 vias). BUF pin 4 vias are NOT placed because the 0.8mm minimum via doesn't fit between BUF output and OE fanout bus (only 1.25mm gap, needs ~1.44mm for clearance)
+- DFF via safe position: `(pin1_x, pin1_y + 0.60)` — 1.47mm from GND via, 2.1mm from CLK bus, 1.0mm from DFF-to-buffer trace
+- B.Cu interconnect left to FreeRouting, which has obstacle-avoidance capability
+- At 90° CW rotation: DFF pins 1, 2, 4 all share Y = fp_y + 0.25; pins 3, 5 share Y = fp_y - 0.25
+
 **PCB trace routing style:**
 
 - Use **45-degree angle traces** wherever possible — avoid 90-degree bends

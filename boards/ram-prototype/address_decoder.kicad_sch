@@ -1,6 +1,6 @@
 (kicad_sch (version 20250114) (generator eeschema)
 
-  (uuid 34d03671-97d1-41f7-a3f4-70d15d450d82)
+  (uuid 688c9915-f803-488f-9eb8-9e7247120746)
 
   (paper "A3")
 
@@ -1038,256 +1038,6 @@
 
     )
 
-    (symbol "Device:R_Small"
-
-    	(pin_numbers
-
-    		(hide yes)
-
-    	)
-
-    	(pin_names
-
-    		(offset 0.254)
-
-    		(hide yes)
-
-    	)
-
-    	(exclude_from_sim no)
-
-    	(in_bom yes)
-
-    	(on_board yes)
-
-    	(property "Reference" "R"
-
-    		(at 0 0 90)
-
-    		(effects
-
-    			(font
-
-    				(size 1.016 1.016)
-
-    			)
-
-    		)
-
-    	)
-
-    	(property "Value" "R_Small"
-
-    		(at 1.778 0 90)
-
-    		(effects
-
-    			(font
-
-    				(size 1.27 1.27)
-
-    			)
-
-    		)
-
-    	)
-
-    	(property "Footprint" ""
-
-    		(at 0 0 0)
-
-    		(effects
-
-    			(font
-
-    				(size 1.27 1.27)
-
-    			)
-
-    			(hide yes)
-
-    		)
-
-    	)
-
-    	(property "Datasheet" "~"
-
-    		(at 0 0 0)
-
-    		(effects
-
-    			(font
-
-    				(size 1.27 1.27)
-
-    			)
-
-    			(hide yes)
-
-    		)
-
-    	)
-
-    	(property "Description" "Resistor, small symbol"
-
-    		(at 0 0 0)
-
-    		(effects
-
-    			(font
-
-    				(size 1.27 1.27)
-
-    			)
-
-    			(hide yes)
-
-    		)
-
-    	)
-
-    	(property "ki_keywords" "R resistor"
-
-    		(at 0 0 0)
-
-    		(effects
-
-    			(font
-
-    				(size 1.27 1.27)
-
-    			)
-
-    			(hide yes)
-
-    		)
-
-    	)
-
-    	(property "ki_fp_filters" "R_*"
-
-    		(at 0 0 0)
-
-    		(effects
-
-    			(font
-
-    				(size 1.27 1.27)
-
-    			)
-
-    			(hide yes)
-
-    		)
-
-    	)
-
-    	(symbol "R_Small_0_1"
-
-    		(rectangle
-
-    			(start -0.762 1.778)
-
-    			(end 0.762 -1.778)
-
-    			(stroke
-
-    				(width 0.2032)
-
-    				(type default)
-
-    			)
-
-    			(fill
-
-    				(type none)
-
-    			)
-
-    		)
-
-    	)
-
-    	(symbol "R_Small_1_1"
-
-    		(pin passive line
-
-    			(at 0 2.54 270)
-
-    			(length 0.762)
-
-    			(name "~"
-
-    				(effects
-
-    					(font
-
-    						(size 1.27 1.27)
-
-    					)
-
-    				)
-
-    			)
-
-    			(number "1"
-
-    				(effects
-
-    					(font
-
-    						(size 1.27 1.27)
-
-    					)
-
-    				)
-
-    			)
-
-    		)
-
-    		(pin passive line
-
-    			(at 0 -2.54 90)
-
-    			(length 0.762)
-
-    			(name "~"
-
-    				(effects
-
-    					(font
-
-    						(size 1.27 1.27)
-
-    					)
-
-    				)
-
-    			)
-
-    			(number "2"
-
-    				(effects
-
-    					(font
-
-    						(size 1.27 1.27)
-
-    					)
-
-    				)
-
-    			)
-
-    		)
-
-    	)
-
-    	(embedded_fonts no)
-
-    )
-
     (symbol "Device:LED_Small"
 
     	(pin_numbers
@@ -1657,602 +1407,852 @@
     	(embedded_fonts no)
 
     )
+
+    (symbol "Device:R_Small"
+
+    	(pin_numbers
+
+    		(hide yes)
+
+    	)
+
+    	(pin_names
+
+    		(offset 0.254)
+
+    		(hide yes)
+
+    	)
+
+    	(exclude_from_sim no)
+
+    	(in_bom yes)
+
+    	(on_board yes)
+
+    	(property "Reference" "R"
+
+    		(at 0 0 90)
+
+    		(effects
+
+    			(font
+
+    				(size 1.016 1.016)
+
+    			)
+
+    		)
+
+    	)
+
+    	(property "Value" "R_Small"
+
+    		(at 1.778 0 90)
+
+    		(effects
+
+    			(font
+
+    				(size 1.27 1.27)
+
+    			)
+
+    		)
+
+    	)
+
+    	(property "Footprint" ""
+
+    		(at 0 0 0)
+
+    		(effects
+
+    			(font
+
+    				(size 1.27 1.27)
+
+    			)
+
+    			(hide yes)
+
+    		)
+
+    	)
+
+    	(property "Datasheet" "~"
+
+    		(at 0 0 0)
+
+    		(effects
+
+    			(font
+
+    				(size 1.27 1.27)
+
+    			)
+
+    			(hide yes)
+
+    		)
+
+    	)
+
+    	(property "Description" "Resistor, small symbol"
+
+    		(at 0 0 0)
+
+    		(effects
+
+    			(font
+
+    				(size 1.27 1.27)
+
+    			)
+
+    			(hide yes)
+
+    		)
+
+    	)
+
+    	(property "ki_keywords" "R resistor"
+
+    		(at 0 0 0)
+
+    		(effects
+
+    			(font
+
+    				(size 1.27 1.27)
+
+    			)
+
+    			(hide yes)
+
+    		)
+
+    	)
+
+    	(property "ki_fp_filters" "R_*"
+
+    		(at 0 0 0)
+
+    		(effects
+
+    			(font
+
+    				(size 1.27 1.27)
+
+    			)
+
+    			(hide yes)
+
+    		)
+
+    	)
+
+    	(symbol "R_Small_0_1"
+
+    		(rectangle
+
+    			(start -0.762 1.778)
+
+    			(end 0.762 -1.778)
+
+    			(stroke
+
+    				(width 0.2032)
+
+    				(type default)
+
+    			)
+
+    			(fill
+
+    				(type none)
+
+    			)
+
+    		)
+
+    	)
+
+    	(symbol "R_Small_1_1"
+
+    		(pin passive line
+
+    			(at 0 2.54 270)
+
+    			(length 0.762)
+
+    			(name "~"
+
+    				(effects
+
+    					(font
+
+    						(size 1.27 1.27)
+
+    					)
+
+    				)
+
+    			)
+
+    			(number "1"
+
+    				(effects
+
+    					(font
+
+    						(size 1.27 1.27)
+
+    					)
+
+    				)
+
+    			)
+
+    		)
+
+    		(pin passive line
+
+    			(at 0 -2.54 90)
+
+    			(length 0.762)
+
+    			(name "~"
+
+    				(effects
+
+    					(font
+
+    						(size 1.27 1.27)
+
+    					)
+
+    				)
+
+    			)
+
+    			(number "2"
+
+    				(effects
+
+    					(font
+
+    						(size 1.27 1.27)
+
+    					)
+
+    				)
+
+    			)
+
+    		)
+
+    	)
+
+    	(embedded_fonts no)
+
+    )
   )
 
   (junction (at 52.07 43.18) (diameter 0) (color 0 0 0 0)
-    (uuid d2a893a2-c930-48e7-9f3c-88c80ac792e1)
+    (uuid d512a9b0-898b-4e7a-a479-3135649759e2)
   )
   (junction (at 52.07 60.96) (diameter 0) (color 0 0 0 0)
-    (uuid 20b766dd-16b1-47ad-883f-84cc5d2c6122)
+    (uuid 3bccdfc0-00c2-4d66-9270-916d6b580be0)
   )
   (junction (at 52.07 111.76) (diameter 0) (color 0 0 0 0)
-    (uuid 1a76d488-f95e-42c1-b094-7e2cdf35481f)
+    (uuid 96c9b9a0-69b6-4284-8c63-eebff1ef456d)
   )
   (junction (at 52.07 162.56) (diameter 0) (color 0 0 0 0)
-    (uuid 2e6bbd57-dc18-420c-b13d-6d00c4bf21a4)
+    (uuid 271ade09-70d1-4ec6-a9df-aead2df3c5f5)
   )
   (junction (at 49.53 68.58) (diameter 0) (color 0 0 0 0)
-    (uuid bb97902b-5707-4161-9ebe-cf037759eac3)
+    (uuid 70842e2d-a767-4059-89b3-74f991b18e3a)
   )
   (junction (at 49.53 81.28) (diameter 0) (color 0 0 0 0)
-    (uuid 004f74d7-a2bf-42ab-8417-ae8c95fe42ec)
+    (uuid c8bbad00-0c0d-4828-8838-5c69212dbe5b)
   )
   (junction (at 49.53 106.68) (diameter 0) (color 0 0 0 0)
-    (uuid 0b5c2592-69f3-4906-9c0a-e9631458c190)
+    (uuid 0d9a763d-9983-413e-bdb5-f8d76194ce2f)
   )
   (junction (at 49.53 182.88) (diameter 0) (color 0 0 0 0)
-    (uuid 7d603c81-1e3d-46b8-ba8e-9d07f873af2f)
+    (uuid 4e6e75e9-8180-4241-89b3-6729b630c8fa)
   )
   (junction (at 46.99 93.98) (diameter 0) (color 0 0 0 0)
-    (uuid 8737c795-ab2b-4989-996a-6a99dc232886)
+    (uuid dc1391b6-8ea4-4049-88fe-6e1d3ab5d57d)
   )
   (junction (at 46.99 127.0) (diameter 0) (color 0 0 0 0)
-    (uuid 97e9a600-3913-4ae4-af75-c74c0fca7d2f)
+    (uuid f6f057a2-d24a-4e82-b978-4bd71890f84a)
   )
   (junction (at 46.99 152.4) (diameter 0) (color 0 0 0 0)
-    (uuid 57ce0d38-634a-4ea9-8c30-7eaaad4bf2d3)
+    (uuid 782c83e9-e598-4d88-aadd-68c387bdc167)
   )
   (junction (at 46.99 177.8) (diameter 0) (color 0 0 0 0)
-    (uuid ba8a43c4-85ac-4263-a7d3-049186f6d748)
+    (uuid 3298f3e7-8974-4b75-bdf9-a806809d8b32)
   )
   (junction (at 88.9 43.18) (diameter 0) (color 0 0 0 0)
-    (uuid bfb7e784-9d0b-47ae-8dd8-701126f519f4)
+    (uuid 51944af6-e741-4e31-b089-aaa15fe1f63d)
   )
   (junction (at 104.14 43.18) (diameter 0) (color 0 0 0 0)
-    (uuid 94b5a5f9-70a4-4810-a36b-0a9f2792b5f0)
+    (uuid 38a37a5e-85fd-4ed3-bfa6-11432567ccd0)
   )
   (junction (at 104.14 86.36) (diameter 0) (color 0 0 0 0)
-    (uuid 0c9628cd-4631-4602-8b9e-1d63dadb1411)
+    (uuid 87391a60-ec73-4929-a7eb-656de29065bb)
   )
   (junction (at 104.14 137.16) (diameter 0) (color 0 0 0 0)
-    (uuid 2b4445e3-088a-4acd-ab41-1fb9f1b0de65)
+    (uuid 4f9910ba-857c-43f2-b9a4-b245d88a87c8)
   )
   (junction (at 88.9 68.58) (diameter 0) (color 0 0 0 0)
-    (uuid 2d75d5e2-8e55-4e71-a359-e68e04489d43)
+    (uuid 109f86ee-af3e-4dd8-98da-86191a75d0e1)
   )
   (junction (at 109.22 55.88) (diameter 0) (color 0 0 0 0)
-    (uuid 8e8d400d-be19-4c80-a63f-7be2ed08abe6)
+    (uuid e8255c0d-04e1-45f2-b313-870041bdf6c2)
   )
   (junction (at 109.22 68.58) (diameter 0) (color 0 0 0 0)
-    (uuid 7fe2205a-056a-49ed-a635-83a2bed9f3d1)
+    (uuid 2ccd17d9-f0a9-4adc-ba11-d982be08c3e6)
   )
   (junction (at 109.22 132.08) (diameter 0) (color 0 0 0 0)
-    (uuid bb1b7947-4c47-4be1-a7aa-cb27f2dd6afb)
+    (uuid efa4b531-a43f-4358-81df-d0f9ba635528)
   )
   (junction (at 88.9 93.98) (diameter 0) (color 0 0 0 0)
-    (uuid 4039feda-e51c-474e-93f0-52acf3ffc680)
+    (uuid 03c8a9c6-1ba4-44ce-ac2a-79f4ff19780a)
   )
   (junction (at 114.3 50.8) (diameter 0) (color 0 0 0 0)
-    (uuid bf26a5f3-0982-4ded-802e-3489e062a2f0)
+    (uuid 41de60d5-5da7-4c0f-9e44-d6a443b051fc)
   )
   (junction (at 114.3 76.2) (diameter 0) (color 0 0 0 0)
-    (uuid a94cbb9c-9ac9-4e72-a534-1ab4dab8bc08)
+    (uuid 011a0520-f3d5-47b0-b5dc-a525774bef80)
   )
   (junction (at 114.3 93.98) (diameter 0) (color 0 0 0 0)
-    (uuid 83b69c50-3325-4dbc-aaa4-e3cbeedc89d6)
+    (uuid c7ab1478-eeea-4248-82e5-b7c4135a7aa1)
   )
   (junction (at 149.86 30.48) (diameter 0) (color 0 0 0 0)
-    (uuid 6ee3a8c8-755f-47ff-a58c-0ecfc93f6922)
+    (uuid 067b3ffb-8a0e-4ebc-acf7-90c27f1eb016)
   )
   (junction (at 149.86 55.88) (diameter 0) (color 0 0 0 0)
-    (uuid 803e7e8a-b153-445a-a1c7-03ff06a5b42a)
+    (uuid cb601424-dc28-4ce1-b14f-16e32bf40379)
   )
   (junction (at 149.86 81.28) (diameter 0) (color 0 0 0 0)
-    (uuid 030ab3b7-0eec-4f29-8670-5ade7dd14d83)
+    (uuid fc527a7d-1a3e-418b-96da-7b1e3f3a4077)
   )
   (junction (at 149.86 106.68) (diameter 0) (color 0 0 0 0)
-    (uuid b62ab125-8bc8-4a71-a77a-cbebc16e80f0)
+    (uuid f1664dd4-9eb6-45b4-b167-4f57632cb503)
   )
   (junction (at 149.86 132.08) (diameter 0) (color 0 0 0 0)
-    (uuid 544ab305-a472-4238-99f0-546637aa1bef)
+    (uuid e164b66a-317c-4bc1-9101-23577a909a5e)
   )
   (junction (at 149.86 157.48) (diameter 0) (color 0 0 0 0)
-    (uuid bbff9fa2-94f0-4f28-afca-ebfaef05ecf1)
+    (uuid fba5e929-31b1-49e0-9494-b502f6f4502c)
   )
   (junction (at 149.86 182.88) (diameter 0) (color 0 0 0 0)
-    (uuid 83dee2d0-4db2-4f3d-9e23-831167d1f059)
+    (uuid f8ac2052-94d5-4e2e-a4b1-62537c7ac335)
   )
   (junction (at 149.86 208.28) (diameter 0) (color 0 0 0 0)
-    (uuid ca1f55bb-fe0e-4f52-88c5-9fc62eca532c)
+    (uuid 0a063aee-39bf-49bb-acb3-315395e42b06)
   )
 
   (wire (pts (xy 25.4 20.32) (xy 52.07 20.32))
     (stroke (width 0.0))
-    (uuid 05a3baca-bb04-40f8-aeb0-17d752c25015)
+    (uuid f2851017-b70f-4c93-bfee-c34e4476109d)
   )
   (wire (pts (xy 25.4 22.86) (xy 49.53 22.86))
     (stroke (width 0.0))
-    (uuid 995e8b8c-ec14-4372-ae5d-9d12f8da8170)
+    (uuid d2126622-b3c0-4dd8-964c-ea2394ef3f43)
   )
   (wire (pts (xy 25.4 25.4) (xy 46.99 25.4))
     (stroke (width 0.0))
-    (uuid b8d35259-a03c-4e8a-acf2-2c999569a8da)
+    (uuid c6a06011-e577-47c5-8fa2-625edb8d9749)
   )
   (wire (pts (xy 52.07 20.32) (xy 52.07 43.18))
     (stroke (width 0.0))
-    (uuid cfe7f8c2-4863-4529-8111-c6daf5fb0e82)
+    (uuid 1b4aff86-b735-49d7-b507-4ba2eeede2ee)
   )
   (wire (pts (xy 52.07 43.18) (xy 52.07 60.96))
     (stroke (width 0.0))
-    (uuid 04b14650-5ebb-4d9c-aa72-60cf84c648d3)
+    (uuid f807ab8d-0a61-4558-b123-268592a7856e)
   )
   (wire (pts (xy 52.07 60.96) (xy 52.07 111.76))
     (stroke (width 0.0))
-    (uuid c924ed1d-debb-40bf-b632-55f3c49f90b4)
+    (uuid 7469fd5b-9970-40b2-9d31-e993a5c8a6fc)
   )
   (wire (pts (xy 52.07 111.76) (xy 52.07 162.56))
     (stroke (width 0.0))
-    (uuid 06396bd4-84a6-46c5-9e25-70955c4d15cb)
+    (uuid d2d313f5-5dc0-4e78-ba9c-62a218295b1c)
   )
   (wire (pts (xy 52.07 162.56) (xy 52.07 213.36))
     (stroke (width 0.0))
-    (uuid 986e1b89-00a4-461e-9715-794d0dd4951a)
+    (uuid da31870b-9dd4-4085-a4f5-6c2f8e634b9c)
   )
   (wire (pts (xy 52.07 43.18) (xy 55.88 43.18))
     (stroke (width 0.0))
-    (uuid eeb0f683-6bb2-41f0-b5d2-6293f0062cb0)
+    (uuid 1d89fcbf-1bd3-4572-bf49-9740c6268c95)
   )
   (wire (pts (xy 52.07 60.96) (xy 116.84 60.96))
     (stroke (width 0.0))
-    (uuid f79ad13a-66d7-4e78-bd3a-91079ca44892)
+    (uuid 737d3d3d-a171-4acd-ad7c-5dd312f073ce)
   )
   (wire (pts (xy 52.07 111.76) (xy 116.84 111.76))
     (stroke (width 0.0))
-    (uuid 2f74458e-0e6c-48f9-a188-b24371fe6f0f)
+    (uuid c65672c7-0e9e-4f90-aad4-efa839591cfc)
   )
   (wire (pts (xy 52.07 162.56) (xy 116.84 162.56))
     (stroke (width 0.0))
-    (uuid bfd57ab6-8304-458a-b329-7279afc3dd7a)
+    (uuid b108fb9f-e2cc-4a88-94e2-af740c277b0e)
   )
   (wire (pts (xy 52.07 213.36) (xy 116.84 213.36))
     (stroke (width 0.0))
-    (uuid 0a6a3972-e39c-4f65-821c-ab9a2bb9f74d)
+    (uuid a4e3c7d2-9a75-4706-8480-0602a64ccbde)
   )
   (wire (pts (xy 49.53 22.86) (xy 49.53 68.58))
     (stroke (width 0.0))
-    (uuid 18052623-4fcd-408d-b141-b4d78494a10e)
+    (uuid 6f2d6a10-c928-4dda-9856-f65315aa4507)
   )
   (wire (pts (xy 49.53 68.58) (xy 49.53 81.28))
     (stroke (width 0.0))
-    (uuid 481d98ea-1544-469b-8ae8-a7e9b174fb12)
+    (uuid 9295d1b2-04a8-4daf-af4d-71e7529b97c9)
   )
   (wire (pts (xy 49.53 81.28) (xy 49.53 106.68))
     (stroke (width 0.0))
-    (uuid 5931fe0e-c551-4da5-afe3-f254ab4670bb)
+    (uuid 641c7555-e00f-4d4a-8a71-3a4a93c30f7b)
   )
   (wire (pts (xy 49.53 106.68) (xy 49.53 182.88))
     (stroke (width 0.0))
-    (uuid a40ba630-7719-498a-95f3-e7046cc6ce60)
+    (uuid 90661959-7b80-4805-aecf-7bbdc1b386f8)
   )
   (wire (pts (xy 49.53 182.88) (xy 49.53 208.28))
     (stroke (width 0.0))
-    (uuid 457c80cf-b3dd-4b7d-912c-67526490d312)
+    (uuid 35dbe8b9-2bb4-4b3a-bca0-75938f001a2c)
   )
   (wire (pts (xy 49.53 68.58) (xy 55.88 68.58))
     (stroke (width 0.0))
-    (uuid 99c06c74-ad56-47dc-929c-39f08c88fa0b)
+    (uuid c334061c-9095-4dd0-80cf-fe2e7b40911d)
   )
   (wire (pts (xy 49.53 81.28) (xy 116.84 81.28))
     (stroke (width 0.0))
-    (uuid edf806a2-78f3-4cbc-a18d-a01a74492391)
+    (uuid d99fbe5a-311f-4353-b689-212dc14ed6d2)
   )
   (wire (pts (xy 49.53 106.68) (xy 116.84 106.68))
     (stroke (width 0.0))
-    (uuid 449f6585-5b09-4217-a43f-050c41107f30)
+    (uuid 66efe62e-376c-458a-8f93-c66643f480df)
   )
   (wire (pts (xy 49.53 182.88) (xy 116.84 182.88))
     (stroke (width 0.0))
-    (uuid 863f3ffc-42aa-4851-bbfc-78c7e799c9b3)
+    (uuid 045ccfd8-71d4-4cdf-b16e-b2ef588344d2)
   )
   (wire (pts (xy 49.53 208.28) (xy 116.84 208.28))
     (stroke (width 0.0))
-    (uuid 5736f34e-ba4b-4f51-bd48-a8450da8c7b8)
+    (uuid cc16bc2f-a736-424b-a56a-6ee3bf2c488b)
   )
   (wire (pts (xy 46.99 25.4) (xy 46.99 93.98))
     (stroke (width 0.0))
-    (uuid 8360386a-5afd-49f2-ad07-b9c2c80a874c)
+    (uuid 92f1cf82-91da-40a6-9417-c31716a1ae36)
   )
   (wire (pts (xy 46.99 93.98) (xy 46.99 127.0))
     (stroke (width 0.0))
-    (uuid 282ee6ad-8b5c-4a6e-98ea-d35bfb7578df)
+    (uuid 08722b66-9a04-4386-9e4d-7df894553e14)
   )
   (wire (pts (xy 46.99 127.0) (xy 46.99 152.4))
     (stroke (width 0.0))
-    (uuid ace903d9-4a8d-405c-bdd0-9a1c3ca41aa4)
+    (uuid 8f1b60e5-04a1-4919-98d6-670c8c25446d)
   )
   (wire (pts (xy 46.99 152.4) (xy 46.99 177.8))
     (stroke (width 0.0))
-    (uuid 26e5326f-e4a0-4e0c-9356-60575641817c)
+    (uuid a5391ff8-21d6-40df-b2f6-0b015a2b3535)
   )
   (wire (pts (xy 46.99 177.8) (xy 46.99 203.2))
     (stroke (width 0.0))
-    (uuid d51b85f0-e5f1-45e9-bd0d-28d162784cc1)
+    (uuid 1b0a8579-0740-4e30-8f56-06f53f2ef56a)
   )
   (wire (pts (xy 46.99 93.98) (xy 55.88 93.98))
     (stroke (width 0.0))
-    (uuid 7f738ed1-200c-44b3-be87-086e02e57113)
+    (uuid a16281eb-2f4c-43ad-b910-9fc7effb09cf)
   )
   (wire (pts (xy 46.99 127.0) (xy 116.84 127.0))
     (stroke (width 0.0))
-    (uuid f1bd978f-afab-41ad-a53a-ada5cadd1b06)
+    (uuid 033f2b1f-ff09-4131-9a2d-61daf46c93df)
   )
   (wire (pts (xy 46.99 152.4) (xy 116.84 152.4))
     (stroke (width 0.0))
-    (uuid 7c8625a1-d335-4745-bf72-d527c0cc427a)
+    (uuid 71fe9474-4c3b-4a6c-9708-30ea71146d5b)
   )
   (wire (pts (xy 46.99 177.8) (xy 116.84 177.8))
     (stroke (width 0.0))
-    (uuid daa01b26-8e35-4bd7-8406-4732e404c790)
+    (uuid d92420c4-0ace-4dae-bc72-0cd882f585e2)
   )
   (wire (pts (xy 46.99 203.2) (xy 116.84 203.2))
     (stroke (width 0.0))
-    (uuid c050a69a-8657-45d2-b7a7-1ed891f253af)
+    (uuid 3434e8be-4a87-4426-b74b-e36fef11cfa1)
   )
   (wire (pts (xy 83.82 43.18) (xy 88.9 43.18))
     (stroke (width 0.0))
-    (uuid 83189b1e-f1ec-4f35-9c00-ab9479bbdee1)
+    (uuid 0a9f446d-3dc4-44ed-ac9a-709f3fe8de4f)
   )
   (wire (pts (xy 88.9 43.18) (xy 104.14 43.18))
     (stroke (width 0.0))
-    (uuid 8cf4cf3b-b769-40fb-8df4-91b7da697dd2)
+    (uuid 3b063e00-f897-4bd9-8bb1-38c6de114995)
   )
   (wire (pts (xy 93.98 53.34) (xy 96.52 53.34))
     (stroke (width 0.0))
-    (uuid efd04788-fb68-44b0-9eba-335c3eb1678a)
+    (uuid 4f735522-e0f6-405d-baa4-40ca8d64db9a)
   )
   (wire (pts (xy 101.6 53.34) (xy 101.6 58.42))
     (stroke (width 0.0))
-    (uuid b62a1331-a714-4a12-b577-9f76ef827c2b)
+    (uuid 09c9259e-7fbf-45cc-8eeb-810f52e8482e)
   )
   (wire (pts (xy 88.9 43.18) (xy 88.9 53.34))
     (stroke (width 0.0))
-    (uuid 72cf90d7-1b8e-4536-a175-0c01bc5bf33e)
+    (uuid f6233f9d-12f1-4497-9c76-d4352aebca9c)
   )
   (wire (pts (xy 104.14 35.56) (xy 104.14 43.18))
     (stroke (width 0.0))
-    (uuid 64ea30aa-776f-4ec7-9123-e2ee8257f826)
+    (uuid f0174538-c74f-43cd-9db1-d512cc9e046f)
   )
   (wire (pts (xy 104.14 43.18) (xy 104.14 86.36))
     (stroke (width 0.0))
-    (uuid 4e9599e0-61d8-4b94-893f-b7b40caca143)
+    (uuid 78394cb0-0ea9-4343-9c8c-b12888f15f57)
   )
   (wire (pts (xy 104.14 86.36) (xy 104.14 137.16))
     (stroke (width 0.0))
-    (uuid d5990c83-f5e4-4d5b-887c-719cb8380e02)
+    (uuid 259ea20c-3a49-4826-8589-0ffc0f7e8e86)
   )
   (wire (pts (xy 104.14 137.16) (xy 104.14 187.96))
     (stroke (width 0.0))
-    (uuid 5cdde692-8ec3-48f9-9fff-740039f52a00)
+    (uuid c6c42376-f899-4cfe-b039-a8fb1d321114)
   )
   (wire (pts (xy 104.14 35.56) (xy 116.84 35.56))
     (stroke (width 0.0))
-    (uuid c0311500-c1a1-4d3b-bb36-d463cf17cdbf)
+    (uuid 24f15b32-3dec-491f-88c4-ab53722d2cf9)
   )
   (wire (pts (xy 104.14 86.36) (xy 116.84 86.36))
     (stroke (width 0.0))
-    (uuid 414b205b-82d9-4d69-8017-71c305647053)
+    (uuid 4cb6fba1-e45d-4413-804e-f3a27665094c)
   )
   (wire (pts (xy 104.14 137.16) (xy 116.84 137.16))
     (stroke (width 0.0))
-    (uuid c032eeb8-e103-4042-ba4d-d1b5d19d07b9)
+    (uuid 5aea60a4-fc83-4354-88a0-b7208f34a51e)
   )
   (wire (pts (xy 104.14 187.96) (xy 116.84 187.96))
     (stroke (width 0.0))
-    (uuid 1c0d00a8-7786-4026-8fa4-c47a6929b0b1)
+    (uuid 81387890-fcbd-457e-af07-6e09c9bf41f7)
   )
   (wire (pts (xy 83.82 68.58) (xy 88.9 68.58))
     (stroke (width 0.0))
-    (uuid 87709a8e-b144-4c8e-bc85-d33ffc8e0978)
+    (uuid 0f986b16-cfde-470d-8d7c-a59d7d729c7d)
   )
   (wire (pts (xy 88.9 68.58) (xy 109.22 68.58))
     (stroke (width 0.0))
-    (uuid ea39f5a4-1e26-40d9-8d03-f53a34658609)
+    (uuid 835f00a8-3c4b-4697-b5ab-2949e9e65106)
   )
   (wire (pts (xy 93.98 78.74) (xy 96.52 78.74))
     (stroke (width 0.0))
-    (uuid 5a39d7ea-9fb9-4e4b-ae62-5f09f9f6f596)
+    (uuid 60fad769-085c-4232-b8c6-7efe197824dd)
   )
   (wire (pts (xy 101.6 78.74) (xy 101.6 83.82))
     (stroke (width 0.0))
-    (uuid 2dd95feb-ec51-4669-a5ed-cedcd19edd48)
+    (uuid a68d84c8-4d06-44d1-99a9-044f172f80ef)
   )
   (wire (pts (xy 88.9 68.58) (xy 88.9 78.74))
     (stroke (width 0.0))
-    (uuid 5a453cfb-71ef-49ac-9cf5-86870a7ff92c)
+    (uuid 3839a82b-c282-4f95-a0f2-f51f76a8ddea)
   )
   (wire (pts (xy 109.22 30.48) (xy 109.22 55.88))
     (stroke (width 0.0))
-    (uuid a0a2eb6d-806a-414c-b09a-af0fee6d1773)
+    (uuid cabf4159-e4e2-4a76-a9aa-01207aa97c24)
   )
   (wire (pts (xy 109.22 55.88) (xy 109.22 68.58))
     (stroke (width 0.0))
-    (uuid cdaf7ba1-c4cd-41db-a8ae-e1b38aa8948d)
+    (uuid 48ef0c42-338a-4f19-bfc6-bf9121877e06)
   )
   (wire (pts (xy 109.22 68.58) (xy 109.22 132.08))
     (stroke (width 0.0))
-    (uuid 25a6db35-23ac-48f6-a61a-eae1e98e2433)
+    (uuid 3704f899-fca0-4238-8fb3-9627d8144faf)
   )
   (wire (pts (xy 109.22 132.08) (xy 109.22 157.48))
     (stroke (width 0.0))
-    (uuid 42efe15c-9b5d-441f-bd17-c805a87d749c)
+    (uuid e89a70ed-dde7-4a21-bd85-03889b460497)
   )
   (wire (pts (xy 109.22 30.48) (xy 116.84 30.48))
     (stroke (width 0.0))
-    (uuid df62f8af-6e80-4f56-b6fb-774668c230d2)
+    (uuid 0170bd77-b359-4795-845a-8b9b773bd619)
   )
   (wire (pts (xy 109.22 55.88) (xy 116.84 55.88))
     (stroke (width 0.0))
-    (uuid 03ede45c-01c8-4959-a3cb-f170d7e01374)
+    (uuid 789e98e8-6319-4a0c-a5a2-08ed7f021c4b)
   )
   (wire (pts (xy 109.22 132.08) (xy 116.84 132.08))
     (stroke (width 0.0))
-    (uuid 8d1aad98-93dc-497c-9e79-8eef18a53d56)
+    (uuid 1389f8bc-1e4d-4321-91bf-fd38aa1a3cf5)
   )
   (wire (pts (xy 109.22 157.48) (xy 116.84 157.48))
     (stroke (width 0.0))
-    (uuid 4f24451a-2579-4312-a626-e3b771f74c0c)
+    (uuid 533869cf-2d9d-4fca-9e29-cd7da4603dbb)
   )
   (wire (pts (xy 83.82 93.98) (xy 88.9 93.98))
     (stroke (width 0.0))
-    (uuid 6d3d8bcd-2486-47e3-a2ab-9602e09eb9ae)
+    (uuid 11143bf0-01c5-43bf-ac65-7e0300650a9e)
   )
   (wire (pts (xy 88.9 93.98) (xy 114.3 93.98))
     (stroke (width 0.0))
-    (uuid dbebcf5a-da21-402d-ba8d-bb4e3ea600e6)
+    (uuid e71c8aad-6475-4060-ac2c-c5825209f243)
   )
   (wire (pts (xy 93.98 104.14) (xy 96.52 104.14))
     (stroke (width 0.0))
-    (uuid a649d4ca-4ef0-4040-a64c-44941edc03b8)
+    (uuid ab031fb4-1021-4e6d-9d13-a38ca7c0871e)
   )
   (wire (pts (xy 101.6 104.14) (xy 101.6 109.22))
     (stroke (width 0.0))
-    (uuid c20dd1ea-ac12-4a4b-ae74-aef55769b393)
+    (uuid 1b2f822c-51bd-4951-9585-8b725598ac76)
   )
   (wire (pts (xy 88.9 93.98) (xy 88.9 104.14))
     (stroke (width 0.0))
-    (uuid 3c0a85af-5c41-4501-ba29-78a9d08d4c78)
+    (uuid c2e50022-1e23-44b0-9876-b3a43277b46e)
   )
   (wire (pts (xy 114.3 25.4) (xy 114.3 50.8))
     (stroke (width 0.0))
-    (uuid 32c1f061-7e3c-428e-a2c0-aff2596d7dcb)
+    (uuid 54a7349d-2441-48f0-ad6c-3f0c5c0f8a96)
   )
   (wire (pts (xy 114.3 50.8) (xy 114.3 76.2))
     (stroke (width 0.0))
-    (uuid b12e1c4e-0c12-4fc0-949a-0f9dbbba6062)
+    (uuid ac0d1162-ff4d-4f62-9b9e-5c3a8386effa)
   )
   (wire (pts (xy 114.3 76.2) (xy 114.3 93.98))
     (stroke (width 0.0))
-    (uuid 9d90d812-2354-4aec-855d-879d81b869cc)
+    (uuid c5c8e527-8d85-47b4-809b-3002fc77a6a0)
   )
   (wire (pts (xy 114.3 93.98) (xy 114.3 101.6))
     (stroke (width 0.0))
-    (uuid 65df8d04-b9c5-49b9-806c-174ec6090b6c)
+    (uuid 325d4c3b-d6d5-4413-9ab5-c2d5ffac86af)
   )
   (wire (pts (xy 114.3 25.4) (xy 116.84 25.4))
     (stroke (width 0.0))
-    (uuid 3b392225-2054-4952-bddb-c667334292a6)
+    (uuid e4cb2426-ae4d-4cf7-a16b-d158eb0d4061)
   )
   (wire (pts (xy 114.3 50.8) (xy 116.84 50.8))
     (stroke (width 0.0))
-    (uuid 99168b60-bc80-4d8f-a673-7719a6254160)
+    (uuid 624ace92-4eb8-4d79-b89e-33ffc7f33472)
   )
   (wire (pts (xy 114.3 76.2) (xy 116.84 76.2))
     (stroke (width 0.0))
-    (uuid a85e192f-6db3-4eb0-a2f6-714faf6a792d)
+    (uuid 7417d62c-1d32-4e20-b7a4-a4f84bc26310)
   )
   (wire (pts (xy 114.3 101.6) (xy 116.84 101.6))
     (stroke (width 0.0))
-    (uuid 38dedb0e-ea6f-4be3-92af-63359fef0a3f)
+    (uuid f40038a7-5da2-4687-8599-ba4ef85c9804)
   )
   (wire (pts (xy 144.78 30.48) (xy 149.86 30.48))
     (stroke (width 0.0))
-    (uuid a5698782-fe1d-4562-8337-14917a85a154)
+    (uuid 36fee25d-22a7-497c-a785-9590ee0e3dd5)
   )
   (wire (pts (xy 149.86 30.48) (xy 187.96 30.48))
     (stroke (width 0.0))
-    (uuid 938b8e61-ab3d-42ec-98cc-196ba85f53d0)
+    (uuid a9d47a5b-c455-41b0-95a9-9d72287e2d42)
   )
   (wire (pts (xy 154.94 38.1) (xy 157.48 38.1))
     (stroke (width 0.0))
-    (uuid 3d0815bc-9a3a-4704-89d7-534dd9847efc)
+    (uuid b647bd3d-8da8-4c7e-8f9e-3dd54b46bdbc)
   )
   (wire (pts (xy 162.56 38.1) (xy 162.56 43.18))
     (stroke (width 0.0))
-    (uuid 225c435b-abb7-4f26-9a47-c18417431a08)
+    (uuid 13470878-13fb-4dde-8788-9841729a8b82)
   )
   (wire (pts (xy 149.86 30.48) (xy 149.86 38.1))
     (stroke (width 0.0))
-    (uuid 54cddcfb-987e-4283-b4e9-23abbb7f92af)
+    (uuid 24b35be3-9f6d-4086-ac6c-2cfdc5bcd25b)
   )
   (wire (pts (xy 144.78 55.88) (xy 149.86 55.88))
     (stroke (width 0.0))
-    (uuid be95c8f4-034d-4cbd-b63f-71f7bc38f81b)
+    (uuid 4bc075df-a741-4372-8b26-41a89092fa23)
   )
   (wire (pts (xy 149.86 55.88) (xy 187.96 55.88))
     (stroke (width 0.0))
-    (uuid c76919f7-7cf9-4a24-8b7c-0a4761d77736)
+    (uuid 8d341630-dfc8-4b62-a6f6-984fe2750a5f)
   )
   (wire (pts (xy 154.94 63.5) (xy 157.48 63.5))
     (stroke (width 0.0))
-    (uuid 0298ef89-8351-4e1d-83dd-f2d73cd9a9c5)
+    (uuid e080e864-096e-4261-bc0f-9a2d65ddb401)
   )
   (wire (pts (xy 162.56 63.5) (xy 162.56 68.58))
     (stroke (width 0.0))
-    (uuid a7794be1-c19d-40e2-80c0-47fba0b1e51d)
+    (uuid dbfb1ab8-9dec-47cd-a877-e854708fd7f9)
   )
   (wire (pts (xy 149.86 55.88) (xy 149.86 63.5))
     (stroke (width 0.0))
-    (uuid 03fc5bd3-3a6c-4694-b591-8a26419218d6)
+    (uuid 199ff9ac-bae3-4c41-9932-1060088c3c8e)
   )
   (wire (pts (xy 144.78 81.28) (xy 149.86 81.28))
     (stroke (width 0.0))
-    (uuid 1cdc4ff0-6032-4e8b-abaf-2d38d7906420)
+    (uuid 06352772-0d95-44ed-bb7c-c5e486024ce1)
   )
   (wire (pts (xy 149.86 81.28) (xy 187.96 81.28))
     (stroke (width 0.0))
-    (uuid 67bfcbe6-3504-44da-907c-ebbd129299b7)
+    (uuid ebcd13d9-2bf3-4db5-b890-5c4c68a20a35)
   )
   (wire (pts (xy 154.94 88.9) (xy 157.48 88.9))
     (stroke (width 0.0))
-    (uuid 0410cdf4-2ffe-449b-98d8-f01cdd2bbbcb)
+    (uuid e552947b-f4b7-4549-8224-4342c78a5142)
   )
   (wire (pts (xy 162.56 88.9) (xy 162.56 93.98))
     (stroke (width 0.0))
-    (uuid 3f6260c8-70ca-407a-ba4c-9d0fc31fa5e0)
+    (uuid 6ce6f65c-64c4-4147-9ffe-88dea7ce382b)
   )
   (wire (pts (xy 149.86 81.28) (xy 149.86 88.9))
     (stroke (width 0.0))
-    (uuid 7b2fb024-3285-492a-9017-edfd93964d96)
+    (uuid a313e85e-0cd9-4961-a724-26fe9fb52f08)
   )
   (wire (pts (xy 144.78 106.68) (xy 149.86 106.68))
     (stroke (width 0.0))
-    (uuid 6b715d91-62f0-462e-ac26-9d347e76cafb)
+    (uuid 831ffe23-f748-4682-a4f9-08b4fac11fcc)
   )
   (wire (pts (xy 149.86 106.68) (xy 187.96 106.68))
     (stroke (width 0.0))
-    (uuid d86fde46-e804-45c6-888a-360c55810775)
+    (uuid 99e51954-c39e-4c87-982f-26264f7195e2)
   )
   (wire (pts (xy 154.94 114.3) (xy 157.48 114.3))
     (stroke (width 0.0))
-    (uuid 2a8e00e5-e8b5-48b5-be96-427b3ef80598)
+    (uuid 12073a90-a673-4d8b-ace2-19fcd3a0f788)
   )
   (wire (pts (xy 162.56 114.3) (xy 162.56 119.38))
     (stroke (width 0.0))
-    (uuid d9acdbc5-b5a6-4915-b4ea-5ee976c40b77)
+    (uuid d98ef7c3-de09-46a5-baca-0f13eb62b47d)
   )
   (wire (pts (xy 149.86 106.68) (xy 149.86 114.3))
     (stroke (width 0.0))
-    (uuid 0c8ac17b-60c2-407a-b9a7-c1752c0ce159)
+    (uuid e7e9de44-1664-49d7-b7b4-cb9b032a407d)
   )
   (wire (pts (xy 144.78 132.08) (xy 149.86 132.08))
     (stroke (width 0.0))
-    (uuid ffb010b3-64b6-4ade-bbf4-a589f93640b7)
+    (uuid d334b30e-d9c4-4784-ba25-7b3c044a4cba)
   )
   (wire (pts (xy 149.86 132.08) (xy 187.96 132.08))
     (stroke (width 0.0))
-    (uuid 1e740b17-dde9-4046-9ba2-0186b9bba16d)
+    (uuid fc86c9ce-798c-4523-8789-9f1369f0deb7)
   )
   (wire (pts (xy 154.94 139.7) (xy 157.48 139.7))
     (stroke (width 0.0))
-    (uuid b3f69b61-16c7-4935-b07d-85f26029618e)
+    (uuid 3493fd43-6241-42a7-a1ab-855e84f8f489)
   )
   (wire (pts (xy 162.56 139.7) (xy 162.56 144.78))
     (stroke (width 0.0))
-    (uuid 1e0533ba-e590-4a3b-9205-58236cd368d3)
+    (uuid 30961d44-6963-4f9a-b43c-8e6312000be4)
   )
   (wire (pts (xy 149.86 132.08) (xy 149.86 139.7))
     (stroke (width 0.0))
-    (uuid 09657138-c41c-4637-bb05-c24410a67adf)
+    (uuid 22dfc637-c688-413a-a956-2081ba74d20e)
   )
   (wire (pts (xy 144.78 157.48) (xy 149.86 157.48))
     (stroke (width 0.0))
-    (uuid 70f39a9c-e444-4e8a-9507-d0af9836f3c2)
+    (uuid fa04538d-cb71-4d03-9d49-2ab382a7e35c)
   )
   (wire (pts (xy 149.86 157.48) (xy 187.96 157.48))
     (stroke (width 0.0))
-    (uuid 6456b145-0c41-4a74-b54d-684b1ced00a1)
+    (uuid 295aa550-75ff-4694-8e77-3d0662dda17f)
   )
   (wire (pts (xy 154.94 165.1) (xy 157.48 165.1))
     (stroke (width 0.0))
-    (uuid 8128e836-2156-4027-9bc2-d35b910e3731)
+    (uuid 797b9d73-dba6-4336-bbb3-3a8ec75b3c23)
   )
   (wire (pts (xy 162.56 165.1) (xy 162.56 170.18))
     (stroke (width 0.0))
-    (uuid d25ab123-676f-4ed6-9a3b-414191fcf57d)
+    (uuid 2ab8b42b-d647-46c5-98af-feead5f19a26)
   )
   (wire (pts (xy 149.86 157.48) (xy 149.86 165.1))
     (stroke (width 0.0))
-    (uuid 74c957ea-6ba6-4458-be31-dc9c5916dfc5)
+    (uuid 1e6e4093-3c07-4e40-9457-a4bbef324a3f)
   )
   (wire (pts (xy 144.78 182.88) (xy 149.86 182.88))
     (stroke (width 0.0))
-    (uuid 7a88d2b1-d79f-4260-9e66-e98b1cae45bb)
+    (uuid 8b883a8b-43b5-43fb-9fa9-42e7ee555455)
   )
   (wire (pts (xy 149.86 182.88) (xy 187.96 182.88))
     (stroke (width 0.0))
-    (uuid fb735e45-4933-4f7a-81e5-12086f0df782)
+    (uuid a808d271-9f69-4930-989e-174347a7fc33)
   )
   (wire (pts (xy 154.94 190.5) (xy 157.48 190.5))
     (stroke (width 0.0))
-    (uuid 6cd0c590-759e-446c-a45e-dd4431db334c)
+    (uuid 7e325bb9-162e-4bf7-afd5-68f35d1e4f7a)
   )
   (wire (pts (xy 162.56 190.5) (xy 162.56 195.58))
     (stroke (width 0.0))
-    (uuid dc02e7dc-a90d-4031-97c4-8a784a5f6217)
+    (uuid 0dfa7e77-c6cc-4081-b0a0-403f3dd6cf6f)
   )
   (wire (pts (xy 149.86 182.88) (xy 149.86 190.5))
     (stroke (width 0.0))
-    (uuid 7ad1c271-23bf-4908-ab95-1dacaed3bc35)
+    (uuid a35646bd-7fbe-4791-b895-e5d0cdc173ed)
   )
   (wire (pts (xy 144.78 208.28) (xy 149.86 208.28))
     (stroke (width 0.0))
-    (uuid e47ce97f-9dcb-4ece-bb14-9a394cc45aa1)
+    (uuid 71dd148e-fc85-4875-96ae-7902a65643e9)
   )
   (wire (pts (xy 149.86 208.28) (xy 187.96 208.28))
     (stroke (width 0.0))
-    (uuid b363b33f-8791-4828-a6cb-6157eb161019)
+    (uuid 49232983-f794-48ad-9527-c1541d8b6f60)
   )
   (wire (pts (xy 154.94 215.9) (xy 157.48 215.9))
     (stroke (width 0.0))
-    (uuid 08b7561d-5fbd-4fbc-a269-29dc802f1a7e)
+    (uuid 29187232-22a8-4985-905c-022499adb86c)
   )
   (wire (pts (xy 162.56 215.9) (xy 162.56 220.98))
     (stroke (width 0.0))
-    (uuid 369da3b4-189f-47b5-a11c-a33a593787b6)
+    (uuid 5d9c4ae1-dd6c-4c18-94db-91169a60cb9b)
   )
   (wire (pts (xy 149.86 208.28) (xy 149.86 215.9))
     (stroke (width 0.0))
-    (uuid 50f68d05-9297-4193-a86b-25d386bca842)
+    (uuid 23c59611-4dbd-4331-a1ad-17df009794ad)
   )
 
   (hierarchical_label "A0" (shape input) (at 25.4 20.32 0)
     (effects (font (size 1.27 1.27)) (justify right))
-    (uuid db278770-27db-41fc-b029-cacdf3b80999)
+    (uuid 43dffe66-cb4c-42ca-8e2d-90726a32a346)
   )
   (hierarchical_label "A1" (shape input) (at 25.4 22.86 0)
     (effects (font (size 1.27 1.27)) (justify right))
-    (uuid a5a57f42-e8ac-453c-95e9-17047ff3d68b)
+    (uuid b536628f-3bfa-40d4-9fa1-45b7ccb6a52c)
   )
   (hierarchical_label "A2" (shape input) (at 25.4 25.4 0)
     (effects (font (size 1.27 1.27)) (justify right))
-    (uuid bca7057e-dae3-444b-865b-cb02a62a9a83)
+    (uuid 65b0162a-3e60-40c8-92e9-ff3a49e4e690)
   )
   (hierarchical_label "SEL0" (shape output) (at 187.96 30.48 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid 8920a26a-d585-451c-a201-3b992313c7c5)
+    (uuid cf2e73a6-5de8-466c-9b2c-3ef4198c3469)
   )
   (hierarchical_label "SEL1" (shape output) (at 187.96 55.88 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid 6e57161d-5444-43f0-ac6d-88b26d637361)
+    (uuid 19687733-3c27-45c6-a43d-61e8a162620a)
   )
   (hierarchical_label "SEL2" (shape output) (at 187.96 81.28 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid e21b2501-0ded-4037-b9fc-eca00ef288ef)
+    (uuid 58512bd1-27d2-46ba-a0f4-0073b817c12b)
   )
   (hierarchical_label "SEL3" (shape output) (at 187.96 106.68 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid fab29464-0b27-4983-adc9-6d57fb99e838)
+    (uuid dff8b310-08f5-4832-89cc-4d80561a9af6)
   )
   (hierarchical_label "SEL4" (shape output) (at 187.96 132.08 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid 89def382-1b10-4e2c-91d7-f57120d9125e)
+    (uuid e314bd05-c640-4837-a24d-96fc3f2d5283)
   )
   (hierarchical_label "SEL5" (shape output) (at 187.96 157.48 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid 4b78e023-3c5f-4f16-b504-abeb7b52b743)
+    (uuid fe794e11-67b3-4a59-8f85-e322bfefe2ed)
   )
   (hierarchical_label "SEL6" (shape output) (at 187.96 182.88 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid 4ce09ebb-0f69-42ce-9510-c8811e4f02b0)
+    (uuid 3f75970c-6b31-462e-9c4a-ea26d53b718a)
   )
   (hierarchical_label "SEL7" (shape output) (at 187.96 208.28 0)
     (effects (font (size 1.27 1.27)) (justify left))
-    (uuid ffe7ce18-dd43-4d2d-91e4-74ba86c25cf8)
+    (uuid 6cfeea94-7df7-4e5e-bd8a-8f5b9148133a)
   )
 
   (symbol (lib_id "74xGxx:74LVC1G04") (at 71.12 43.18 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 48deb902-fa29-42a5-9c58-ddc65bf48c87)
+    (uuid 747d7eb6-a0fb-452d-afe4-22f2ca5da148)
     (property "Reference" "U1" (id 0) (at 71.12 35.56 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2268,16 +2268,16 @@
     (property "Description" "Single NOT Gate, Low-Voltage CMOS" (id 4) (at 71.12 43.18 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "5" (uuid e8fb587e-5c3b-46a8-a78a-ef4869db6d5c))
-    (pin "2" (uuid 4b074699-f3ca-4eb1-ba66-776dfcb996f1))
-    (pin "3" (uuid 78ddc8cb-1b1e-4c70-8fde-d80319a52b13))
-    (pin "4" (uuid 2e538231-62e6-4245-9af9-990c3f11eb47))
+    (pin "5" (uuid d8019bec-5722-40ed-a234-d439d2886214))
+    (pin "2" (uuid 1f686eda-1f54-4d12-963e-08d14ea04183))
+    (pin "3" (uuid 9312bff7-45d5-409d-b557-349fe84a2cf1))
+    (pin "4" (uuid af1e3929-dd7d-4ef8-bc6e-dac44664ee84))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U1") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U1") (unit 1)
         )
       )
@@ -2286,7 +2286,7 @@
 
   (symbol (lib_id "power:VCC") (at 66.04 33.02 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 97bdb04f-8450-4797-9027-e00106778980)
+    (uuid 8ef1f5bc-098a-4a8c-9dfc-d99386491e20)
     (property "Reference" "#PWR1" (id 0) (at 66.04 36.83 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2302,13 +2302,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 66.04 33.02 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 3e88df62-994b-4241-add7-767e6a8fa462))
+    (pin "1" (uuid 8f9960ed-8d83-454c-93eb-638b6d838490))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR1") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR17") (unit 1)
         )
       )
@@ -2317,7 +2317,7 @@
 
   (symbol (lib_id "power:GND") (at 66.04 53.34 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 5abe45b5-8b24-459d-ac64-25a7109d359a)
+    (uuid fda98f01-ea31-4e8e-acbf-94a3cdfc6c1b)
     (property "Reference" "#PWR2" (id 0) (at 66.04 59.69 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2333,13 +2333,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 66.04 53.34 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid da6bbe01-3886-450c-9f69-3cc408026b67))
+    (pin "1" (uuid a5b83324-2424-46c4-9942-8b9d7dade73d))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR2") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR18") (unit 1)
         )
       )
@@ -2348,7 +2348,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G04") (at 71.12 68.58 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid a64996d8-adbb-40e8-9110-7dbc40af293a)
+    (uuid 58cff22e-a95c-42cc-892d-7208918b9289)
     (property "Reference" "U2" (id 0) (at 71.12 60.96 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2364,16 +2364,16 @@
     (property "Description" "Single NOT Gate, Low-Voltage CMOS" (id 4) (at 71.12 68.58 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "5" (uuid d7dd9b8b-289d-4947-8fba-bb933619204b))
-    (pin "2" (uuid 8ad5c8b7-006a-4c1f-b319-12ee7d038280))
-    (pin "3" (uuid 1b4367e4-3f80-4bcb-8a31-bbea3d13e8ee))
-    (pin "4" (uuid 1cf55c30-3966-43c1-88ff-c4e0397b5579))
+    (pin "5" (uuid dea614ff-212a-4de4-b17a-bb3f22d9f584))
+    (pin "2" (uuid ae34ab86-5452-45d9-91bf-8b6ab02e49a0))
+    (pin "3" (uuid a3ce26ec-0201-46fa-867b-33541074c126))
+    (pin "4" (uuid 0b9cdbff-deac-4769-a52e-0420d45555d8))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U2") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U2") (unit 1)
         )
       )
@@ -2382,7 +2382,7 @@
 
   (symbol (lib_id "power:VCC") (at 66.04 58.42 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 5eae899a-d93d-4783-8a55-912034edbd96)
+    (uuid 675a3ce2-7269-4c27-83ea-717a23eb1229)
     (property "Reference" "#PWR3" (id 0) (at 66.04 62.23 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2398,13 +2398,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 66.04 58.42 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid db7121bd-e90e-4a95-93cb-257d3141013d))
+    (pin "1" (uuid fd958969-c256-4c0c-afd9-812027f84a5a))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR3") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR19") (unit 1)
         )
       )
@@ -2413,7 +2413,7 @@
 
   (symbol (lib_id "power:GND") (at 66.04 78.74 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 875c449b-fae1-42d3-a6dd-6a1e6b523eed)
+    (uuid 0e7d7ee7-92bc-4757-89c6-27a6e5b94ceb)
     (property "Reference" "#PWR4" (id 0) (at 66.04 85.09 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2429,13 +2429,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 66.04 78.74 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid c644912a-541a-4658-8ea1-bb7ad72ab9ef))
+    (pin "1" (uuid e344452e-3b0f-456f-828f-e6fbe148f125))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR4") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR20") (unit 1)
         )
       )
@@ -2444,7 +2444,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G04") (at 71.12 93.98 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 87a6eedb-3b05-41f5-8252-bb14ed20ce15)
+    (uuid 2a746a38-819b-4b26-b9a4-9c3e196f3a0c)
     (property "Reference" "U3" (id 0) (at 71.12 86.36 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2460,16 +2460,16 @@
     (property "Description" "Single NOT Gate, Low-Voltage CMOS" (id 4) (at 71.12 93.98 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "5" (uuid d90d3a3e-55f8-4da0-8be0-9e0b639cd5a0))
-    (pin "2" (uuid 70b07b73-2bf0-407d-8a1c-7149b19c1253))
-    (pin "3" (uuid e2cf0473-ce08-4a7e-833e-14c6a69ceaea))
-    (pin "4" (uuid 8ee195f7-bfce-49b1-a989-8d84914d87e2))
+    (pin "5" (uuid acb9e9d2-bec4-4b4d-a7fd-bbaa631ae1de))
+    (pin "2" (uuid 970e1745-16ca-497d-930b-e85e3733f9ad))
+    (pin "3" (uuid ede39a44-73a3-4ac5-b883-7299d0ac95b4))
+    (pin "4" (uuid 917763f4-4c3d-49bf-a9a7-ad44cd51bfb5))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U3") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U3") (unit 1)
         )
       )
@@ -2478,7 +2478,7 @@
 
   (symbol (lib_id "power:VCC") (at 66.04 83.82 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 79444545-6624-4597-a2e8-8cb102412192)
+    (uuid bb1cd3c5-9f9d-4ae2-b81c-6340993f7322)
     (property "Reference" "#PWR5" (id 0) (at 66.04 87.63 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2494,13 +2494,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 66.04 83.82 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 47b5a827-5877-4a0d-a753-6bb54abc1c65))
+    (pin "1" (uuid 2f72623a-ed31-4a7a-b996-2d90012586f4))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR5") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR21") (unit 1)
         )
       )
@@ -2509,7 +2509,7 @@
 
   (symbol (lib_id "power:GND") (at 66.04 104.14 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid de4753f5-1e81-4553-adeb-058f6c91462b)
+    (uuid 48cfc123-62b8-4395-8cdd-f6645a0db742)
     (property "Reference" "#PWR6" (id 0) (at 66.04 110.49 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2525,13 +2525,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 66.04 104.14 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 21679177-41a8-49ab-9a9d-aee8cd85aaac))
+    (pin "1" (uuid 37d5caee-d0d9-4355-a6ef-cf48d6173bcc))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR6") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR22") (unit 1)
         )
       )
@@ -2540,7 +2540,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 30.48 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 14c11a5e-1377-4e76-a840-6dab6e90ceb6)
+    (uuid f2b9ef87-a30b-41d9-9788-9aebd8110bf4)
     (property "Reference" "U4" (id 0) (at 127.0 20.32 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2556,18 +2556,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 30.48 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid 1de45833-fa95-44ab-8985-642042297e86))
-    (pin "1" (uuid 44dba2cb-9c3d-43a2-82b6-3e85004b7f86))
-    (pin "5" (uuid 20d2c15d-0100-4060-b00a-d9f571c9eb1c))
-    (pin "3" (uuid 4c247dd5-2a0a-40b3-977e-77e884d0193f))
-    (pin "2" (uuid 6f186c46-c981-4f92-a842-afd40c9dac6e))
-    (pin "4" (uuid 3bd286d6-fa0f-4f5a-840a-e7a929788751))
+    (pin "6" (uuid 5ed3e92f-792f-4b59-ad04-cd103f2308d7))
+    (pin "1" (uuid c5464352-bc05-485c-9815-3ae0a69490c6))
+    (pin "5" (uuid 1e1d938b-c57d-47be-b991-9973d91cf531))
+    (pin "3" (uuid 27007552-718e-41b0-b844-91c3a9681b74))
+    (pin "2" (uuid b7edadff-8ed2-4cfa-ad32-f22f97d81340))
+    (pin "4" (uuid 33a8f937-8d52-4ccf-aadd-c15ae714a7c6))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U4") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U4") (unit 1)
         )
       )
@@ -2576,7 +2576,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 20.32 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 1f57f0d6-38c0-4974-9110-d399e28afdec)
+    (uuid 46a8939c-94c7-49ff-b4f5-da80d94efc93)
     (property "Reference" "#PWR7" (id 0) (at 132.08 24.13 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2592,13 +2592,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 20.32 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 74a70725-224a-46bc-b1f4-f9a6f13d1190))
+    (pin "1" (uuid c4a82597-157b-4102-b3cb-a5d119d22f8e))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR7") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR23") (unit 1)
         )
       )
@@ -2607,7 +2607,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 40.64 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 95061096-afad-4593-bcc3-4472fd8d37e9)
+    (uuid d859ebe7-92e4-4ccf-8bf6-c975c270c561)
     (property "Reference" "#PWR8" (id 0) (at 132.08 46.99 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2623,13 +2623,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 40.64 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 26ef219a-e017-4a24-9ef2-250c92024338))
+    (pin "1" (uuid bffe9aad-d3c2-4b95-bc8a-5d5495cdb528))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR8") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR24") (unit 1)
         )
       )
@@ -2638,7 +2638,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 55.88 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid d7a285a8-0a01-46b5-b2e6-7ba124e2d87d)
+    (uuid 453898aa-5af7-4ee5-a61e-2502ec4eae0b)
     (property "Reference" "U5" (id 0) (at 127.0 45.72 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2654,18 +2654,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 55.88 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid cf5a9ed1-a61e-4ef6-b5c9-30b6b573f115))
-    (pin "1" (uuid 6f1e2de4-4aef-4f2c-be40-439fb95a3865))
-    (pin "5" (uuid 4043fa9f-5896-4e0c-960c-8adcf77891de))
-    (pin "3" (uuid 5e50313a-45e3-4310-a276-defdbe89cf9b))
-    (pin "2" (uuid 6069475f-789f-4abc-abc2-2661b75e0ce4))
-    (pin "4" (uuid 23e19ce3-5ffd-4d35-9428-65c6d4e71f86))
+    (pin "6" (uuid 8310def4-4fad-4fc3-aad4-80543b3eccd2))
+    (pin "1" (uuid 7923c77d-e697-48ec-9d9e-e22a6ee40e91))
+    (pin "5" (uuid 7a28f528-a009-457f-98bb-fa9ed8ad09d8))
+    (pin "3" (uuid 41544460-8404-48ae-9f52-845a06edef8e))
+    (pin "2" (uuid 7533309b-da28-472e-9c6a-45b7ada42272))
+    (pin "4" (uuid c31f270f-330c-41b2-bf28-71d3ba1b76a4))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U5") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U5") (unit 1)
         )
       )
@@ -2674,7 +2674,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 45.72 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid f6514642-66ba-4c7f-92c6-47316eaa0075)
+    (uuid bfa9a72a-13a9-4c0b-8b47-adfe9821433c)
     (property "Reference" "#PWR9" (id 0) (at 132.08 49.53 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2690,13 +2690,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 45.72 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid b88c7355-aefc-4478-804d-dc37a2b2445f))
+    (pin "1" (uuid 64cc09dd-ef67-4702-aa41-dc7fa3d58861))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR9") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR25") (unit 1)
         )
       )
@@ -2705,7 +2705,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 66.04 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid efba0691-6ef2-4118-ae9e-2e99d7fc8ada)
+    (uuid 72ec3da8-d56b-4080-9d89-006801649780)
     (property "Reference" "#PWR10" (id 0) (at 132.08 72.39 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2721,13 +2721,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 66.04 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 2d67b91c-c9cb-417f-92d4-1d87e3e6e332))
+    (pin "1" (uuid 77ab459e-017b-4dbe-9692-66158e56f7a3))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR10") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR26") (unit 1)
         )
       )
@@ -2736,7 +2736,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 81.28 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid ef1feb16-debd-4321-99a4-b016338fab11)
+    (uuid 941c601e-1ab8-41ae-8e3f-3828eb6c7a6b)
     (property "Reference" "U6" (id 0) (at 127.0 71.12 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2752,18 +2752,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 81.28 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid b4b53746-0155-4b03-a153-1360a3f345a6))
-    (pin "1" (uuid 0b3d6163-3cb9-4dfc-8dcb-b7afeee29ded))
-    (pin "5" (uuid e0c75379-85a1-4f5f-9a5f-eae5d4841726))
-    (pin "3" (uuid 6dabd36a-9553-4bec-b756-b13ff474bcf2))
-    (pin "2" (uuid bbdf08bb-f7f5-4515-ac34-e53852c4515f))
-    (pin "4" (uuid 2d77ac34-9580-4882-9e16-a1dc234e93b9))
+    (pin "6" (uuid c6d76d23-f56c-48fb-a4e1-7c6a417140d9))
+    (pin "1" (uuid 8955d45b-bfb9-4caf-9403-008761daf354))
+    (pin "5" (uuid 92426783-2bdd-4699-886d-a608055d6c2d))
+    (pin "3" (uuid d0a4935d-aed8-4eaf-bb63-d5235d9df5cf))
+    (pin "2" (uuid b07479f8-af11-4e27-8e1a-e774afb51204))
+    (pin "4" (uuid 2d4c7c80-c946-40f1-95e9-2f38bf777687))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U6") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U6") (unit 1)
         )
       )
@@ -2772,7 +2772,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 71.12 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid b4ba9790-070b-47ea-9abd-e32784bf536d)
+    (uuid 57d41e8d-11b1-448c-8a58-72e3c1b11eb4)
     (property "Reference" "#PWR11" (id 0) (at 132.08 74.93 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2788,13 +2788,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 71.12 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 06df2691-ca1d-4dae-8811-baaacb83ca0b))
+    (pin "1" (uuid f8e592be-dcde-42e9-a274-a34aabb1e2b0))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR11") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR27") (unit 1)
         )
       )
@@ -2803,7 +2803,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 91.44 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid a45ba198-bbfa-48ee-9643-1cc6f56ca149)
+    (uuid 2ed24c4f-f96a-4773-ad98-1f0fedac3a01)
     (property "Reference" "#PWR12" (id 0) (at 132.08 97.79 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2819,13 +2819,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 91.44 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 10038fd2-02fb-4293-9aac-41fb49ddb62c))
+    (pin "1" (uuid c4df8785-5bee-40ce-aa45-9870c128b8e1))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR12") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR28") (unit 1)
         )
       )
@@ -2834,7 +2834,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 106.68 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid f02fa750-6ae0-4570-81c8-c8b2b8d12256)
+    (uuid 6a0884c3-a23f-4120-82fc-abe7326b90e7)
     (property "Reference" "U7" (id 0) (at 127.0 96.52 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2850,18 +2850,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 106.68 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid b74bd1ca-4b8f-4377-8b4f-529f8d86aac7))
-    (pin "1" (uuid bbf3bd37-3bd4-4012-a2bc-7b35c1e17351))
-    (pin "5" (uuid 16d90352-07f0-4a01-9df1-00bb575c3f6f))
-    (pin "3" (uuid b24d2a5a-1ddf-465e-a1ff-7e98dfc2132b))
-    (pin "2" (uuid 0814baa2-7153-47fd-9418-9fc2a32e9642))
-    (pin "4" (uuid f656328a-c7e7-4241-8810-e478e012722a))
+    (pin "6" (uuid dd1fe549-8cb8-4450-8e07-2c5371aa8e91))
+    (pin "1" (uuid 61c0d678-bada-4fa0-aae2-52dfcbc7e8ee))
+    (pin "5" (uuid 087540f1-f8cc-470d-830f-06dad15fe423))
+    (pin "3" (uuid f6e06651-ba07-4a2e-95eb-c73ee241e5f2))
+    (pin "2" (uuid 8aa4d132-0240-42dc-9c44-bfa77d92e89a))
+    (pin "4" (uuid e5df05ba-834b-4a59-bf40-dbd5fb903d40))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U7") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U7") (unit 1)
         )
       )
@@ -2870,7 +2870,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 96.52 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid d3ade9d9-921d-40b8-9fef-455ace613303)
+    (uuid 89c9917e-aa4b-4b27-9d0a-0307fed19996)
     (property "Reference" "#PWR13" (id 0) (at 132.08 100.33 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2886,13 +2886,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 96.52 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 4af8d3c8-c238-4d96-a298-a08f6334cd92))
+    (pin "1" (uuid 4be6d4a3-aa8e-44f6-aca3-4c3b179982b1))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR13") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR29") (unit 1)
         )
       )
@@ -2901,7 +2901,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 116.84 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 3414e6ea-9bbc-47ad-aab6-86c8476f8e37)
+    (uuid 42728651-f390-4f8a-a01c-c9a7bf924c69)
     (property "Reference" "#PWR14" (id 0) (at 132.08 123.19 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2917,13 +2917,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 116.84 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 2b77956c-67a9-4ed2-a38a-683eaad3cfa1))
+    (pin "1" (uuid fddc5320-e4d3-4f6d-8765-81d009dca31e))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR14") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR30") (unit 1)
         )
       )
@@ -2932,7 +2932,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 132.08 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid e38e8cb4-53ee-4205-91e9-84d0e531649c)
+    (uuid c120cdb1-61a3-4cb2-ad18-fc037afe85a2)
     (property "Reference" "U8" (id 0) (at 127.0 121.92 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -2948,18 +2948,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 132.08 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid d6a766e3-fbde-48aa-86c8-4d34c6364553))
-    (pin "1" (uuid 0f0d9c94-0a3e-4a62-b197-8197648993e3))
-    (pin "5" (uuid eea78029-3081-41cd-bc90-50fcfae78826))
-    (pin "3" (uuid 02ec0d84-dc55-4650-a9f0-6729843df177))
-    (pin "2" (uuid 05710077-d7f4-4970-9a8e-e17025a22b48))
-    (pin "4" (uuid cc64866a-d3c7-4241-b292-a593cc24c1f8))
+    (pin "6" (uuid 142c18fd-6296-4d8c-97e1-a4de5f98b08c))
+    (pin "1" (uuid 7744df66-b409-4b80-8141-a416aabc154d))
+    (pin "5" (uuid cf89f1de-080e-4703-a25b-3dc5587ef87d))
+    (pin "3" (uuid 96761259-5484-4361-90be-336a396223cb))
+    (pin "2" (uuid c6ddaa42-28a9-40a2-9dc4-bc1e18eae282))
+    (pin "4" (uuid bc511160-9527-4648-b92a-867ce52e0d5d))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U8") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U8") (unit 1)
         )
       )
@@ -2968,7 +2968,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 121.92 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 99ebf8ca-293a-45a0-a254-29bd076c01d4)
+    (uuid 0b700bfe-e9ed-440d-b9ee-3b4ee5e432a0)
     (property "Reference" "#PWR15" (id 0) (at 132.08 125.73 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -2984,13 +2984,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 121.92 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 37eee1bc-fe9b-41c0-8a38-8accaee11dd4))
+    (pin "1" (uuid bc3ff7ec-0420-466d-be85-519ae47d236d))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR15") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR31") (unit 1)
         )
       )
@@ -2999,7 +2999,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 142.24 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 9c24595c-68d7-407c-9fca-f45e50d26c1c)
+    (uuid 7b072a18-a0b9-48e1-bb3f-88f0dc40c8f1)
     (property "Reference" "#PWR16" (id 0) (at 132.08 148.59 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3015,13 +3015,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 142.24 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 1909ae4f-8944-4fdb-b5fa-55fcd64c24bf))
+    (pin "1" (uuid 75b91af7-f0d4-4984-af53-215ea1ce5ac5))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR16") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR32") (unit 1)
         )
       )
@@ -3030,7 +3030,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 157.48 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid a3300d0e-3811-49cb-b2dc-74ba385b3da0)
+    (uuid 7fe15385-316f-42dc-86c6-2e940d37cd34)
     (property "Reference" "U9" (id 0) (at 127.0 147.32 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -3046,18 +3046,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 157.48 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid c89e2d65-e8ef-4b62-95b2-e6ecfee7e6fc))
-    (pin "1" (uuid 45bf0da4-23a7-41b0-bb44-daa6f96a5b46))
-    (pin "5" (uuid 122e1d96-49da-4bc0-b021-b7bc1a2b1266))
-    (pin "3" (uuid 7688258d-76c3-4c3c-82a7-042cbe87a9dd))
-    (pin "2" (uuid f6c96d6c-baa7-4a81-856a-f9eaa7f70e8a))
-    (pin "4" (uuid 8b2b0f7d-36fa-4b7d-9c89-6137b5b08b55))
+    (pin "6" (uuid e3f84f81-a556-4885-aad5-72d3a29d628e))
+    (pin "1" (uuid 84223d1f-dc12-44f8-bb3a-60bfdb01c2b8))
+    (pin "5" (uuid 49c5ea8f-a0a7-4e4c-bf9a-eac7b90560ba))
+    (pin "3" (uuid 6794dfea-61ff-41c7-860d-c8ff07101dd6))
+    (pin "2" (uuid 7d39730a-8f06-49af-9ea3-bb89e191ead5))
+    (pin "4" (uuid f564c2c5-8026-48a2-8323-85b81c4cc79c))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U9") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U9") (unit 1)
         )
       )
@@ -3066,7 +3066,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 147.32 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid ec2aa68a-0aef-4a51-81ff-af591c8f24f0)
+    (uuid 99023ca4-218d-4860-a601-1ba0c1939bb0)
     (property "Reference" "#PWR17" (id 0) (at 132.08 151.13 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3082,13 +3082,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 147.32 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid eaf88ca8-c8af-45d3-8f4c-bab8045dc89e))
+    (pin "1" (uuid 8b411854-a74b-49b6-adaf-99b5b9d92a5a))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR17") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR33") (unit 1)
         )
       )
@@ -3097,7 +3097,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 167.64 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid f4c94ced-d2fd-4665-983f-ef81844f8d91)
+    (uuid 75ae191b-de8d-4b8c-a507-3a8dbbb63555)
     (property "Reference" "#PWR18" (id 0) (at 132.08 173.99 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3113,13 +3113,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 167.64 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 201383b9-8cbd-4585-84d3-46f2a91fa323))
+    (pin "1" (uuid 1b93a9c8-eace-4bd4-84a5-395f36243050))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR18") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR34") (unit 1)
         )
       )
@@ -3128,7 +3128,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 182.88 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid c5e958a5-6e83-4dda-bf1d-cefe1741c04b)
+    (uuid a2a166cc-0cce-4f9c-8a30-083a4aba09c4)
     (property "Reference" "U10" (id 0) (at 127.0 172.72 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -3144,18 +3144,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 182.88 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid b52d5dac-5262-4349-ae71-16fa2e2773e0))
-    (pin "1" (uuid 761e296d-43cc-4a2a-b1ac-70aa8972eac9))
-    (pin "5" (uuid 8de1787a-91c1-4058-a4af-0d4108e63526))
-    (pin "3" (uuid d3f05819-c9d2-464c-b629-61a3dd716799))
-    (pin "2" (uuid ecda2fc6-f03f-4dbf-9b56-e5c36536b242))
-    (pin "4" (uuid 9e7a9b7d-728b-435c-9acc-136dc1075aa7))
+    (pin "6" (uuid 1d0b247a-04db-4c80-ac37-82113117f6cb))
+    (pin "1" (uuid d92ac9cb-47ee-47c3-a20f-ccbbe8b4094b))
+    (pin "5" (uuid a85ef408-7b0d-4315-9a25-5b7bdcef96e9))
+    (pin "3" (uuid 13ffc3cd-963b-48d6-8701-bdd318e403b0))
+    (pin "2" (uuid 5353ef78-eddf-41a7-ae0d-d90e94650d94))
+    (pin "4" (uuid 6c5b364a-535e-40b9-b3cf-b7c41776622a))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U10") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U10") (unit 1)
         )
       )
@@ -3164,7 +3164,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 172.72 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 82fd67b1-b817-49c4-896b-910b3e559000)
+    (uuid fb8c58bb-6ce7-4448-8685-f9c6306d9b66)
     (property "Reference" "#PWR19" (id 0) (at 132.08 176.53 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3180,13 +3180,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 172.72 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 871a4cb7-1109-4673-9276-bc4b47e5e6b6))
+    (pin "1" (uuid ac08693d-b757-4e60-8141-45360b8db508))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR19") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR35") (unit 1)
         )
       )
@@ -3195,7 +3195,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 193.04 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 96fdba46-31e2-4b73-a31c-2df05b520577)
+    (uuid f4cf3342-bc50-4ffa-a655-eee0a1d312a4)
     (property "Reference" "#PWR20" (id 0) (at 132.08 199.39 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3211,13 +3211,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 193.04 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid f8d6f6d9-fb35-4239-9d14-f40ba7073f8e))
+    (pin "1" (uuid f6ba3709-1dbc-45be-983c-7b58998fae49))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR20") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR36") (unit 1)
         )
       )
@@ -3226,7 +3226,7 @@
 
   (symbol (lib_id "74xGxx:74LVC1G11") (at 132.08 208.28 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 14da2912-3e2d-4173-b791-736301189cf9)
+    (uuid b7c905c9-8bbd-4d0d-bb59-180d88fdd723)
     (property "Reference" "U11" (id 0) (at 127.0 198.12 0)
       (effects (font (size 1.27 1.27)))
     )
@@ -3242,18 +3242,18 @@
     (property "Description" "Single AND 3-Input Gate, Low-Voltage CMOS" (id 4) (at 132.08 208.28 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "6" (uuid e4a368d6-bff1-4be6-b372-184316645ca3))
-    (pin "1" (uuid 7be3c9bd-ccfe-46c2-960f-e589e946374b))
-    (pin "5" (uuid 4f6f18bc-3349-42f2-aaf2-6f8936069fd0))
-    (pin "3" (uuid 31e40fed-1bff-4078-b8ad-d1a9f7d8343c))
-    (pin "2" (uuid 1b7fa3b5-b929-4766-91ca-ca440526afc1))
-    (pin "4" (uuid 0d22a2f2-6e5f-469d-b35a-896170e7dc82))
+    (pin "6" (uuid 71f60e17-f489-46a7-950e-83d4938d95b9))
+    (pin "1" (uuid c5ca53c7-f1f3-4de8-a372-20f59f6342a1))
+    (pin "5" (uuid 24c1ce73-c9db-4a69-a47d-d8090bff2762))
+    (pin "3" (uuid 58ee27c5-04a3-4567-9541-22bd2c33110a))
+    (pin "2" (uuid 5976ce80-c5f2-4f0e-948f-737e0402c446))
+    (pin "4" (uuid 4503749f-d3c4-40e4-a774-94861c90f515))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "U11") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "U11") (unit 1)
         )
       )
@@ -3262,7 +3262,7 @@
 
   (symbol (lib_id "power:VCC") (at 132.08 198.12 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 7a2f512d-fe69-4933-bba3-8f79dd78884c)
+    (uuid 6f141adf-23c4-4067-8508-e1ddcac23f30)
     (property "Reference" "#PWR21" (id 0) (at 132.08 201.93 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3278,13 +3278,13 @@
     (property "Description" "Power symbol creates a global label with name \"VCC\"" (id 4) (at 132.08 198.12 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 2f367678-a2a9-48b1-bd7b-9d788b8a9a1c))
+    (pin "1" (uuid 497abd96-1095-475d-a763-86d3d3ad9ddf))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR21") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR37") (unit 1)
         )
       )
@@ -3293,7 +3293,7 @@
 
   (symbol (lib_id "power:GND") (at 132.08 218.44 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 9ef93a8e-5360-4114-8fc5-382d1ea7ca05)
+    (uuid 3fc822b2-319b-4fb6-b623-e277c0e0fac2)
     (property "Reference" "#PWR22" (id 0) (at 132.08 224.79 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3309,81 +3309,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 132.08 218.44 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 7a19820f-d0c8-42cc-b8df-a77971daf283))
+    (pin "1" (uuid 24e18809-8fe1-4b9c-94dc-0ceebcaf0feb))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR22") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR38") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 91.44 53.34 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 91.44 53.34 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 99c50e88-8383-4f88-bfb9-f311d3d40bb2)
-    (property "Reference" "R1" (id 0) (at 91.44 53.34 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid 93b8fb33-304c-443d-bb0f-2a4e78eea2db)
+    (property "Reference" "D1" (id 0) (at 92.71 56.51 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 91.44 51.56 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 95.89 50.8 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 91.44 53.34 0)
+    (property "Footprint" "" (id 2) (at 91.44 53.34 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 91.44 53.34 0)
+    (property "Datasheet" "~" (id 3) (at 91.44 53.34 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 91.44 53.34 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 91.44 53.34 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid da9eb5cd-6bef-4f72-bd19-3db2b4c529af))
-    (pin "2" (uuid e7edadec-db4c-48a8-9abe-ac4f9d673ad1))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 91.44 53.34 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid b818b959-6976-44db-9222-108eab29fb00))
+    (pin "1" (uuid 6f1a61ee-df78-42d8-afd3-8fb2c239d612))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R1") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D1") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R15") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D15") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 99.06 53.34 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 99.06 53.34 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid d6c4cb88-c103-4b3a-b375-ed56346de27a)
-    (property "Reference" "D1" (id 0) (at 100.33 56.51 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid dd4bc6b6-2ca8-4269-b904-59b2f6c3a73c)
+    (property "Reference" "R1" (id 0) (at 99.06 53.34 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 103.51 50.8 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 99.06 51.56 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 99.06 53.34 90)
+    (property "Footprint" "" (id 2) (at 99.06 53.34 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 99.06 53.34 90)
+    (property "Datasheet" "~" (id 3) (at 99.06 53.34 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 99.06 53.34 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 99.06 53.34 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 99.06 53.34 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 858a1da9-3b7f-4b4b-8fa6-6672f25f8820))
-    (pin "1" (uuid eca41786-11ca-4c6d-bccf-db9a094a28ec))
+    (pin "1" (uuid 721ce172-3c9b-4016-9a9b-cd0623a84fce))
+    (pin "2" (uuid 571a8afa-f1c0-43c2-8c48-ff7eb912420f))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D1") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R1") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D15") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R15") (unit 1)
         )
       )
     )
@@ -3391,7 +3391,7 @@
 
   (symbol (lib_id "power:GND") (at 101.6 58.42 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 4137f97b-d9d8-4a73-9690-24452871609c)
+    (uuid cfb649fc-82d5-4ffc-a01c-77aa99172816)
     (property "Reference" "#PWR23" (id 0) (at 101.6 64.77 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3407,81 +3407,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 101.6 58.42 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 2bbdcf99-e1fa-494c-b054-bf40dc1d3f9c))
+    (pin "1" (uuid 81b7debb-acdb-4bbf-8527-32431c390d2b))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR23") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR39") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 91.44 78.74 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 91.44 78.74 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 614bdf90-d715-478b-ac68-f2233acb358e)
-    (property "Reference" "R2" (id 0) (at 91.44 78.74 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid 9500d7dd-90a5-4512-a2f2-a213d14d1657)
+    (property "Reference" "D2" (id 0) (at 92.71 81.91 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 91.44 76.96 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 95.89 76.2 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 91.44 78.74 0)
+    (property "Footprint" "" (id 2) (at 91.44 78.74 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 91.44 78.74 0)
+    (property "Datasheet" "~" (id 3) (at 91.44 78.74 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 91.44 78.74 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 91.44 78.74 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid fd7e90ce-986a-4fd8-a025-b585fb7af43f))
-    (pin "2" (uuid 7409f2f3-3d69-4045-94c3-216996839942))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 91.44 78.74 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid ff01fb99-4b0b-41b8-8954-7139fa031498))
+    (pin "1" (uuid cb09e201-e997-4aed-801a-cc1ccd1e0d09))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R2") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D2") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R16") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D16") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 99.06 78.74 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 99.06 78.74 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid b957e161-7722-4bdc-a94b-b2d8edfb86b4)
-    (property "Reference" "D2" (id 0) (at 100.33 81.91 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid 6e4e1c08-cc9a-4072-bca2-951ff68b7015)
+    (property "Reference" "R2" (id 0) (at 99.06 78.74 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 103.51 76.2 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 99.06 76.96 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 99.06 78.74 90)
+    (property "Footprint" "" (id 2) (at 99.06 78.74 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 99.06 78.74 90)
+    (property "Datasheet" "~" (id 3) (at 99.06 78.74 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 99.06 78.74 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 99.06 78.74 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 99.06 78.74 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 3b6e209d-0b24-493c-a979-cd4fcedac7ec))
-    (pin "1" (uuid ac5e7794-ffd3-4062-bf33-d90d101be28c))
+    (pin "1" (uuid bb643de3-3362-4bca-a573-7516e596888a))
+    (pin "2" (uuid 604d69c8-aa2f-482c-99ad-b313cd85c6d6))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D2") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R2") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D16") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R16") (unit 1)
         )
       )
     )
@@ -3489,7 +3489,7 @@
 
   (symbol (lib_id "power:GND") (at 101.6 83.82 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 4ecdfb96-caea-4359-ac29-af564765b901)
+    (uuid 82e72de0-7d73-42a0-9cf9-c3d8af8b0f13)
     (property "Reference" "#PWR24" (id 0) (at 101.6 90.17 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3505,81 +3505,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 101.6 83.82 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 3932592e-72a1-4647-a58d-5bd3a80c0eb4))
+    (pin "1" (uuid 8f23df61-57ac-4f13-a2e5-fc1402796064))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR24") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR40") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 91.44 104.14 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 91.44 104.14 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid c9ab9d18-0452-45d9-87f1-a6d23053e522)
-    (property "Reference" "R3" (id 0) (at 91.44 104.14 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid 72a47484-a6ea-4910-b148-395e170b76dc)
+    (property "Reference" "D3" (id 0) (at 92.71 107.31 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 91.44 102.36 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 95.89 101.6 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 91.44 104.14 0)
+    (property "Footprint" "" (id 2) (at 91.44 104.14 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 91.44 104.14 0)
+    (property "Datasheet" "~" (id 3) (at 91.44 104.14 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 91.44 104.14 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 91.44 104.14 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 640ff8f6-e538-4b8d-a1c6-dd46ab3ace36))
-    (pin "2" (uuid bde10840-e925-4de5-a0a1-3ff1cf87157e))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 91.44 104.14 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid 3ee9d289-8d3c-4b76-aed2-7cf00e57f975))
+    (pin "1" (uuid 957d4186-7314-49d7-aa82-d398ca7d1d61))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R3") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D3") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R17") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D17") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 99.06 104.14 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 99.06 104.14 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 78f91ba8-cf5b-41ee-b64d-ca234888c438)
-    (property "Reference" "D3" (id 0) (at 100.33 107.31 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid 40899aa4-09c8-4bbd-9ca2-0098de661b63)
+    (property "Reference" "R3" (id 0) (at 99.06 104.14 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 103.51 101.6 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 99.06 102.36 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 99.06 104.14 90)
+    (property "Footprint" "" (id 2) (at 99.06 104.14 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 99.06 104.14 90)
+    (property "Datasheet" "~" (id 3) (at 99.06 104.14 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 99.06 104.14 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 99.06 104.14 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 99.06 104.14 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 75e513be-d91b-43a5-b6e5-61feec8b3bd5))
-    (pin "1" (uuid d63703a0-4b5d-454f-8ff5-911abe56a515))
+    (pin "1" (uuid 486f64a0-5645-4120-af55-69e85786984c))
+    (pin "2" (uuid 63d55fa5-58dc-4231-9915-8d491d6f5827))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D3") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R3") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D17") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R17") (unit 1)
         )
       )
     )
@@ -3587,7 +3587,7 @@
 
   (symbol (lib_id "power:GND") (at 101.6 109.22 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 1e2cd5f8-b6a1-47aa-a2db-6d3e39b29060)
+    (uuid 52a4299c-54aa-4a3c-9f1d-a0b6ff6a2aee)
     (property "Reference" "#PWR25" (id 0) (at 101.6 115.57 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3603,81 +3603,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 101.6 109.22 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid c3161d0e-0552-4cd5-a9f9-e04da926fc7e))
+    (pin "1" (uuid f47a4ba1-c8c9-493b-9f5b-bcb3daa3579c))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR25") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR41") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 38.1 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 38.1 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid df56e0ac-32bd-4b0c-b75a-3a5cce0f578c)
-    (property "Reference" "R4" (id 0) (at 152.4 38.1 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid ff007593-a82c-48f6-b63b-e65bd4c69b95)
+    (property "Reference" "D4" (id 0) (at 153.67 41.27 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 36.32 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 35.56 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 38.1 0)
+    (property "Footprint" "" (id 2) (at 152.4 38.1 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 38.1 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 38.1 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 38.1 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 38.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid bdfac9c8-10a8-470f-a011-d63106af6cdc))
-    (pin "2" (uuid 91e2f8aa-5f81-42cd-aed7-b3857018b532))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 38.1 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid daca41a7-43a2-4b2f-882b-cf0522c5c3b9))
+    (pin "1" (uuid a3a7d20c-a70c-4ea4-8e56-3aa9d890aa35))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R4") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D4") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R18") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D18") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 38.1 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 38.1 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid d0ac054a-a7ed-498c-ab4a-2ef62a98cb1f)
-    (property "Reference" "D4" (id 0) (at 161.29 41.27 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid 24287e63-0c89-4390-9bea-300446c4890f)
+    (property "Reference" "R4" (id 0) (at 160.02 38.1 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 35.56 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 36.32 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 38.1 90)
+    (property "Footprint" "" (id 2) (at 160.02 38.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 38.1 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 38.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 38.1 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 38.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 38.1 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 50886d7b-30ce-428d-b63d-c64f6a9a8f13))
-    (pin "1" (uuid 86d53aae-f2e2-499f-a709-471099524801))
+    (pin "1" (uuid b64ef99c-2af0-415c-b976-d32328b30f07))
+    (pin "2" (uuid dee86b45-f992-4a0b-a2b5-f1e6f566baaa))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D4") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R4") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D18") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R18") (unit 1)
         )
       )
     )
@@ -3685,7 +3685,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 43.18 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 86d75e1b-1f93-4121-921f-6220434dd1a9)
+    (uuid 552bbedf-59ea-44a5-b193-71b52217bd0d)
     (property "Reference" "#PWR26" (id 0) (at 162.56 49.53 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3701,81 +3701,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 43.18 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 00972151-f177-431c-a4d7-5359be62ef03))
+    (pin "1" (uuid 1004b0ef-78c2-4815-8547-a1b38ee19976))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR26") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR42") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 63.5 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 63.5 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 68cd8f35-d9ec-4fab-a052-4d804405389a)
-    (property "Reference" "R5" (id 0) (at 152.4 63.5 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid 3149dcf5-a45a-4806-b189-7db1826a3c54)
+    (property "Reference" "D5" (id 0) (at 153.67 66.67 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 61.72 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 60.96 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 63.5 0)
+    (property "Footprint" "" (id 2) (at 152.4 63.5 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 63.5 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 63.5 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 63.5 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 63.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 426e2d9d-854f-4acc-8a87-682fcda2feb4))
-    (pin "2" (uuid 92320b74-b9da-4b86-a0c8-0eec35372ea9))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 63.5 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid ab1bf78e-1860-44de-ab9c-fd4e5d37d1a9))
+    (pin "1" (uuid 0c7eb28f-3d9f-4108-8473-733de05f44f4))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R5") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D5") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R19") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D19") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 63.5 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 63.5 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 69a6f497-83f0-4740-8465-bca0b70a3151)
-    (property "Reference" "D5" (id 0) (at 161.29 66.67 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid bb39fce7-4465-4c96-b8e6-f40097642e4d)
+    (property "Reference" "R5" (id 0) (at 160.02 63.5 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 60.96 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 61.72 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 63.5 90)
+    (property "Footprint" "" (id 2) (at 160.02 63.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 63.5 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 63.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 63.5 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 63.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 63.5 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid ee53f6a7-dfcf-4b06-9b29-dda16cb85965))
-    (pin "1" (uuid c38601b8-4018-4310-8caa-667ab3c70488))
+    (pin "1" (uuid 9622e273-400b-4f46-84cc-23dce8433b06))
+    (pin "2" (uuid fb282917-660f-42a7-bda5-790e7606f14f))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D5") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R5") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D19") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R19") (unit 1)
         )
       )
     )
@@ -3783,7 +3783,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 68.58 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid c4c0206b-a7e4-447f-b7fe-63e1979df4d9)
+    (uuid 2f1ac876-1005-46e1-bf47-f58557932a50)
     (property "Reference" "#PWR27" (id 0) (at 162.56 74.93 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3799,81 +3799,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 68.58 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 4b9ac47f-6706-49aa-82a4-86f2d137c996))
+    (pin "1" (uuid f3c08e67-c158-4a18-ba4c-b46a21eba103))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR27") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR43") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 88.9 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 88.9 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 4cda4dd1-244d-416a-8d86-f7199f82a931)
-    (property "Reference" "R6" (id 0) (at 152.4 88.9 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid 1ea43528-0d23-4179-b684-f46ff99c99b3)
+    (property "Reference" "D6" (id 0) (at 153.67 92.07 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 87.12 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 86.36 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 88.9 0)
+    (property "Footprint" "" (id 2) (at 152.4 88.9 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 88.9 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 88.9 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 88.9 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 88.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 907b78ee-6f8b-45d4-bcd2-d3bb6fc03dc3))
-    (pin "2" (uuid 605249bb-9ceb-4012-abfc-e3d1949e35b4))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 88.9 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid 8a8ead2b-af2b-418d-a506-7d3069164c1d))
+    (pin "1" (uuid ca29170a-c5cb-43f8-a986-800369db3f3e))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R6") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D6") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R20") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D20") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 88.9 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 88.9 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 5159c192-c15a-42c8-8528-a2a9f9d25eb6)
-    (property "Reference" "D6" (id 0) (at 161.29 92.07 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid 98230072-f69f-4d40-8282-e778fd3d1dae)
+    (property "Reference" "R6" (id 0) (at 160.02 88.9 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 86.36 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 87.12 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 88.9 90)
+    (property "Footprint" "" (id 2) (at 160.02 88.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 88.9 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 88.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 88.9 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 88.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 88.9 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 162702be-c14d-49fe-be69-d079c2ebb699))
-    (pin "1" (uuid 75715514-9dba-46a2-a0dc-4fb50997bbda))
+    (pin "1" (uuid 9fbf4d1d-934f-4b89-ad0b-37b7ac0ab17a))
+    (pin "2" (uuid 6d9b7f71-ab8f-4f78-a05c-b309b096615f))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D6") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R6") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D20") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R20") (unit 1)
         )
       )
     )
@@ -3881,7 +3881,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 93.98 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 44b654a1-3add-40c0-a311-6b566c9745ec)
+    (uuid e0d7f032-1005-4a27-848f-ccac89d1de1e)
     (property "Reference" "#PWR28" (id 0) (at 162.56 100.33 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3897,81 +3897,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 93.98 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid c948a0f6-fce1-4f15-905f-903ee977dc4a))
+    (pin "1" (uuid b767f5e0-54fc-4109-9276-f1d57d86c96f))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR28") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR44") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 114.3 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 114.3 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid b58e9838-3428-45e8-9c65-3c1489c82598)
-    (property "Reference" "R7" (id 0) (at 152.4 114.3 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid c6f6d4db-7142-4fb3-93d7-8617727ccbd0)
+    (property "Reference" "D7" (id 0) (at 153.67 117.47 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 112.52 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 111.76 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 114.3 0)
+    (property "Footprint" "" (id 2) (at 152.4 114.3 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 114.3 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 114.3 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 114.3 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 114.3 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid ae978ebb-f4b6-4ea5-b764-754e44aad123))
-    (pin "2" (uuid 15c32d87-110b-403a-964d-90cf6241370d))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 114.3 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid 77653b62-d63e-418a-b072-dc056b848c9e))
+    (pin "1" (uuid 1e58d228-48bc-4728-89d3-57aea0e3c37f))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R7") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D7") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R21") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D21") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 114.3 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 114.3 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid cf2fba04-1e66-44c6-a288-5060493cf427)
-    (property "Reference" "D7" (id 0) (at 161.29 117.47 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid f3a53837-a97f-4b63-8b72-30dd94f3f937)
+    (property "Reference" "R7" (id 0) (at 160.02 114.3 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 111.76 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 112.52 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 114.3 90)
+    (property "Footprint" "" (id 2) (at 160.02 114.3 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 114.3 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 114.3 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 114.3 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 114.3 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 114.3 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 6b3435d0-6a3e-4610-a760-8f3a9bdabde2))
-    (pin "1" (uuid 472138bf-fc49-4b07-ab5b-66989e97a3e3))
+    (pin "1" (uuid eeb4377f-0bb3-4c2a-8753-75d6e9dcd211))
+    (pin "2" (uuid c7b2e164-f2ee-44dd-a8b4-de16973e7a3b))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D7") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R7") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D21") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R21") (unit 1)
         )
       )
     )
@@ -3979,7 +3979,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 119.38 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 4036b03d-3be8-47a6-948f-dab5d1894473)
+    (uuid 048cc7ec-d792-4105-9fd9-c839366e804c)
     (property "Reference" "#PWR29" (id 0) (at 162.56 125.73 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -3995,81 +3995,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 119.38 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid e2095d57-9433-4391-90c1-1ea883cf5006))
+    (pin "1" (uuid 78bdad2d-92bd-420f-a34b-9f4bbe4e61e7))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR29") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR45") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 139.7 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 139.7 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid d3a5ddcc-e5bd-4978-b163-e5d998005149)
-    (property "Reference" "R8" (id 0) (at 152.4 139.7 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid b43b7d80-1c5c-4bbc-a66e-ad39c55802fb)
+    (property "Reference" "D8" (id 0) (at 153.67 142.87 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 137.92 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 137.16 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 139.7 0)
+    (property "Footprint" "" (id 2) (at 152.4 139.7 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 139.7 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 139.7 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 139.7 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 139.7 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 47078fd7-0f84-49ef-b9f3-60f46e39512d))
-    (pin "2" (uuid 43e39397-f8c0-484b-a803-8158387e0228))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 139.7 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid d8298cfc-3230-403b-80e4-72d75e332cca))
+    (pin "1" (uuid f26cef60-52b4-405a-b712-1fff037599e1))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R8") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D8") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R22") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D22") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 139.7 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 139.7 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 8ef75379-1b43-4f0f-8b14-7ce0fbc577ee)
-    (property "Reference" "D8" (id 0) (at 161.29 142.87 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid 718259fc-508d-43a1-9a7d-394d3316bee5)
+    (property "Reference" "R8" (id 0) (at 160.02 139.7 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 137.16 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 137.92 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 139.7 90)
+    (property "Footprint" "" (id 2) (at 160.02 139.7 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 139.7 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 139.7 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 139.7 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 139.7 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 139.7 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 42a18b14-41a2-4021-b3a5-a2a26137971e))
-    (pin "1" (uuid 0f780174-87a0-4f56-8f8f-8f758f5c5901))
+    (pin "1" (uuid 130ccfac-1d1c-4564-be5b-7852b54fab93))
+    (pin "2" (uuid 121bcf17-6875-4a2b-9ee0-49ed96f73057))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D8") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R8") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D22") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R22") (unit 1)
         )
       )
     )
@@ -4077,7 +4077,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 144.78 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 2465cf34-d91e-436e-96a5-a936eb07e297)
+    (uuid 3dc0b883-52c9-4f1e-be61-5c398b72c773)
     (property "Reference" "#PWR30" (id 0) (at 162.56 151.13 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -4093,81 +4093,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 144.78 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 405d04cb-0a24-45f6-a4ce-87b40e1998f9))
+    (pin "1" (uuid a3eb6173-fb60-45c5-9659-d660cc50685f))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR30") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR46") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 165.1 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 165.1 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid d5a61c3b-8102-476a-9f77-216f50b2f9ac)
-    (property "Reference" "R9" (id 0) (at 152.4 165.1 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid 5c723313-e35d-4b04-ba6d-aca78dd5bb1f)
+    (property "Reference" "D9" (id 0) (at 153.67 168.27 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 163.32 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 162.56 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 165.1 0)
+    (property "Footprint" "" (id 2) (at 152.4 165.1 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 165.1 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 165.1 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 165.1 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 165.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid 554c040e-c9a0-4cd1-a531-231eaf92512d))
-    (pin "2" (uuid 6d3b9fe1-5371-4007-8ed6-d77d0e58b079))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 165.1 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid 885a93de-db5b-4de5-ba52-71495934d8b2))
+    (pin "1" (uuid 39279d11-7258-4707-b5ef-9c082cd4d750))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R9") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D9") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R23") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D23") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 165.1 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 165.1 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 5d715110-7194-4aeb-b3c5-0fc99f26d5b3)
-    (property "Reference" "D9" (id 0) (at 161.29 168.27 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid dbce7334-0044-4a00-a9e1-3e2d7b63496f)
+    (property "Reference" "R9" (id 0) (at 160.02 165.1 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 162.56 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 163.32 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 165.1 90)
+    (property "Footprint" "" (id 2) (at 160.02 165.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 165.1 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 165.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 165.1 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 165.1 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 165.1 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 0f45919e-583c-4b39-ae90-e3f2dfd321f8))
-    (pin "1" (uuid 4d8eced1-f27f-4e85-a123-cf533d3121c6))
+    (pin "1" (uuid 66500bc6-a45f-4144-9c60-ed08b7cb61f4))
+    (pin "2" (uuid bbac2a24-1876-420e-a2db-563054abd192))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D9") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R9") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D23") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R23") (unit 1)
         )
       )
     )
@@ -4175,7 +4175,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 170.18 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 40604570-cc74-4c09-9381-93a8a006b65e)
+    (uuid d098119e-70f1-4f4a-a878-21c55670f40a)
     (property "Reference" "#PWR31" (id 0) (at 162.56 176.53 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -4191,81 +4191,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 170.18 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid f0bca916-c985-47d1-9d49-2dccf8747a8c))
+    (pin "1" (uuid 4e56e611-98c4-4f04-b117-95085bf7280a))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR31") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR47") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 190.5 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 190.5 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 1c9c8f83-3972-40b2-a379-dd5b411cbe66)
-    (property "Reference" "R10" (id 0) (at 152.4 190.5 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid d237205d-d6e2-4b86-9eba-9ce7cf9f7921)
+    (property "Reference" "D10" (id 0) (at 153.67 193.67 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 188.72 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 187.96 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 190.5 0)
+    (property "Footprint" "" (id 2) (at 152.4 190.5 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 190.5 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 190.5 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 190.5 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 190.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid c1836b88-513a-449d-983e-9c2cadac762b))
-    (pin "2" (uuid c540bc2b-d213-4788-919d-1f3d10ca8ec8))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 190.5 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid a2eca69d-df7e-4191-8e23-12e30a66fd87))
+    (pin "1" (uuid 0f76d1a5-bce4-4e24-9e3a-b884ee8e8888))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R10") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D10") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R24") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D24") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 190.5 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 190.5 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 0bc76db0-56f5-4001-ad90-ada036a326c0)
-    (property "Reference" "D10" (id 0) (at 161.29 193.67 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid 820a143d-4d42-4179-bfa4-fc99c6b58bf1)
+    (property "Reference" "R10" (id 0) (at 160.02 190.5 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 187.96 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 188.72 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 190.5 90)
+    (property "Footprint" "" (id 2) (at 160.02 190.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 190.5 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 190.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 190.5 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 190.5 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 190.5 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid a5f01c99-862d-4520-b3c5-42c6159739b7))
-    (pin "1" (uuid 88c1d828-8d3b-4c5d-9390-3a1840513df6))
+    (pin "1" (uuid 2e521dad-9496-4d54-a04e-241272bff278))
+    (pin "2" (uuid f4563d3e-b102-4e12-aca6-ddce0ab93191))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D10") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R10") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D24") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R24") (unit 1)
         )
       )
     )
@@ -4273,7 +4273,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 195.58 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 19e9b108-071f-4793-9d48-6c2536b249d5)
+    (uuid a5a8888b-bebc-42a6-9167-4a698511c9fe)
     (property "Reference" "#PWR32" (id 0) (at 162.56 201.93 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -4289,81 +4289,81 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 195.58 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid ea7dbc12-e23b-458c-96a1-5aa6e62bca0e))
+    (pin "1" (uuid 9599d7c9-e012-4bf2-badd-5e6c03f477b9))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR32") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR48") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:R_Small") (at 152.4 215.9 90) (unit 1)
+  (symbol (lib_id "Device:LED_Small") (at 152.4 215.9 180) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 725b3e88-d02a-4a04-a32e-8b341b768251)
-    (property "Reference" "R11" (id 0) (at 152.4 215.9 90)
-      (effects (font (size 1.016 1.016)))
+    (uuid 239f61a9-8487-43d4-8842-d3cd7891bf69)
+    (property "Reference" "D11" (id 0) (at 153.67 219.07 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "680R" (id 1) (at 152.4 214.12 90)
-      (effects (font (size 1.27 1.27)))
+    (property "Value" "Red" (id 1) (at 156.85 213.36 0)
+      (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Footprint" "" (id 2) (at 152.4 215.9 0)
+    (property "Footprint" "" (id 2) (at 152.4 215.9 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 152.4 215.9 0)
+    (property "Datasheet" "~" (id 3) (at 152.4 215.9 90)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Resistor, small symbol" (id 4) (at 152.4 215.9 0)
+    (property "Description" "Light emitting diode, small symbol" (id 4) (at 152.4 215.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid e2b9188d-f135-4f07-9135-c3e5117f93fc))
-    (pin "2" (uuid 9cadbe0d-3a3a-4cf4-a0d8-3f15eea1d07f))
+    (property "Sim.Pins" "1=K 2=A" (id 5) (at 152.4 215.9 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "2" (uuid 6cbedffa-4c67-4501-b34a-421ec3a6a834))
+    (pin "1" (uuid d4c701f8-2370-4c87-a912-f98547a9a3cd))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "R11") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "D11") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "R25") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "D25") (unit 1)
         )
       )
     )
   )
 
-  (symbol (lib_id "Device:LED_Small") (at 160.02 215.9 180) (unit 1)
+  (symbol (lib_id "Device:R_Small") (at 160.02 215.9 90) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid 8ecb434d-d32d-4eea-8c77-bbfd1071f1c4)
-    (property "Reference" "D11" (id 0) (at 161.29 219.07 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (uuid 8be067ce-b469-4086-9e32-c231199a381e)
+    (property "Reference" "R11" (id 0) (at 160.02 215.9 90)
+      (effects (font (size 1.016 1.016)))
     )
-    (property "Value" "Red" (id 1) (at 164.47 213.36 0)
-      (effects (font (size 1.27 1.27)) (justify left))
+    (property "Value" "680R" (id 1) (at 160.02 214.12 90)
+      (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "" (id 2) (at 160.02 215.9 90)
+    (property "Footprint" "" (id 2) (at 160.02 215.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Datasheet" "~" (id 3) (at 160.02 215.9 90)
+    (property "Datasheet" "~" (id 3) (at 160.02 215.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Description" "Light emitting diode, small symbol" (id 4) (at 160.02 215.9 0)
+    (property "Description" "Resistor, small symbol" (id 4) (at 160.02 215.9 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "Sim.Pins" "1=K 2=A" (id 5) (at 160.02 215.9 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "2" (uuid 0a679a75-db9b-42b2-889f-8727f54d2841))
-    (pin "1" (uuid 6df6b2f5-717a-4e47-821d-92c4258bbc2f))
+    (pin "1" (uuid cd9c0a09-8477-4270-86ae-fb7422c7fd02))
+    (pin "2" (uuid 987eb361-0601-404e-b5be-0cd7d4150719))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
-          (reference "D11") (unit 1)
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
+          (reference "R11") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
-          (reference "D25") (unit 1)
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
+          (reference "R25") (unit 1)
         )
       )
     )
@@ -4371,7 +4371,7 @@
 
   (symbol (lib_id "power:GND") (at 162.56 220.98 0) (unit 1)
     (in_bom yes) (on_board yes)
-    (uuid ead17815-1ddf-49dc-8501-55f11cd32b83)
+    (uuid d41a918f-630d-4c76-80b7-6329b6d4c734)
     (property "Reference" "#PWR33" (id 0) (at 162.56 227.33 0)
       (effects (font (size 1.27 1.27)) hide)
     )
@@ -4387,13 +4387,13 @@
     (property "Description" "Power symbol creates a global label with name \"GND\" , ground" (id 4) (at 162.56 220.98 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid a6818705-d8c6-45be-a69b-72244b27db07))
+    (pin "1" (uuid eba26047-2591-49f4-8fe8-789da78bf579))
     (instances
       (project "ram"
-        (path "/34d03671-97d1-41f7-a3f4-70d15d450d82/"
+        (path "/688c9915-f803-488f-9eb8-9e7247120746/"
           (reference "#PWR33") (unit 1)
         )
-        (path "/faf39366-edc9-4b97-be6c-0a2d110922de/3ae0e042-8feb-4d6d-84ba-9f1a3d704423"
+        (path "/264ae29e-afa8-42e9-9c22-4da0bcd34307/87899c1b-ff31-472a-adcb-d10452fc9414"
           (reference "#PWR49") (unit 1)
         )
       )

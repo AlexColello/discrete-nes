@@ -810,6 +810,34 @@ class PCBBuilder:
     # Silkscreen helpers
     # ----------------------------------------------------------
 
+    def add_silkscreen_line(
+        self,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        layer: str = "F.SilkS",
+        stroke_width: float = 0.15,
+    ):
+        """Add a silkscreen line segment.
+
+        Args:
+            x1, y1: Start position in mm
+            x2, y2: End position in mm
+            layer: Silkscreen layer ("F.SilkS" or "B.SilkS")
+            stroke_width: Line width in mm
+        """
+        from kiutils.items.gritems import GrLine
+
+        line = GrLine(
+            start=Position(X=round(x1, 2), Y=round(y1, 2)),
+            end=Position(X=round(x2, 2), Y=round(y2, 2)),
+            layer=layer,
+            width=stroke_width,
+            tstamp=uid(),
+        )
+        self.board.graphicItems.append(line)
+
     def add_silkscreen_rect(
         self,
         x: float,
@@ -846,6 +874,7 @@ class PCBBuilder:
         y: float,
         size: float = 1.0,
         layer: str = "F.SilkS",
+        thickness: float = 0.15,
     ):
         """Add silkscreen text.
 
@@ -854,6 +883,7 @@ class PCBBuilder:
             x, y: Position in mm
             size: Font height and width in mm
             layer: Silkscreen layer ("F.SilkS" or "B.SilkS")
+            thickness: Stroke thickness in mm (min 0.15 for most fabs)
         """
         from kiutils.items.gritems import GrText
         from kiutils.items.common import Effects
@@ -861,6 +891,7 @@ class PCBBuilder:
         effects = Effects()
         effects.font.height = size
         effects.font.width = size
+        effects.font.thickness = thickness
 
         gr_text = GrText(
             text=text,

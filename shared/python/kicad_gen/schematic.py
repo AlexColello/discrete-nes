@@ -203,31 +203,31 @@ class SchematicBuilder:
     # -- place an LED + resistor pair (indicator for a gate output) --
 
     def place_led_indicator(self, x, y):
-        """Place R + LED + GND chain at (x, y). Signal enters from left.
+        """Place LED + R + GND chain at (x, y). Signal enters from left.
 
-        Layout (left to right): signal -> R Pin 1 -> R Pin 2 -> LED Pin 2 -> LED Pin 1 -> GND
+        Layout (left to right): signal -> LED Pin 2 (Anode) -> LED Pin 1 (Cathode) -> R Pin 1 -> R Pin 2 -> GND
 
-        R_Small at angle=90:   Pin 1 at LEFT (dx=-2.54), Pin 2 at RIGHT (dx=+2.54)
         LED_Small at angle=180: Pin 2/Anode at LEFT (dx=-2.54), Pin 1/Cathode at RIGHT (dx=+2.54)
+        R_Small at angle=90:   Pin 1 at LEFT (dx=-2.54), Pin 2 at RIGHT (dx=+2.54)
 
         Components are spaced apart so wires don't pass through symbol bodies.
         """
-        r_x = x + GRID  # shift R center right so pin 1 (at dx=-2.54) lands at x
-        _, r_pins = self.place_symbol("R_Small", r_x, y, ref_prefix="R",
-                                      value="680R", angle=90)
-
-        # LED placed 3 grid units right of R center -- enough gap to avoid overlap
-        led_x = r_x + 3 * GRID
+        led_x = x + GRID  # shift LED center right so pin 2/anode (at dx=-2.54) lands at x
         _, led_pins = self.place_symbol("LED_Small", led_x, y, ref_prefix="D",
                                         value="Red", angle=180)
-        # Wire from R Pin 2 (right) to LED Pin 2 / Anode (left)
-        self.add_wire(*r_pins["2"], *led_pins["2"])
 
-        # GND below LED cathode (Pin 1, right side)
-        self.wire_power("GND", led_pins["1"], offset_y=2 * GRID)
+        # R placed 3 grid units right of LED center -- enough gap to avoid overlap
+        r_x = led_x + 3 * GRID
+        _, r_pins = self.place_symbol("R_Small", r_x, y, ref_prefix="R",
+                                      value="680R", angle=90)
+        # Wire from LED Pin 1 / Cathode (right) to R Pin 1 (left)
+        self.add_wire(*led_pins["1"], *r_pins["1"])
 
-        # Signal enters at R Pin 1 (left side)
-        return r_pins["1"]
+        # GND below R Pin 2 (right side)
+        self.wire_power("GND", r_pins["2"], offset_y=2 * GRID)
+
+        # Signal enters at LED Pin 2 / Anode (left side)
+        return led_pins["2"]
 
     # -- net labels --
 
