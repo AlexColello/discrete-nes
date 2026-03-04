@@ -67,8 +67,8 @@ LED_OFFSET_X = 2.2  # LED center offset from IC center (closest, vertical 270°)
 R_OFFSET_X = 3.7    # R center offset from IC center (after LED, vertical 270°)
 
 # Group layout spacing (mm)
-GROUP_GAP_X = 10.0   # horizontal gap between groups
-GROUP_GAP_Y = 12.0   # vertical gap between group rows
+GROUP_GAP_X = 3.0    # horizontal gap between groups
+GROUP_GAP_Y = 3.0    # vertical gap between group rows
 BOARD_MARGIN = 6.0   # margin from board edge to components
 SHEET_BORDER = 13.0  # minimum distance from sheet edge to board outline
 PLACEMENT_ORIGIN = SHEET_BORDER + BOARD_MARGIN  # components start here

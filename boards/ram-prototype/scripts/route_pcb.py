@@ -251,7 +251,7 @@ def cleanup_dangling_tracks(pcb_path):
 
     Pre-routing creates fanout stubs past the LED bank. The autorouter
     may connect partway along a stub, leaving a short dangling remnant.
-    This step finds short tracks (<1mm) where one endpoint has no other
+    This step finds tracks (<10mm) where one endpoint has no other
     track, pad, or via connection and removes them.
     """
     script = textwrap.dedent(f"""\
@@ -284,15 +284,21 @@ def cleanup_dangling_tracks(pcb_path):
                 for layer_id in pad.GetLayerSet().CuStack():
                     pad_positions.add((pos.x, pos.y, layer_id))
 
-        # Find and remove short dangling tracks
-        removed = 0
+        # Find and remove dangling tracks.
+        # Sort by length descending so long stubs are removed first,
+        # making their short remnants immediately catchable in one pass.
+        candidates = []
         for track in list(board.GetTracks()):
             if isinstance(track, pcbnew.PCB_VIA):
                 continue
             length_mm = track.GetLength() / 1e6
-            if length_mm > 1.0:
+            if length_mm > 10.0:
                 continue
+            candidates.append((length_mm, track))
+        candidates.sort(key=lambda x: -x[0])
 
+        removed = 0
+        for length_mm, track in candidates:
             layer = track.GetLayer()
             s = track.GetStart()
             e = track.GetEnd()

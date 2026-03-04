@@ -637,7 +637,7 @@ def generate_root_sheet():
     # Connector pins
     # ================================================================
     signal_names = ["D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0",
-                    "nWE", "nOE", "nCE",
+                    "nCE", "nWE", "nOE",
                     "A2", "A1", "A0"]
     conn_signal_pos = {}
     for pin_num_int, sig in enumerate(signal_names, start=2):
