@@ -61,15 +61,17 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 
 # Cell layout dimensions (mm)
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
-IC_CELL_W = 7.5     # horizontal spacing between IC centers (IC+LED+R ~6.4mm)
-IC_CELL_H = 4.5     # vertical spacing between IC rows (DSBGA courtyard ~3.4mm)
+IC_CELL_W = 5.5     # horizontal spacing between IC centers
+IC_CELL_H = 3.0     # vertical spacing between IC rows (DFF to buffer)
 LED_OFFSET_X = 2.2  # LED center offset from IC center (closest, vertical 270°)
-R_OFFSET_X = 3.7    # R center offset from IC center (after LED, vertical 270°)
+R_OFFSET_X = 3.3    # R center offset from IC center (after LED, vertical 270°)
 
 # Group layout spacing (mm)
-GROUP_GAP_X = 3.0    # horizontal gap between groups
-GROUP_GAP_Y = 3.0    # vertical gap between group rows
-BOARD_MARGIN = 6.0   # margin from board edge to components
+GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
+GROUP_GAP_Y = 0.5    # vertical gap between byte rows
+BYTE_COL_GAP = 2.0   # horizontal gap between the two byte columns (physical gap)
+CTRL_ROW_GAP = 7.5   # vertical gap between RAM area and control logic row
+BOARD_MARGIN = 7.0   # margin from board edge to components
 SHEET_BORDER = 13.0  # minimum distance from sheet edge to board outline
 PLACEMENT_ORIGIN = SHEET_BORDER + BOARD_MARGIN  # components start here
 
@@ -1137,9 +1139,19 @@ def main():
     byte_col1 = ["byte_4", "byte_5", "byte_6", "byte_7"]
     all_bytes = byte_col0 + byte_col1
 
-    # Compute byte grid dimensions
+    # Compute byte grid dimensions from actual placement positions
+    # (not from compute_group_size which adds IC_CELL_W/IC_CELL_H padding)
     byte_col_w = max((group_sizes.get(b, (0, 0))[0] for b in all_bytes), default=0)
     byte_row_h = max((group_sizes.get(b, (0, 0))[1] for b in all_bytes), default=0)
+
+    # Byte column center span: compute from actual placement positions (not
+    # compute_group_size which adds IC_CELL_W padding).
+    byte_center_span_x = 0
+    for b in all_bytes:
+        layout = group_layouts.get(b, [])
+        if layout:
+            xs = [x for _, x, _ in layout]
+            byte_center_span_x = max(byte_center_span_x, max(xs) - min(xs))
 
     # Total RAM area height
     ram_total_h = 4 * byte_row_h + 3 * GROUP_GAP_Y
@@ -1180,7 +1192,10 @@ def main():
     # Track absolute positions for silkscreen annotation
     byte_bounds = {}  # name -> (min_x, min_y, max_x, max_y)
     for col_idx, byte_col in enumerate([byte_col0, byte_col1]):
-        bx = ram_x + col_idx * (byte_col_w + GROUP_GAP_X)
+        # Column offset: center span already includes R positions (rightmost R
+        # at last_IC_x + R_OFFSET_X). Just add R courtyard half-width + gap +
+        # IC courtyard half-width to get actual physical gap = BYTE_COL_GAP.
+        bx = ram_x + col_idx * (byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75)
         for row_idx, name in enumerate(byte_col):
             if name not in group_layouts:
                 continue
@@ -1221,7 +1236,7 @@ def main():
         # Midpoint of gap between the two byte columns
         col0_max_x = max(byte_bounds[b][2] for b in byte_col0 if b in byte_bounds)
         col1_min_x = min(byte_bounds[b][0] for b in byte_col1 if b in byte_bounds)
-        div_x = round((col0_max_x + col1_min_x) / 2, 2)
+        div_x = round((col0_max_x + col1_min_x) / 2 - 0.25, 2)
         pcb.add_silkscreen_line(div_x, grid_y1, div_x, grid_y2)
 
         # 3 horizontal dividers between rows
@@ -1234,18 +1249,24 @@ def main():
                 div_y = round((top_max_y + bot_min_y) / 2, 2)
                 pcb.add_silkscreen_line(grid_x1, div_y, grid_x2, div_y)
 
-        # Address labels inside each cell
+        # Address labels on the outside border of the grid
         for name, (bmin_x, bmin_y, bmax_x, bmax_y) in byte_bounds.items():
             byte_idx = int(name.split("_")[1])
             label = f"0x{byte_idx}"
-            label_x = round(bmin_x - SILK_MARGIN + 1.5, 2)
-            label_y = round(bmin_y - SILK_MARGIN + 1.5, 2)
+            # Vertically center label in the byte's row
+            label_y = round((bmin_y + bmax_y) / 2, 2)
+            if byte_idx < 4:
+                # Left column: label on left edge, outside the grid
+                label_x = round(grid_x1 - 1.5, 2)
+            else:
+                # Right column: label on right edge, outside the grid
+                label_x = round(grid_x2 + 1.5, 2)
             pcb.add_silkscreen_text(label, label_x, label_y, size=1.0)
 
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
     # Place control logic below RAM: write_clk_gen + read_oe_gen
-    ctrl_row_y = ram_y + ram_total_h + GROUP_GAP_Y
+    ctrl_row_y = ram_y + ram_total_h + CTRL_ROW_GAP
     ctrl_row_x = ram_x
     for name in ["write_clk_gen", "read_oe_gen"]:
         if name not in group_layouts:
@@ -1283,7 +1304,7 @@ def main():
     conn_traces = preroute_connector_leds(pcb, netlist_data)
     print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
 
-    col_boundary_x = ram_x + byte_col_w + GROUP_GAP_X / 2
+    col_boundary_x = ram_x + byte_center_span_x + 0.5 + BYTE_COL_GAP / 2
     dbus_vias, dbus_traces = preroute_data_bus(pcb, netlist_data, col_boundary_x)
     print(f"  D* data bus: {dbus_vias} vias, {dbus_traces} trace segments")
 

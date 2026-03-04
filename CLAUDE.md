@@ -111,6 +111,33 @@ The verification script catches bugs that are invisible in KiCad's GUI and that 
 
 Output goes to `verify_output/` (gitignored), including SVGs for visual inspection.
 
+### PCB Routing (FreeRouting autorouter)
+
+Each board has a `route_pcb.py` script that autoroutes using FreeRouting. **Java must be on PATH.**
+
+```bash
+cd boards/ram-prototype
+# Ensure Java is available (JDK 17+)
+export PATH="/c/Program Files/Java/jdk-21.0.10/bin:$PATH"
+
+# Full pipeline: DSN export → FreeRouting → SES import → zone fill → cleanup → verify
+python scripts/route_pcb.py
+
+# Options:
+python scripts/route_pcb.py --passes 30      # Override max routing passes
+python scripts/route_pcb.py --dry-run        # Export DSN only, don't route
+python scripts/route_pcb.py --skip-verify    # Skip post-routing verification
+```
+
+**Pipeline steps:** Export Specctra DSN → Run FreeRouting CLI → Import SES → Fill zones → Cleanup dangling stubs → Hide footprint text → Post-routing DRC verification.
+
+**Requirements:** Java 17+ on PATH, FreeRouting JAR auto-downloaded to `tools/freerouting/`.
+
+**Post-routing verification:**
+```bash
+python scripts/verify_pcb.py --post-routing  # Stricter DRC on ram_routed.kicad_pcb
+```
+
 ## Technology Stack & Research Findings
 
 ### KiCad Scripting - Why kiutils?
@@ -145,35 +172,9 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 **PCB Layout Strategy:**
 
 - Use kiutils for component placement in grid patterns
-- Manual routing initially (better control for prototype)
-- Can revisit automation after validating approach
+- FreeRouting autorouter for trace routing (see "PCB Routing" section above)
 
-### PCB Layout Preferences & Lessons
-
-**User's preferred RAM board layout (connector → decode → RAM → control):**
-
-```
-+------+-----------+-----------+-----------+
-|      | ADDR DEC  | BYTE 0    | BYTE 4    |
-|      |           | BYTE 1    | BYTE 5    |
-| CONN +-----------+ BYTE 2    | BYTE 6    |
-|      | CTRL LOGIC| BYTE 3    | BYTE 7    |
-+------+-----------+-----------+-----------+
-                   | WRITE CLK | READ OE   |
-                   +-----------+-----------+
-```
-
-- **Connector** on the far left
-- **Address decoder + control logic** stacked vertically to the right of the connector
-- **RAM bytes** in a grid to the right, organized by bytes in column-major order (down first, then right)
-- **Write/Read control logic** below the RAM
-- Each byte is a **line of 8 bits** (8 DFFs in one row, 8 buffers below)
-
-**Connector bus indicator LEDs:**
-
-- Each bus indicator R+LED pair must be positioned at the exact Y of its matching connector pin (1:1 mapping)
-- Match R to connector pin via shared signal net (exclude GND/VCC from net matching — LEDs have GND which matches pin 1)
-- R at fixed X offset right of connector, LED at slightly further X offset
+### PCB Layout Lessons
 
 **Board outline computation — use pad + courtyard extents:**
 
@@ -215,13 +216,6 @@ Output goes to `verify_output/` (gitignored), including SVGs for visual inspecti
 - B.Cu traces will short against or violate clearance with any through-via annular they pass near
 - To use B.Cu for signal routing, traces must explicitly avoid all power via positions
 - Board minimum via: 0.8mm diameter, 0.4mm drill (Elecrow). Can't use smaller without changing fab
-
-**D\* data bus prerouting strategy (RAM prototype):**
-
-- Only DFF pin 1 vias are pre-placed (64 vias). BUF pin 4 vias are NOT placed because the 0.8mm minimum via doesn't fit between BUF output and OE fanout bus (only 1.25mm gap, needs ~1.44mm for clearance)
-- DFF via safe position: `(pin1_x, pin1_y + 0.60)` — 1.47mm from GND via, 2.1mm from CLK bus, 1.0mm from DFF-to-buffer trace
-- B.Cu interconnect left to FreeRouting, which has obstacle-avoidance capability
-- At 90° CW rotation: DFF pins 1, 2, 4 all share Y = fp_y + 0.25; pins 3, 5 share Y = fp_y - 0.25
 
 **PCB trace routing style:**
 
