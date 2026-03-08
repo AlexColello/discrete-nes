@@ -981,6 +981,172 @@ def preroute_data_bus(pcb, netlist_data, col_boundary_x):
 
 
 # --------------------------------------------------------------
+# Layer visibility test grid (for clear PCB fabrication)
+# --------------------------------------------------------------
+
+# Layer rank for fill/text visibility ordering
+LAYER_RANK = {"F.Cu": 3, "In1.Cu": 2, "In2.Cu": 1, "B.Cu": 0}
+
+# Test grid dimensions (mm)
+TEST_CELL_W = 6.0
+TEST_CELL_H = 3.5
+TEST_CELL_GAP = 0.5
+TEST_TEXT_SIZE = 0.8
+TEST_LABEL_W = 8.0     # width for row labels
+TEST_HEADER_H = 3.0    # height for column headers
+TEST_TITLE_H = 2.5     # height for title above headers
+
+
+def add_layer_test_grid(pcb, origin_x, origin_y):
+    """Add a test grid for clear PCB layer visibility testing.
+
+    Rows: no-fill, no-fill knockout, B.Cu/In2/In1/F.Cu fills.
+    Columns 0-3: text on F.Cu / In1.Cu / In2.Cu / B.Cu.
+    Column 4: knockout text on the fill layer (negative space).
+
+    Returns (grid_width, grid_height) of the total test grid area.
+    """
+    # (fill_layer, label, row_is_knockout)
+    fill_rows = [
+        (None,     "No Fill",    False),
+        (None,     "KO No Fill", True),
+        ("B.Cu",   "B.Cu Fill",  False),
+        ("In2.Cu", "In2 Fill",   False),
+        ("In1.Cu", "In1 Fill",   False),
+        ("F.Cu",   "F.Cu Fill",  False),
+    ]
+    # Columns: 4 text layers + 1 negative-space column
+    text_cols = ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"]
+    col_headers = text_cols + ["Negative"]
+    n_cols = len(col_headers)
+
+    n_rows = len(fill_rows)
+    step_x = TEST_CELL_W + TEST_CELL_GAP
+    step_y = TEST_CELL_H + TEST_CELL_GAP
+
+    # Grid content origin (after title, headers, and row labels)
+    gx0 = origin_x + TEST_LABEL_W
+    gy0 = origin_y + TEST_TITLE_H + TEST_HEADER_H
+
+    total_w = TEST_LABEL_W + n_cols * step_x
+    total_h = TEST_TITLE_H + TEST_HEADER_H + n_rows * step_y
+
+    # --- Title ---
+    pcb.add_silkscreen_text(
+        "LAYER TEST", origin_x + total_w / 2, origin_y + TEST_TITLE_H / 2,
+        size=1.0, layer="F.SilkS", thickness=0.15)
+
+    # --- Column headers ---
+    for ci, header in enumerate(col_headers):
+        cx = gx0 + ci * step_x + TEST_CELL_W / 2
+        cy = gy0 - TEST_HEADER_H / 2
+        pcb.add_silkscreen_text(header, cx, cy, size=0.8, layer="F.SilkS")
+
+    # --- Row labels ---
+    for ri, (_, label, _) in enumerate(fill_rows):
+        lx = origin_x + TEST_LABEL_W / 2
+        ly = gy0 + ri * step_y + TEST_CELL_H / 2
+        pcb.add_silkscreen_text(label, lx, ly, size=0.8, layer="F.SilkS")
+
+    # --- Border rectangle ---
+    pcb.add_silkscreen_rect(
+        gx0 - 0.5, gy0 - 0.5,
+        n_cols * step_x + 0.5, n_rows * step_y + 0.5,
+        layer="F.SilkS", stroke_width=0.15)
+
+    # --- Vertical column separators ---
+    grid_top = gy0 - 0.5
+    grid_bot = gy0 + n_rows * step_y
+    for ci in range(1, n_cols):
+        sep_x = gx0 + ci * step_x - TEST_CELL_GAP / 2
+        pcb.add_silkscreen_line(sep_x, grid_top, sep_x, grid_bot,
+                                layer="F.SilkS", stroke_width=0.15)
+
+    # --- Keepout zones and fill zones per row ---
+    for ri, (fill_layer, _, _) in enumerate(fill_rows):
+        row_y0 = gy0 + ri * step_y - TEST_CELL_GAP / 2
+        row_y1 = row_y0 + TEST_CELL_H + TEST_CELL_GAP
+        row_x0 = gx0 - TEST_CELL_GAP / 2
+        row_x1 = row_x0 + n_cols * step_x
+        row_outline = [(row_x0, row_y0), (row_x1, row_y0),
+                       (row_x1, row_y1), (row_x0, row_y1)]
+
+        # Block In1.Cu (GND) zone where this row does NOT want In1.Cu fill
+        if fill_layer != "In1.Cu":
+            pcb.add_keepout_zone("In1.Cu", row_outline)
+
+        # Block In2.Cu (VCC) zone where this row does NOT want In2.Cu fill
+        if fill_layer != "In2.Cu":
+            pcb.add_keepout_zone("In2.Cu", row_outline)
+
+        # Add new copper pour zone for F.Cu or B.Cu fill rows
+        if fill_layer in ("F.Cu", "B.Cu"):
+            pcb.add_zone("GND", fill_layer, row_outline, clearance=0.3)
+
+    # --- Cell text (columns 0-3: per-layer text) ---
+    # When text_rank <= fill_rank, multiple columns place identical copper
+    # text on the fill layer.  Use those duplicates to test solder mask
+    # removal: first dup = normal, then no-mask-both, F-only, B-only.
+    MASK_VARIANTS = [None, "both", "front", "back"]
+
+    for ri, (fill_layer, _, row_ko) in enumerate(fill_rows):
+        fill_rank = LAYER_RANK.get(fill_layer, -1) if fill_layer else -1
+        dup_idx = 0  # tracks position within duplicate group
+
+        for ci, text_layer in enumerate(text_cols):
+            text_rank = LAYER_RANK[text_layer]
+            cx = gx0 + ci * step_x + TEST_CELL_W / 2
+            cy = gy0 + ri * step_y + TEST_CELL_H / 2
+
+            if row_ko:
+                # Knockout row: knockout text on each layer, no fill
+                pcb.add_silkscreen_text(
+                    "TEST", cx, cy, size=TEST_TEXT_SIZE,
+                    layer=text_layer, knockout=True)
+            elif fill_layer is None or text_rank > fill_rank:
+                # Additive: copper text on text layer (above fill)
+                pcb.add_silkscreen_text(
+                    "TEST", cx, cy, size=TEST_TEXT_SIZE, layer=text_layer)
+            else:
+                # Same/below: copper text on fill layer (duplicate)
+                pcb.add_silkscreen_text(
+                    "TEST", cx, cy, size=TEST_TEXT_SIZE, layer=fill_layer)
+
+                # Apply mask variant to this duplicate
+                variant = MASK_VARIANTS[min(dup_idx, len(MASK_VARIANTS) - 1)]
+                if variant == "both":
+                    pcb.add_mask_opening(cx, cy, TEST_CELL_W, TEST_CELL_H)
+                elif variant == "front":
+                    pcb.add_mask_opening(cx, cy, TEST_CELL_W, TEST_CELL_H,
+                                         back=False)
+                elif variant == "back":
+                    pcb.add_mask_opening(cx, cy, TEST_CELL_W, TEST_CELL_H,
+                                         front=False)
+                dup_idx += 1
+
+    # --- Cell text (column 4: knockout / negative space) ---
+    neg_ci = len(text_cols)
+    for ri, (fill_layer, _, row_ko) in enumerate(fill_rows):
+        cx = gx0 + neg_ci * step_x + TEST_CELL_W / 2
+        cy = gy0 + ri * step_y + TEST_CELL_H / 2
+
+        if row_ko:
+            # KO No Fill row, Negative col: empty — use for mask test
+            # (no copper, no fill — shows bare substrate vs masked substrate)
+            pcb.add_mask_opening(cx, cy, TEST_CELL_W, TEST_CELL_H)
+        elif fill_layer is not None:
+            # Knockout: letter shapes cut out of fill copper
+            pcb.add_silkscreen_text(
+                "TEST", cx, cy, size=TEST_TEXT_SIZE,
+                layer=fill_layer, knockout=True)
+        else:
+            # No fill, Negative col: empty cell (nothing to knock out of)
+            pass
+
+    return total_w, total_h
+
+
+# --------------------------------------------------------------
 # Main
 # --------------------------------------------------------------
 
@@ -1063,7 +1229,7 @@ def main():
                 # PinHeader_1x16 pad Y: pin N at (N-1)*2.54mm
                 conn_x = 0.0
                 led_x = 7.0   # LED offset right of connector (closer)
-                r_x = 11.0   # R offset right of connector (further, more gap)
+                r_x = 10.0   # R offset right of connector (further, more gap)
 
                 # Find connector pin-to-net mapping (excluding power nets)
                 j1 = others[0]  # J1 is the only non-R/D/U in root
@@ -1159,7 +1325,7 @@ def main():
     # Vertically center connector and decode/ctrl column with RAM area
     col0_y = PLACEMENT_ORIGIN + max(0, (ram_total_h - root_h) / 2)
     # Stack decoder + ctrl to fill the height next to RAM
-    col1_y = PLACEMENT_ORIGIN
+    col1_y = PLACEMENT_ORIGIN + 4.0  # shifted down 4mm
 
     # Place connector (root) — connector bus LEDs horizontal (180°),
     # connector Rs horizontal (0°) for clean LED→R trace clearance
@@ -1174,6 +1340,21 @@ def main():
             _place_component(pcb, comp, col0_x + rel_x, col0_y + rel_y,
                              netlist_data, angle_override=override)
             total_placed += 1
+
+    # Add silkscreen pin name labels to the left of the connector
+    # Pin ordering: pin 1 (GND) at bottom, pin 16 (VCC) at top
+    # After 180° rotation + normalization (shift = 14*pitch, since pin 15
+    # is the highest signal pin — VCC/GND excluded from LED placements),
+    # pin N is at rel_y = (15 - N) * CONN_PIN_PITCH
+    conn_pin_names = {
+        1: "GND", 2: "D7", 3: "D6", 4: "D5", 5: "D4",
+        6: "D3", 7: "D2", 8: "D1", 9: "D0", 10: "nCE",
+        11: "nWE", 12: "nOE", 13: "A2", 14: "A1", 15: "A0", 16: "VCC",
+    }
+    label_x = round(col0_x - 3.0, 2)  # 3mm to the left of connector center
+    for pin_num, pin_name in conn_pin_names.items():
+        label_y = round(col0_y + (15 - pin_num) * CONN_PIN_PITCH, 2)
+        pcb.add_silkscreen_text(pin_name, label_x, label_y, size=0.8)
 
     # Place addr_decoder (top of column 1)
     if "addr_decoder" in group_layouts:
@@ -1312,6 +1493,13 @@ def main():
     total_traces = pwr_traces + ic_led_traces + led_r_traces + dff_buf_traces + clk_traces + oe_traces + conn_traces + dbus_traces
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
+    # Layer visibility test grid (for clear PCB) — right of control row
+    test_x = ctrl_row_x
+    test_y = ctrl_row_y
+    test_grid_w, test_grid_h = add_layer_test_grid(pcb, test_x, test_y)
+    print(f"\n  Layer test grid: {test_grid_w:.0f} x {test_grid_h:.0f} mm "
+          f"at ({test_x:.1f}, {test_y:.1f})")
+
     # Step 7: Board outline and power planes
     print("\n[7/7] Adding board outline and power planes...")
 
@@ -1351,6 +1539,10 @@ def main():
                     comp_max_x = max(comp_max_x, abs_x)
                     comp_min_y = min(comp_min_y, abs_y)
                     comp_max_y = max(comp_max_y, abs_y)
+
+        # Extend board bounds for test grid (GrText, not footprints)
+        comp_max_x = max(comp_max_x, test_x + test_grid_w)
+        comp_max_y = max(comp_max_y, test_y + test_grid_h)
 
         # Add margin around component extents, ensuring the outline
         # stays within the sheet border (A4 landscape = 297x210mm,

@@ -52,12 +52,16 @@ PRE_ROUTING_SKIP_TYPES = {
     "via_dangling",            # Vias to inner planes appear dangling before fill
     "track_dangling",          # Fanout stubs intentionally end mid-air
     "silk_overlap",            # Stock 0402 footprint silk 0.1mm from pads (DRU requires 0.15mm)
+    "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
 }
 
 # DRC violation types to skip after routing
 # Fewer skips -- unconnected_items should now be resolved
 POST_ROUTING_SKIP_TYPES = {
     "silk_overlap",            # Stock 0402 footprint silk 0.1mm from pads (DRU requires 0.15mm)
+    "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
+    "solder_mask_bridge",      # Test grid mask openings expose copper near zone fills
+    "isolated_copper",         # Test grid F.Cu/B.Cu zones are isolated (visual test only)
 }
 
 

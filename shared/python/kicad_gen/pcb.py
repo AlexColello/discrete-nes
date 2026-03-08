@@ -543,6 +543,41 @@ class PCBBuilder:
 
         self.board.zones.append(zone)
 
+    def add_keepout_zone(
+        self,
+        layer: str,
+        outline: List[Tuple[float, float]],
+    ):
+        """Add a no-copper-pour keepout zone.
+
+        Prevents zone fills on the specified layer within the outline.
+
+        Args:
+            layer: Layer name (e.g., "In1.Cu")
+            outline: List of (x, y) corner points
+        """
+        from kiutils.items.zones import KeepoutSettings
+
+        zone = Zone()
+        zone.net = 0
+        zone.netName = ""
+        zone.layers = [layer]
+        zone.tstamp = uid()
+        zone.hatch = Hatch(style="edge", pitch=0.508)
+        # kiutils defaults use hyphens (not-allowed) but KiCad expects
+        # underscores (not_allowed) — set all values explicitly
+        zone.keepoutSettings = KeepoutSettings(
+            tracks='allowed', vias='allowed', pads='allowed',
+            copperpour='not_allowed', footprints='not_allowed',
+        )
+
+        polygon = ZonePolygon()
+        polygon.coordinates = [Position(X=round(x, 2), Y=round(y, 2))
+                               for x, y in outline]
+        zone.polygons = [polygon]
+
+        self.board.zones.append(zone)
+
     # ----------------------------------------------------------
     # Routing helpers
     # ----------------------------------------------------------
@@ -875,15 +910,17 @@ class PCBBuilder:
         size: float = 1.0,
         layer: str = "F.SilkS",
         thickness: float = 0.15,
+        knockout: bool = False,
     ):
-        """Add silkscreen text.
+        """Add text to the board.
 
         Args:
             text: Text string to display
             x, y: Position in mm
             size: Font height and width in mm
-            layer: Silkscreen layer ("F.SilkS" or "B.SilkS")
+            layer: Layer name (e.g., "F.SilkS", "F.Cu", "B.Cu")
             thickness: Stroke thickness in mm (min 0.15 for most fabs)
+            knockout: If True, text is cut out from copper (letter-shaped holes)
         """
         from kiutils.items.gritems import GrText
         from kiutils.items.common import Effects
@@ -897,10 +934,49 @@ class PCBBuilder:
             text=text,
             position=Position(X=round(x, 2), Y=round(y, 2)),
             layer=layer,
+            knockout=knockout,
             effects=effects,
             tstamp=uid(),
         )
         self.board.graphicItems.append(gr_text)
+
+    def add_mask_opening(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        front: bool = True,
+        back: bool = True,
+    ):
+        """Add solder mask opening (expose area underneath).
+
+        Places filled rectangles on F.Mask/B.Mask to remove solder mask.
+
+        Args:
+            x, y: Center position in mm
+            width, height: Opening size in mm
+            front: If True, open front solder mask (F.Mask)
+            back: If True, open back solder mask (B.Mask)
+        """
+        from kiutils.items.gritems import GrRect
+
+        x0 = round(x - width / 2, 2)
+        y0 = round(y - height / 2, 2)
+        x1 = round(x + width / 2, 2)
+        y1 = round(y + height / 2, 2)
+
+        for layer, enabled in [("F.Mask", front), ("B.Mask", back)]:
+            if enabled:
+                rect = GrRect(
+                    start=Position(X=x0, Y=y0),
+                    end=Position(X=x1, Y=y1),
+                    layer=layer,
+                    width=0,
+                    fill="solid",
+                    tstamp=uid(),
+                )
+                self.board.graphicItems.append(rect)
 
     def save(self, filepath: str, hide_text: bool = False):
         """Save the PCB to a file.
