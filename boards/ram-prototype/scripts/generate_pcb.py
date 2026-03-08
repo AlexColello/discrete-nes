@@ -1602,7 +1602,7 @@ def main():
     info_lines = [
         "Discrete NES - RAM Prototype",
         "8 bytes (3-bit address, 8-bit data)",
-        "v1.0  2026-03",
+        "v1.0  2026-03-08",
     ]
     line_spacing = 1.6  # mm between lines
     for i, line in enumerate(info_lines):
