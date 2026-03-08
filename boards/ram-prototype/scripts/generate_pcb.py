@@ -1519,7 +1519,7 @@ def main():
 
     # Layer visibility test grid (for clear PCB) — right of control row
     test_x = ctrl_row_x
-    test_y = ctrl_row_y
+    test_y = ctrl_row_y - 3.5
     test_grid_w, test_grid_h = add_layer_test_grid(pcb, test_x, test_y)
     print(f"\n  Layer test grid: {test_grid_w:.0f} x {test_grid_h:.0f} mm "
           f"at ({test_x:.1f}, {test_y:.1f})")
@@ -1596,6 +1596,24 @@ def main():
     pcb.add_zone("VCC", "In2.Cu", outline, clearance=0.3)
     print("  Added GND zone on In1.Cu")
     print("  Added VCC zone on In2.Cu")
+
+    # Board info text block — bottom-left corner
+    info_x = round(origin_x + BOARD_MARGIN, 2)
+    info_y = round(origin_y + board_h - BOARD_MARGIN, 2)
+    info_lines = [
+        "Discrete NES - RAM Prototype",
+        "8 bytes (3-bit address, 8-bit data)",
+        f"{board_w} x {board_h} mm, 4-layer, 3.3V",
+        "512 components (161 ICs, 175 LEDs, 175 Rs)",
+        "TI SN74LVC1G DSBGA + 0402 SMD",
+        "v1.0  2026-03",
+    ]
+    line_spacing = 1.6  # mm between lines
+    for i, line in enumerate(info_lines):
+        ly = round(info_y - (len(info_lines) - 1 - i) * line_spacing, 2)
+        pcb.add_silkscreen_text(line, info_x, ly, size=0.8,
+                                justify="left")
+    print(f"  Board info text at ({info_x}, {info_y})")
 
     # Save PCB (hide all footprint text to avoid silk_overlap/silk_over_copper)
     pcb_path = os.path.join(BOARD_DIR, "ram.kicad_pcb")

@@ -911,6 +911,7 @@ class PCBBuilder:
         layer: str = "F.SilkS",
         thickness: float = 0.15,
         knockout: bool = False,
+        justify: str = None,
     ):
         """Add text to the board.
 
@@ -921,14 +922,17 @@ class PCBBuilder:
             layer: Layer name (e.g., "F.SilkS", "F.Cu", "B.Cu")
             thickness: Stroke thickness in mm (min 0.15 for most fabs)
             knockout: If True, text is cut out from copper (letter-shaped holes)
+            justify: Text justification ("left", "right", or None for center)
         """
         from kiutils.items.gritems import GrText
-        from kiutils.items.common import Effects
+        from kiutils.items.common import Effects, Justify
 
         effects = Effects()
         effects.font.height = size
         effects.font.width = size
         effects.font.thickness = thickness
+        if justify:
+            effects.justify = Justify(horizontally=justify)
 
         gr_text = GrText(
             text=text,
