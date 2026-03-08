@@ -246,30 +246,26 @@ def fill_zones(pcb_path):
 # Step 5b: Remove dangling track stubs
 # --------------------------------------------------------------
 
-def cleanup_dangling_tracks(pcb_path):
-    """Remove short dangling track stubs left by the autorouter.
-
-    Pre-routing creates fanout stubs past the LED bank. The autorouter
-    may connect partway along a stub, leaving a short dangling remnant.
-    This step finds tracks (<10mm) where one endpoint has no other
-    track, pad, or via connection and removes them.
-    """
+def _run_one_cleanup_pass(pcb_path):
+    """Run a single dangling-track cleanup pass. Returns number of tracks removed."""
     script = textwrap.dedent(f"""\
         import pcbnew
+        from collections import defaultdict
+
         board = pcbnew.LoadBoard(r"{pcb_path}")
 
-        # Collect all track/via endpoints and pad positions for connectivity
-        # Key: (x, y, layer) -> count of items at that point
-        # (vias connect all layers, so use layer=None for them)
-        from collections import defaultdict
-        endpoint_counts = defaultdict(int)
         pad_positions = set()
+        for fp in board.GetFootprints():
+            for pad in fp.Pads():
+                pos = pad.GetPosition()
+                for layer_id in pad.GetLayerSet().CuStack():
+                    pad_positions.add((pos.x, pos.y, layer_id))
 
+        endpoint_counts = defaultdict(int)
         for track in board.GetTracks():
             if isinstance(track, pcbnew.PCB_VIA):
-                # Vias connect at their position on all layers
                 pos = track.GetPosition()
-                for layer_id in range(64):  # check all copper layers
+                for layer_id in range(64):
                     endpoint_counts[(pos.x, pos.y, layer_id)] += 1
             else:
                 layer = track.GetLayer()
@@ -278,15 +274,6 @@ def cleanup_dangling_tracks(pcb_path):
                 endpoint_counts[(s.x, s.y, layer)] += 1
                 endpoint_counts[(e.x, e.y, layer)] += 1
 
-        for fp in board.GetFootprints():
-            for pad in fp.Pads():
-                pos = pad.GetPosition()
-                for layer_id in pad.GetLayerSet().CuStack():
-                    pad_positions.add((pos.x, pos.y, layer_id))
-
-        # Find and remove dangling tracks.
-        # Sort by length descending so long stubs are removed first,
-        # making their short remnants immediately catchable in one pass.
         candidates = []
         for track in list(board.GetTracks()):
             if isinstance(track, pcbnew.PCB_VIA):
@@ -305,13 +292,10 @@ def cleanup_dangling_tracks(pcb_path):
             sk = (s.x, s.y, layer)
             ek = (e.x, e.y, layer)
 
-            # A track contributes 1 to its own endpoints. If the total
-            # count at an endpoint is 1 and no pad is there, it's dangling.
             start_dangling = (endpoint_counts[sk] <= 1 and sk not in pad_positions)
             end_dangling = (endpoint_counts[ek] <= 1 and ek not in pad_positions)
 
             if start_dangling or end_dangling:
-                # Decrement counts before removing
                 endpoint_counts[sk] -= 1
                 endpoint_counts[ek] -= 1
                 board.Remove(track)
@@ -319,7 +303,7 @@ def cleanup_dangling_tracks(pcb_path):
 
         if removed > 0:
             board.Save(r"{pcb_path}")
-        print(f"Removed {{removed}} dangling track stub(s)")
+        print(removed)
     """)
 
     result = subprocess.run(
@@ -327,13 +311,35 @@ def cleanup_dangling_tracks(pcb_path):
         capture_output=True, text=True, timeout=120,
     )
 
-    if result.stdout.strip():
-        for line in result.stdout.strip().splitlines():
-            print(f"  {line}")
-
     if result.returncode != 0:
-        print(f"  STDERR: {result.stderr.strip()}")
-        print("  WARNING: Dangling track cleanup failed (non-fatal)")
+        return -1  # error
+
+    # Last line of stdout is the count
+    for line in reversed(result.stdout.strip().splitlines()):
+        try:
+            return int(line.strip())
+        except ValueError:
+            continue
+    return -1
+
+
+def cleanup_dangling_tracks(pcb_path):
+    """Remove short dangling track stubs left by the autorouter.
+
+    Runs multiple passes (each in a fresh subprocess) since removing
+    one stub can expose another as dangling.
+    """
+    total_removed = 0
+    for pass_num in range(1, 11):
+        removed = _run_one_cleanup_pass(pcb_path)
+        if removed < 0:
+            print("  WARNING: Dangling track cleanup failed (non-fatal)")
+            break
+        total_removed += removed
+        if removed == 0:
+            break
+
+    print(f"  Removed {total_removed} dangling track stub(s) in {pass_num} pass(es)")
 
 
 # --------------------------------------------------------------

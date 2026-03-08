@@ -61,14 +61,17 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 
 # Cell layout dimensions (mm)
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
-IC_CELL_W = 5.5     # horizontal spacing between IC centers
-IC_CELL_H = 3.0     # vertical spacing between IC rows (DFF to buffer)
-LED_OFFSET_X = 2.2  # LED center offset from IC center (closest, vertical 270°)
-R_OFFSET_X = 3.3    # R center offset from IC center (after LED, vertical 270°)
+IC_CELL_W = 5.5      # horizontal spacing between IC centers (RAM bytes — tight)
+IC_CELL_H = 3.0      # vertical spacing between IC rows (RAM bytes — tight)
+CTRL_CELL_W = 6.5    # horizontal spacing for control logic (wider for routing)
+CTRL_CELL_H = 3.5    # vertical spacing for control logic (wider for routing)
+LED_OFFSET_X = 2.2   # LED center offset from IC center (closest, vertical 270°)
+R_OFFSET_X = 3.3     # R center offset from IC center (after LED, vertical 270°)
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
 GROUP_GAP_Y = 0.5    # vertical gap between byte rows
+CTRL_GROUP_GAP_X = 4.0  # horizontal gap between control logic groups
 BYTE_COL_GAP = 2.0   # horizontal gap between the two byte columns (physical gap)
 CTRL_ROW_GAP = 7.5   # vertical gap between RAM area and control logic row
 BOARD_MARGIN = 7.0   # margin from board edge to components
@@ -212,19 +215,23 @@ def sort_components_for_placement(components):
 # Layout computation
 # --------------------------------------------------------------
 
-def compute_group_layout(ic_cells, standalone, max_cols=4):
+def compute_group_layout(ic_cells, standalone, max_cols=4,
+                         cell_w=None, cell_h=None):
     """Compute relative positions for components within a group.
 
     Returns list of (component, rel_x, rel_y) for all components.
     Each IC cell is laid out as: IC at (0,0), LED at (+1.8, 0), R at (+3.5, 0)
     ICs are arranged in a grid with max_cols columns.
     """
+    cw = cell_w if cell_w is not None else IC_CELL_W
+    ch = cell_h if cell_h is not None else IC_CELL_H
+
     placements = []
     row, col = 0, 0
 
     for ic, r, led in ic_cells:
-        x = col * IC_CELL_W
-        y = row * IC_CELL_H
+        x = col * cw
+        y = row * ch
 
         placements.append((ic, x, y))
         if led:
@@ -242,8 +249,8 @@ def compute_group_layout(ic_cells, standalone, max_cols=4):
         row += 1
         col = 0
         for r, led in standalone:
-            x = col * IC_CELL_W
-            y = row * IC_CELL_H
+            x = col * cw
+            y = row * ch
 
             placements.append((r, x, y))
             if led:
@@ -257,7 +264,7 @@ def compute_group_layout(ic_cells, standalone, max_cols=4):
     return placements
 
 
-def compute_group_size(placements):
+def compute_group_size(placements, cell_w=None, cell_h=None):
     """Compute bounding box of a group's placements.
 
     Returns (width, height) in mm.
@@ -265,10 +272,13 @@ def compute_group_size(placements):
     if not placements:
         return (0, 0)
 
+    cw = cell_w if cell_w is not None else IC_CELL_W
+    ch = cell_h if cell_h is not None else IC_CELL_H
+
     xs = [x for _, x, y in placements]
     ys = [y for _, x, y in placements]
 
-    return (max(xs) - min(xs) + IC_CELL_W, max(ys) - min(ys) + IC_CELL_H)
+    return (max(xs) - min(xs) + cw, max(ys) - min(ys) + ch)
 
 
 # --------------------------------------------------------------
@@ -1200,26 +1210,39 @@ def main():
     # Pre-compute layouts for each group
     group_layouts = {}
     group_sizes = {}
+    # Track which cell dimensions each group uses (for compute_group_size)
+    group_cell_dims = {}
     for name, comps in groups.items():
-        # Determine max columns based on group size
+        # Determine max columns and cell dimensions based on group type
+        is_ram = name.startswith("byte")
+        is_ctrl = name in ("addr_decoder", "control_logic",
+                           "write_clk_gen", "read_oe_gen")
         if name == "root":
             max_cols = 3  # Connector + root LEDs
-        elif name.startswith("byte"):
+        elif is_ram:
             max_cols = 8  # 8 bits per line (DFFs row + buffers row)
         elif name == "addr_decoder":
             max_cols = 4  # 3 INV + 8 AND3
         else:
             max_cols = 3
 
+        # RAM bytes use tight spacing; control logic uses wider spacing
+        if is_ctrl:
+            cw, ch = CTRL_CELL_W, CTRL_CELL_H
+        else:
+            cw, ch = IC_CELL_W, IC_CELL_H
+        group_cell_dims[name] = (cw, ch)
+
         ic_cells, standalone, others = sort_components_for_placement(comps)
 
         # Reverse bit order within byte groups: MSB (D7) on the left
-        if name.startswith("byte"):
+        if is_ram:
             dff_cells = [c for c in ic_cells if c[0]["part"] == "74LVC1G79"]
             buf_cells = [c for c in ic_cells if c[0]["part"] == "74LVC1G125"]
             ic_cells = list(reversed(dff_cells)) + list(reversed(buf_cells))
 
-        placements = compute_group_layout(ic_cells, standalone, max_cols)
+        placements = compute_group_layout(ic_cells, standalone, max_cols,
+                                          cell_w=cw, cell_h=ch)
 
         # Add connector and other non-IC components
         if others:
@@ -1278,7 +1301,8 @@ def main():
                     placements.append((comp, 0.0, i * CONN_PIN_PITCH))
 
         group_layouts[name] = placements
-        group_sizes[name] = compute_group_size(placements)
+        cw, ch = group_cell_dims.get(name, (IC_CELL_W, IC_CELL_H))
+        group_sizes[name] = compute_group_size(placements, cell_w=cw, cell_h=ch)
 
     # --- Compute absolute positions ---
     total_placed = 0
@@ -1456,7 +1480,7 @@ def main():
         for comp, rel_x, rel_y in group_layouts[name]:
             _place_component(pcb, comp, ctrl_row_x + rel_x, ctrl_row_y + rel_y, netlist_data)
             total_placed += 1
-        ctrl_row_x += w + GROUP_GAP_X
+        ctrl_row_x += w + CTRL_GROUP_GAP_X
 
     print(f"  Total components placed: {total_placed}")
 
