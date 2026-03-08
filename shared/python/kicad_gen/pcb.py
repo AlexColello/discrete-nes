@@ -349,6 +349,18 @@ class PCBBuilder:
         fp.tstamp = tstamp or uid()
         fp.path = f"/{tstamp}" if tstamp else ""
 
+        # If placing on back side, mirror pad and graphic layers from F -> B
+        if layer == "B.Cu":
+            _LAYER_FLIP = {
+                "F.Cu": "B.Cu", "F.Paste": "B.Paste", "F.Mask": "B.Mask",
+                "F.SilkS": "B.SilkS", "F.Fab": "B.Fab", "F.CrtYd": "B.CrtYd",
+            }
+            for pad in fp.pads:
+                pad.layers = [_LAYER_FLIP.get(l, l) for l in pad.layers]
+            for gi in fp.graphicItems:
+                if hasattr(gi, 'layer') and gi.layer in _LAYER_FLIP:
+                    gi.layer = _LAYER_FLIP[gi.layer]
+
         # Set pad orientation to match footprint rotation.
         # KiCad stores pad orientation as pad_local + parent_rotation (historical).
         # GetFPRelativeOrientation() = stored_angle - parent_rotation.
@@ -503,6 +515,7 @@ class PCBBuilder:
         clearance: float = 0.3,
         min_thickness: float = 0.254,
         priority: int = 0,
+        pad_connection: Optional[str] = None,
     ):
         """Add a copper pour zone.
 
@@ -513,6 +526,8 @@ class PCBBuilder:
             clearance: Zone clearance in mm
             min_thickness: Minimum copper width in mm
             priority: Zone priority (higher = fills first)
+            pad_connection: Pad connection type: "full" (solid), "no",
+                "thru_hole_only", or None (thermal relief, default)
         """
         net_obj = self._nets.get(net_name)
         if net_obj is None:
@@ -526,6 +541,7 @@ class PCBBuilder:
         zone.clearance = clearance
         zone.minThickness = min_thickness
         zone.priority = priority
+        zone.connectPads = pad_connection
         zone.hatch = Hatch(style="edge", pitch=0.508)
 
         # Set fill settings
@@ -618,6 +634,7 @@ class PCBBuilder:
             if pad.number == pad_number:
                 px, py = pad.position.X, pad.position.Y
                 # KiCad uses clockwise rotation (positive angle = CW in Y-down coords)
+                # B.Cu pads use the same coordinate system (no X mirror)
                 abs_x = fp_x + px * cos_a + py * sin_a
                 abs_y = fp_y - px * sin_a + py * cos_a
                 return (round(abs_x, 2), round(abs_y, 2))
@@ -684,6 +701,53 @@ class PCBBuilder:
         self.board.traceItems.append(seg)
         return seg
 
+    def add_chamfered_trace(
+        self,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        net: int,
+        width: float = 0.2,
+        layer: str = "F.Cu",
+        horizontal_first: bool = True,
+    ) -> int:
+        """Add an L-shaped trace with a 45-degree chamfer at the corner.
+
+        Instead of a sharp 90-degree bend, inserts a short diagonal segment.
+        Returns the number of trace segments added (2 or 3).
+        """
+        x1, y1 = round(start[0], 2), round(start[1], 2)
+        x2, y2 = round(end[0], 2), round(end[1], 2)
+
+        dx = x2 - x1
+        dy = y2 - y1
+
+        # If start == end or purely horizontal/vertical, just one segment
+        if (abs(dx) < 0.01 and abs(dy) < 0.01):
+            return 0
+        if abs(dx) < 0.01 or abs(dy) < 0.01:
+            self.add_trace(start, end, net, width, layer)
+            return 1
+
+        # Chamfer length = min of half the shorter leg, 0.5mm
+        chamfer = min(abs(dx) / 2, abs(dy) / 2, 0.5)
+
+        if horizontal_first:
+            # Horizontal → diagonal → vertical
+            cx = x2 - (chamfer if dx > 0 else -chamfer)
+            cy = y1 + (chamfer if dy > 0 else -chamfer)
+            self.add_trace((x1, y1), (cx, y1), net, width, layer)
+            self.add_trace((cx, y1), (x2, cy), net, width, layer)
+            self.add_trace((x2, cy), (x2, y2), net, width, layer)
+        else:
+            # Vertical → diagonal → horizontal
+            cx = x1 + (chamfer if dx > 0 else -chamfer)
+            cy = y2 - (chamfer if dy > 0 else -chamfer)
+            self.add_trace((x1, y1), (x1, cy), net, width, layer)
+            self.add_trace((x1, cy), (cx, y2), net, width, layer)
+            self.add_trace((cx, y2), (x2, y2), net, width, layer)
+
+        return 3
+
     def add_via(
         self,
         position: Tuple[float, float],
@@ -691,6 +755,7 @@ class PCBBuilder:
         size: float = 0.6,
         drill: float = 0.3,
         layers: Optional[List[str]] = None,
+        remove_unused_layers: bool = False,
     ) -> Via:
         """Add a via.
 
@@ -700,6 +765,8 @@ class PCBBuilder:
             size: Via outer diameter in mm
             drill: Drill diameter in mm
             layers: Layer pair (default ["F.Cu", "B.Cu"])
+            remove_unused_layers: If True, remove annular rings from
+                layers not in the layer pair (reduces DRC conflicts)
 
         Returns:
             The created Via.
@@ -713,6 +780,7 @@ class PCBBuilder:
             layers=layers,
             net=net,
             tstamp=uid(),
+            removeUnusedLayers=remove_unused_layers,
         )
         self.board.traceItems.append(v)
         return v
@@ -1127,11 +1195,25 @@ class PCBBuilder:
         # --- Fix unquoted generator values ---
         text = _fix_unquoted_generator(text)
 
-        # --- Fix bare (remove_unused_layers) → (remove_unused_layers no) ---
+        # --- Fix bare (remove_unused_layers) ---
         # kiutils misinterprets "(remove_unused_layers no)" as boolean True and
-        # serializes it as "(remove_unused_layers)" without value. KiCad sees
-        # this as different from the library's "(remove_unused_layers no)".
-        text = text.replace('(remove_unused_layers)', '(remove_unused_layers no)')
+        # serializes it as "(remove_unused_layers)" without value.
+        # For vias: bare means intentional → convert to "yes"
+        # For footprint pads: bare means kiutils bug → convert to "no"
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if '(remove_unused_layers)' not in line:
+                continue
+            stripped = line.lstrip()
+            if stripped.startswith('(via '):
+                lines[i] = line.replace(
+                    '(remove_unused_layers)',
+                    '(remove_unused_layers yes)')
+            else:
+                lines[i] = line.replace(
+                    '(remove_unused_layers)',
+                    '(remove_unused_layers no)')
+        text = '\n'.join(lines)
 
         open(filepath, "w", encoding="utf-8").write(text)
 
