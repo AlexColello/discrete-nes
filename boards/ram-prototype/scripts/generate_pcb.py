@@ -2,7 +2,7 @@
 """
 Generate KiCad PCB layout for the 8-byte discrete RAM prototype.
 
-Places all 512 components (161 ICs, 175 LEDs, 175 resistors, 1 connector)
+Places all 391 components (158 ICs, 116 LEDs, 116 resistors, 1 connector)
 in a grouped layout matching the schematic hierarchy.  All DSBGA ICs are
 at 180° rotation (outputs at top, inputs at bottom).  LEDs and resistors
 at 90° (vertical, anode above).
@@ -23,10 +23,10 @@ Layout:
   | CONN +-----------+ BYTE 2    | BYTE 6    |
   |      | CTRL LOGIC| BYTE 3    | BYTE 7    |
   +------+-----------+-----------+-----------+
-                     | WRITE CLK | READ OE   |
-                     +-----------+-----------+
+                     | COL SEL |WRITE EN|READ EN|
+                     +---------+--------+-------+
 
-  Each byte is a line of 8 bits (8 DFFs + 8 buffers in 8 columns).
+  Each byte has 1 NAND (74LVC2G00) + 8 DFFs + 8 buffers in 9 columns.
   Bytes sorted by address: top-left going down first, then right.
 
 Each IC is paired with its LED+R in a horizontal cell:
@@ -105,10 +105,12 @@ def group_components(netlist_data):
             groups["addr_decoder"].append(comp)
         elif "Control Logic" in sheetpath:
             groups["control_logic"].append(comp)
-        elif "Write Clk Gen" in sheetpath:
-            groups["write_clk_gen"].append(comp)
-        elif "Read OE Gen" in sheetpath:
-            groups["read_oe_gen"].append(comp)
+        elif "Column Select" in sheetpath:
+            groups["column_select"].append(comp)
+        elif "Write Enable Gen" in sheetpath:
+            groups["write_en_gen"].append(comp)
+        elif "Read Enable Gen" in sheetpath:
+            groups["read_en_gen"].append(comp)
         else:
             # Byte sheets: /Byte 0/, /Byte 1/, etc.
             for i in range(8):
@@ -143,10 +145,11 @@ def sort_components_for_placement(components):
         else:
             others.append(c)
 
-    # Sort ICs: DFFs (74LVC1G79) first, then buffers (74LVC1G125), then others.
+    # Sort ICs: DFFs (74LVC1G79) first, then buffers (74LVC1G125),
+    # then dual NANDs (74LVC2G00), then others.
     # Within each type group, sort by reference number.
     # This ensures DFFs fill row 0 and buffers fill row 1 in byte groups.
-    PART_ORDER = {"74LVC1G79": 0, "74LVC1G125": 1}
+    PART_ORDER = {"74LVC1G79": 0, "74LVC1G125": 1, "74LVC2G00": 2}
 
     def ref_num(c):
         ref = c["ref"]
@@ -160,39 +163,58 @@ def sort_components_for_placement(components):
     rs.sort(key=ref_num)
     leds.sort(key=ref_num)
 
-    # Match ICs with their LED+R pairs via shared nets
-    # Each IC output drives LED -> R -> GND
+    # Match ICs with their LED+R pairs via OUTPUT pin nets only.
+    # Using all pin nets would cause DFFs/BUFs to steal NAND LEDs
+    # (DFF CLK shares net with NAND write output, BUF OE shares net
+    # with NAND read output).
+    # 74LVC2G00 (dual NAND) has 2 outputs -> 2 LEDs; first match gets the IC,
+    # second becomes an extra cell with ic=None (placeholder for grid layout).
+    OUTPUT_PINS = {
+        "74LVC2G00": ["7", "3"],   # dual NAND outputs (DSBGA-8)
+        "74LVC1G11": ["5"],        # 3-input AND output (DSBGA-6)
+    }
+    DEFAULT_OUTPUT_PIN = ["4"]     # DSBGA-5: output on pin 4
+
     ic_cells = []
     used_rs = set()
     used_leds = set()
 
     for ic in ics:
-        # Find LED connected to this IC's output (IC output -> LED anode)
-        ic_nets = set(ic["pins"].values())
-        matched_led = None
+        out_pins = OUTPUT_PINS.get(ic["part"], DEFAULT_OUTPUT_PIN)
+        ic_out_nets = set(ic["pins"].get(p, "") for p in out_pins) - {""}
+        is_dual = len(out_pins) > 1
+
+        # Match LEDs on output pin nets only
+        matched_pairs = []
         for led in leds:
             if led["ref"] in used_leds:
                 continue
             led_nets = set(led["pins"].values())
-            if ic_nets & led_nets:
-                matched_led = led
+            if ic_out_nets & led_nets:
+                # Find R connected to this LED
+                matched_r = None
+                for r in rs:
+                    if r["ref"] in used_rs:
+                        continue
+                    r_nets = set(r["pins"].values())
+                    if led_nets & r_nets:
+                        matched_r = r
+                        used_rs.add(r["ref"])
+                        break
+                matched_pairs.append((led, matched_r))
                 used_leds.add(led["ref"])
-                break
+                if not is_dual:
+                    break  # single-output ICs: stop after first match
 
-        # Find R connected to this LED (LED cathode -> R)
-        matched_r = None
-        if matched_led:
-            led_nets = set(matched_led["pins"].values())
-            for r in rs:
-                if r["ref"] in used_rs:
-                    continue
-                r_nets = set(r["pins"].values())
-                if led_nets & r_nets:
-                    matched_r = r
-                    used_rs.add(r["ref"])
-                    break
-
-        ic_cells.append((ic, matched_r, matched_led))
+        if matched_pairs:
+            # First pair gets the IC
+            led0, r0 = matched_pairs[0]
+            ic_cells.append((ic, r0, led0))
+            # Additional pairs (dual NAND second output) get ic=None placeholder
+            for led_n, r_n in matched_pairs[1:]:
+                ic_cells.append((None, r_n, led_n))
+        else:
+            ic_cells.append((ic, None, None))
 
     # Standalone R+LED pairs (root sheet bus LEDs)
     # After swap: LED has signal net from connector, find R from LED's nets
@@ -236,7 +258,8 @@ def compute_group_layout(ic_cells, standalone, max_cols=4,
         x = col * cw
         y = row * ch
 
-        placements.append((ic, x, y))
+        if ic is not None:
+            placements.append((ic, x, y))
         if led:
             placements.append((led, x + LED_OFFSET_X, y))
         if r:
@@ -399,6 +422,12 @@ def preroute_power_vias(pcb):
         if not (is_dsbga or is_led or is_resistor):
             continue
 
+        # Skip DSBGA-8 (74LVC2G00): 0.5mm pitch is too tight for 0.8mm
+        # power vias — the "away from center" offset lands on adjacent pads.
+        # Left to autorouter.
+        if "DSBGA-8" in lib_id:
+            continue
+
         for pad in fp.pads:
             if not (pad.net and pad.net.name in ("GND", "VCC")):
                 continue
@@ -459,49 +488,63 @@ def preroute_bcu_resistors(pcb, netlist_data):
 
     via_count = 0
 
+    ref_to_part = _build_ref_to_part(netlist_data)
+    processed_leds = set()
+
     for fp in pcb.board.footprints:
         ref = fp.properties.get("Reference", "")
         if not ref.startswith("U"):
             continue
 
-        # Get IC output pin (pin 4) net
-        ic_out_net = pcb.get_pad_net(ref, "4")
-        if ic_out_net is None or ic_out_net == 0:
-            continue
+        part = ref_to_part.get(ref, "")
+
+        # Determine output pins by part type
+        if part == "74LVC2G00":
+            out_pins = ["7", "3"]
+        elif part == "74LVC1G11":
+            out_pins = ["5"]
+        else:
+            out_pins = ["4"]
 
         ic_x, ic_y = fp.position.X, fp.position.Y
 
-        # Find nearest LED on the IC output net
-        pads_on_net = net_to_pads.get(ic_out_net, [])
-        led_ref = None
-        led_anode_pad = None
-        best_dist = float("inf")
-        for pad_ref, pad_num, px, py, pnet in pads_on_net:
-            if pad_ref.startswith("D"):
-                dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
-                if dist < IC_CELL_W * 1.5 and dist < best_dist:
-                    best_dist = dist
-                    led_ref = pad_ref
-                    led_anode_pad = pad_num
+        for out_pin in out_pins:
+            ic_out_net = pcb.get_pad_net(ref, out_pin)
+            if ic_out_net is None or ic_out_net == 0:
+                continue
 
-        if led_ref is None:
-            continue
+            # Find nearest LED on the IC output net
+            pads_on_net = net_to_pads.get(ic_out_net, [])
+            led_ref = None
+            led_anode_pad = None
+            best_dist = float("inf")
+            for pad_ref, pad_num, px, py, pnet in pads_on_net:
+                if pad_ref.startswith("D") and pad_ref not in processed_leds:
+                    dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
+                    if dist < IC_CELL_W * 1.5 and dist < best_dist:
+                        best_dist = dist
+                        led_ref = pad_ref
+                        led_anode_pad = pad_num
 
-        # Get LED cathode pad and net
-        led_cathode_pad = "1" if led_anode_pad == "2" else "2"
-        led_cathode_net = pcb.get_pad_net(led_ref, led_cathode_pad)
-        if led_cathode_net is None or led_cathode_net == 0:
-            continue
+            if led_ref is None:
+                continue
+            processed_leds.add(led_ref)
 
-        # Get LED cathode position (F.Cu)
-        led_cathode_pos = pcb.get_pad_position(led_ref, led_cathode_pad)
+            # Get LED cathode pad and net
+            led_cathode_pad = "1" if led_anode_pad == "2" else "2"
+            led_cathode_net = pcb.get_pad_net(led_ref, led_cathode_pad)
+            if led_cathode_net is None or led_cathode_net == 0:
+                continue
 
-        # Cathode via: connects F.Cu LED cathode to B.Cu R pad 1
-        via_x = round(led_cathode_pos[0], 2)
-        via_y = round(led_cathode_pos[1], 2)
-        pcb.add_via((via_x, via_y), led_cathode_net,
-                    VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"])
-        via_count += 1
+            # Get LED cathode position (F.Cu)
+            led_cathode_pos = pcb.get_pad_position(led_ref, led_cathode_pad)
+
+            # Cathode via: connects F.Cu LED cathode to B.Cu R pad 1
+            via_x = round(led_cathode_pos[0], 2)
+            via_y = round(led_cathode_pos[1], 2)
+            pcb.add_via((via_x, via_y), led_cathode_net,
+                        VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"])
+            via_count += 1
 
     return via_count, 0
 
@@ -541,50 +584,56 @@ def preroute_ic_to_led(pcb, netlist_data):
         if part == "74LVC1G11":
             continue
 
-        out_pin = "4"  # All DSBGA-5 ICs: output on pin 4
-
-        ic_out_net = pcb.get_pad_net(ref, out_pin)
-        if ic_out_net is None or ic_out_net == 0:
+        # Skip 74LVC2G00 — LEDs are placed below the IC (not to the right),
+        # so the diagonal-right routing creates long crossing traces.
+        # Left to autorouter.
+        if part == "74LVC2G00":
             continue
 
-        # IC position for proximity filtering
+        out_pins = ["4"]  # standard DSBGA-5
+
         ic_x, ic_y = fp.position.X, fp.position.Y
 
-        # Find nearest LED pad on the same net (within IC_CELL_W distance)
-        pads_on_net = net_to_pads.get(ic_out_net, [])
-        led_ref = None
-        led_pad_num = None
-        best_dist = float("inf")
-        for pad_ref, pad_num, px, py, pnet in pads_on_net:
-            if pad_ref.startswith("D"):
-                dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
-                if dist < IC_CELL_W and dist < best_dist:
-                    best_dist = dist
-                    led_ref = pad_ref
-                    led_pad_num = pad_num
+        for out_pin in out_pins:
+            ic_out_net = pcb.get_pad_net(ref, out_pin)
+            if ic_out_net is None or ic_out_net == 0:
+                continue
 
-        if led_ref is None:
-            continue
+            # Find nearest LED pad on the same net (within IC_CELL_W distance)
+            pads_on_net = net_to_pads.get(ic_out_net, [])
+            led_ref = None
+            led_pad_num = None
+            best_dist = float("inf")
+            for pad_ref, pad_num, px, py, pnet in pads_on_net:
+                if pad_ref.startswith("D"):
+                    dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
+                    if dist < IC_CELL_W * 1.5 and dist < best_dist:
+                        best_dist = dist
+                        led_ref = pad_ref
+                        led_pad_num = pad_num
 
-        out_pos = pcb.get_pad_position(ref, out_pin)
-        led_anode_pos = pcb.get_pad_position(led_ref, led_pad_num)
+            if led_ref is None:
+                continue
 
-        # 45° diagonal UP-RIGHT from output pin to LED anode Y,
-        # then horizontal RIGHT to LED anode X
-        dy = out_pos[1] - led_anode_pos[1]  # positive (going up)
-        diag_end_x = round(out_pos[0] + dy, 2)  # 45°: dx = dy
-        diag_end_y = round(led_anode_pos[1], 2)
+            out_pos = pcb.get_pad_position(ref, out_pin)
+            led_anode_pos = pcb.get_pad_position(led_ref, led_pad_num)
 
-        # Segment 1: diagonal
-        pcb.add_trace(out_pos, (diag_end_x, diag_end_y), ic_out_net,
-                       SIGNAL_TRACE_W, "F.Cu")
-        traces += 1
+            # 45° diagonal UP-RIGHT from output pin to LED anode Y,
+            # then horizontal RIGHT to LED anode X
+            dy = out_pos[1] - led_anode_pos[1]  # positive (going up)
+            diag_end_x = round(out_pos[0] + dy, 2)  # 45°: dx = dy
+            diag_end_y = round(led_anode_pos[1], 2)
 
-        # Segment 2: horizontal to LED anode (if needed)
-        if abs(diag_end_x - led_anode_pos[0]) > 0.01:
-            pcb.add_trace((diag_end_x, diag_end_y), led_anode_pos, ic_out_net,
+            # Segment 1: diagonal
+            pcb.add_trace(out_pos, (diag_end_x, diag_end_y), ic_out_net,
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
+
+            # Segment 2: horizontal to LED anode (if needed)
+            if abs(diag_end_x - led_anode_pos[0]) > 0.01:
+                pcb.add_trace((diag_end_x, diag_end_y), led_anode_pos, ic_out_net,
+                               SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
 
     return traces
 
@@ -1273,9 +1322,10 @@ def main():
 
     # Step 1: Create custom DSBGA footprints
     print("\n[1/7] Creating custom DSBGA footprints...")
-    fp5_path, fp6_path = create_dsbga_footprints(SHARED_FP_DIR)
+    fp5_path, fp6_path, fp8_path = create_dsbga_footprints(SHARED_FP_DIR)
     print(f"  Created: {os.path.basename(fp5_path)}")
     print(f"  Created: {os.path.basename(fp6_path)}")
+    print(f"  Created: {os.path.basename(fp8_path)}")
 
     # Step 2: Export netlist from schematic
     print("\n[2/7] Exporting netlist from schematic...")
@@ -1313,7 +1363,7 @@ def main():
     #   Column 0: Connector (root) on the left
     #   Column 1: addr_decoder (top) + control_logic (bottom)
     #   Columns 2+: RAM bytes in 4-col x 2-row grid
-    #   Below RAM: write_clk_gen + read_oe_gen
+    #   Below RAM: column_select + write_en_gen + read_en_gen
 
     # Pre-compute layouts for each group
     group_layouts = {}
@@ -1323,14 +1373,14 @@ def main():
     for name, comps in groups.items():
         # Determine max columns and cell dimensions based on group type
         is_ram = name.startswith("byte")
-        is_ctrl = name in ("addr_decoder", "control_logic",
-                           "write_clk_gen", "read_oe_gen")
+        is_ctrl = name in ("addr_decoder", "control_logic", "column_select",
+                           "write_en_gen", "read_en_gen")
         if name == "root":
             max_cols = 3  # Connector + root LEDs
         elif is_ram:
-            max_cols = 8  # 8 bits per line (DFFs row + buffers row)
+            max_cols = 9  # NAND + 8 bits per line (DFFs row + buffers row)
         elif name == "addr_decoder":
-            max_cols = 4  # 3 INV + 8 AND3
+            max_cols = 3  # 2 INV + 4 AND2
         else:
             max_cols = 3
 
@@ -1344,10 +1394,28 @@ def main():
         ic_cells, standalone, others = sort_components_for_placement(comps)
 
         # Reverse bit order within byte groups: MSB (D7) on the left
+        # NAND (74LVC2G00) goes in col 0 of DFF row; DFFs shift right
+        # Both NAND LEDs placed together below the NAND IC
+        nand_led_pairs = []
         if is_ram:
-            dff_cells = [c for c in ic_cells if c[0]["part"] == "74LVC1G79"]
-            buf_cells = [c for c in ic_cells if c[0]["part"] == "74LVC1G125"]
-            ic_cells = list(reversed(dff_cells)) + list(reversed(buf_cells))
+            nand_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC2G00"]
+            nand_extra = [c for c in ic_cells if c[0] is None]  # 2nd NAND LED
+            dff_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G79"]
+            buf_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G125"]
+
+            # Collect both NAND LED+R pairs for manual placement
+            if nand_cells:
+                _, r1, led1 = nand_cells[0]
+                if led1:
+                    nand_led_pairs.append((r1, led1))
+                nand_cells[0] = (nand_cells[0][0], None, None)  # strip from cell
+            for cell in nand_extra:
+                _, r_n, led_n = cell
+                if led_n:
+                    nand_led_pairs.append((r_n, led_n))
+
+            # Spacer before BUFs so they align at col 1 (matching DFF columns)
+            ic_cells = nand_cells + list(reversed(dff_cells)) + [(None, None, None)] + list(reversed(buf_cells))
 
         placements = compute_group_layout(ic_cells, standalone, max_cols,
                                           cell_w=cw, cell_h=ch)
@@ -1360,6 +1428,24 @@ def main():
                 else (comp, rx, ry)
                 for comp, rx, ry in placements
             ]
+
+            # Nudge NAND IC: +1mm right, +0.5mm down relative to bits
+            placements = [
+                (comp, round(rx + 1.0, 2), round(ry + 0.5, 2))
+                if comp is not None and comp.get("part") == "74LVC2G00"
+                else (comp, rx, ry)
+                for comp, rx, ry in placements
+            ]
+
+            # Place both NAND LEDs side by side below the NAND IC
+            # (shifted +1.0mm X to match NAND nudge)
+            nand_led_y = round(ch - 0.5, 2)  # same Y as buffer row
+            for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
+                lx = round(0.5 + i * 1.5, 2)  # below NAND IC
+                if led_comp:
+                    placements.append((led_comp, lx, nand_led_y))
+                if r_comp:
+                    placements.append((r_comp, lx, nand_led_y))
 
         # Add connector and other non-IC components
         if others:
@@ -1429,7 +1515,7 @@ def main():
     col0_y = PLACEMENT_ORIGIN
     root_w, root_h = group_sizes.get("root", (0, 0))
 
-    # Column 1: addr_decoder stacked above control_logic
+    # Column 1: addr_decoder + control_logic stacked
     col1_x = col0_x + root_w + GROUP_GAP_X
     col1_y = PLACEMENT_ORIGIN
     dec_w, dec_h = group_sizes.get("addr_decoder", (0, 0))
@@ -1587,10 +1673,10 @@ def main():
 
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
-    # Place control logic below RAM: write_clk_gen + read_oe_gen
+    # Place control logic below RAM: column_select + write_en_gen + read_en_gen
     ctrl_row_y = ram_y + ram_total_h + CTRL_ROW_GAP
     ctrl_row_x = ram_x
-    for name in ["write_clk_gen", "read_oe_gen"]:
+    for name in ["column_select", "write_en_gen", "read_en_gen"]:
         if name not in group_layouts:
             continue
         w, h = group_sizes[name]
@@ -1637,8 +1723,9 @@ def main():
 
     # Layer visibility test grid (for clear PCB) — right of control row
     # Place test grid to the right of control row, below OE fanout traces
-    ctrl_h_max = max(group_sizes.get("write_clk_gen", (0, 0))[1],
-                     group_sizes.get("read_oe_gen", (0, 0))[1])
+    ctrl_h_max = max(group_sizes.get("column_select", (0, 0))[1],
+                     group_sizes.get("write_en_gen", (0, 0))[1],
+                     group_sizes.get("read_en_gen", (0, 0))[1])
     test_x = ctrl_row_x
     test_y = ctrl_row_y + ctrl_h_max + 3.0
     test_grid_w, test_grid_h = add_layer_test_grid(pcb, test_x, test_y)
@@ -1724,7 +1811,7 @@ def main():
     info_lines = [
         "Discrete NES - RAM Prototype",
         "8 bytes (3-bit address, 8-bit data)",
-        "v1.0  2026-03-08",
+        "v2.0  2026-03-09  Row/Col architecture",
     ]
     line_spacing = 1.6  # mm between lines
     for i, line in enumerate(info_lines):
@@ -1805,7 +1892,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
         elif part == "R_Small":
             angle = 90   # Vertical, pad 1 below at y+0.55, pad 2/GND above at y-0.55
             layer = "B.Cu"  # Directly behind LED on back side
-        elif "74LVC1G" in part:
+        elif "74LVC" in part:
             angle = 180  # 180°: output at top-right, inputs at bottom-right
         elif part == "Conn_01x16":
             angle = 180  # Pins face left toward board edge

@@ -24,11 +24,13 @@ from kiutils.items.zones import FillSettings, Hatch, Zone, ZonePolygon
 from .common import (
     DSBGA5_BALL_TO_PIN,
     DSBGA6_BALL_TO_PIN,
+    DSBGA8_BALL_TO_PIN,
     FOOTPRINT_MAP,
     KICAD_CLI,
     KICAD_FP_DIR,
     STOCK_DSBGA5_FP,
     STOCK_DSBGA6_FP,
+    STOCK_DSBGA8_FP,
     uid,
 )
 
@@ -37,8 +39,8 @@ from .common import (
 # Custom DSBGA Footprint Generation
 # ==============================================================
 
-def create_dsbga_footprints(output_dir: str) -> Tuple[str, str]:
-    """Create DSBGA-5 and DSBGA-6 footprints with numeric pad names.
+def create_dsbga_footprints(output_dir: str) -> Tuple[str, str, str]:
+    """Create DSBGA-5, DSBGA-6, and DSBGA-8 footprints with numeric pad names.
 
     Loads stock KiCad DSBGA footprints, renames BGA ball pads (A1/B1/C1/...)
     to numeric pin numbers (1/2/3/...) matching the KiCad 74xGxx symbols.
@@ -47,7 +49,7 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str]:
         output_dir: Path to .pretty directory to write footprints into.
 
     Returns:
-        Tuple of (dsbga5_path, dsbga6_path) for the created files.
+        Tuple of (dsbga5_path, dsbga6_path, dsbga8_path) for the created files.
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -91,7 +93,26 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str]:
     fp6.to_file(dsbga6_path)
     _fix_footprint_file(dsbga6_path, stock6_path)
 
-    return dsbga5_path, dsbga6_path
+    # --- DSBGA-8 ---
+    stock8_path = os.path.join(KICAD_FP_DIR, STOCK_DSBGA8_FP)
+    fp8 = Footprint.from_file(stock8_path)
+    fp8.entryName = "DSBGA-8_NumericPads"
+    fp8.description = (
+        "TI DSBGA-8 (YZP) with numeric pad names matching 74xGxx symbols. "
+        "Based on Texas_DSBGA-8_0.9x1.9mm_Layout2x4_P0.5mm."
+    )
+    fp8.tags = "BGA 8 0.5 YZP DSBGA numeric"
+    if "Value" in fp8.properties:
+        fp8.properties["Value"] = "DSBGA-8_NumericPads"
+    for pad in fp8.pads:
+        if pad.number in DSBGA8_BALL_TO_PIN:
+            pad.number = DSBGA8_BALL_TO_PIN[pad.number]
+    fp8.tstamp = uid()
+    dsbga8_path = os.path.join(output_dir, "DSBGA-8_NumericPads.kicad_mod")
+    fp8.to_file(dsbga8_path)
+    _fix_footprint_file(dsbga8_path, stock8_path)
+
+    return dsbga5_path, dsbga6_path, dsbga8_path
 
 
 # ==============================================================
@@ -346,8 +367,16 @@ class PCBBuilder:
         fp.position = Position(X=x, Y=y, angle=angle)
         fp.layer = layer
         fp.libId = lib_fp
-        fp.tstamp = tstamp or uid()
-        fp.path = f"/{tstamp}" if tstamp else ""
+        # tstamp may contain multiple UUIDs for multi-unit symbols (e.g.,
+        # 74LVC2G00 dual NAND).  KiCad expects exactly 1 UUID in fp.tstamp;
+        # the full space-separated path goes into fp.path.
+        if tstamp:
+            parts = tstamp.split()
+            fp.tstamp = parts[-1]           # last UUID = component's own
+            fp.path = "/" + "/".join(parts)  # full hierarchy path
+        else:
+            fp.tstamp = uid()
+            fp.path = ""
 
         # If placing on back side, mirror pad and graphic layers from F -> B
         if layer == "B.Cu":

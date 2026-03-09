@@ -192,6 +192,14 @@ python scripts/verify_pcb.py --post-routing  # Stricter DRC on ram_routed.kicad_
 - Footprint courtyard layer is `F.CrtYd` (not `F.Courtyard`) in kiutils layer names
 - `Net` is from `kiutils.items.common`, not `kiutils.items.brditems`
 
+**Multi-UUID tstamp in netlist (CRITICAL — breaks GUI file loading):**
+
+- Multi-unit symbols (e.g., 74LVC2G00 dual NAND) produce space-separated UUIDs in the netlist `<tstamps>` field (hierarchy path)
+- KiCad's PCB `(tstamp ...)` field expects EXACTLY 1 UUID — multiple UUIDs cause "expecting ')'" parse error when opening in the GUI
+- `kicad-cli pcb drc` uses a different parser that tolerates this, so DRC passes even though the GUI can't load the file — verify_pcb.py won't catch this bug!
+- Fix: split tstamp on spaces, use only the LAST UUID (component's own) for `fp.tstamp`, full path for `fp.path`
+- Implemented in `PCBBuilder.place_component()` in `pcb.py`
+
 **Pad orientation in rotated footprints (CRITICAL for lib_footprint_mismatch DRC):**
 
 - KiCad stores pad orientation as `pad_local_angle + parent_rotation` (historical convention)

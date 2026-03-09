@@ -237,15 +237,21 @@ FOOTPRINT_MAP = {
 # DSBGA pin number to BGA ball name mapping (TI convention)
 DSBGA5_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "A2", "4": "C1", "5": "C2"}
 DSBGA6_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "A2", "4": "C1", "5": "C2", "6": "B2"}
+DSBGA8_PIN_TO_BALL = {
+    "1": "A1", "2": "A2", "3": "B1", "4": "B2",
+    "5": "C1", "6": "C2", "7": "D1", "8": "D2",
+}
 
 # Reverse: ball name to pin number
 DSBGA5_BALL_TO_PIN = {v: k for k, v in DSBGA5_PIN_TO_BALL.items()}
 DSBGA6_BALL_TO_PIN = {v: k for k, v in DSBGA6_PIN_TO_BALL.items()}
+DSBGA8_BALL_TO_PIN = {v: k for k, v in DSBGA8_PIN_TO_BALL.items()}
 
 # KiCad footprint library paths
 KICAD_FP_DIR = r"C:\Program Files\KiCad\9.0\share\kicad\footprints"
 STOCK_DSBGA5_FP = "Package_BGA.pretty/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.kicad_mod"
 STOCK_DSBGA6_FP = "Package_BGA.pretty/Texas_DSBGA-6_0.9x1.4mm_Layout2x3_P0.5mm.kicad_mod"
+STOCK_DSBGA8_FP = "Package_BGA.pretty/Texas_DSBGA-8_0.9x1.9mm_Layout2x4_P0.5mm.kicad_mod"
 
 
 def uid():
