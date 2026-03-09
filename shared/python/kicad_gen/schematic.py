@@ -21,7 +21,10 @@ from kiutils.items.common import (
 )
 
 from .common import GRID, SYMBOL_LIB_MAP, uid, snap
-from .symbols import get_lib_symbols, get_raw_lib_texts, get_pin_offsets
+from .symbols import (
+    get_lib_symbols, get_raw_lib_texts, get_pin_offsets,
+    _fallback_pin_offsets_unit,
+)
 
 
 class SchematicBuilder:
@@ -66,18 +69,26 @@ class SchematicBuilder:
     # -- place a component --
 
     def place_symbol(self, lib_name, x, y, ref_prefix="U", value=None,
-                     angle=0, mirror=None, extra_props=None):
+                     angle=0, mirror=None, extra_props=None,
+                     unit=1, ref_override=None):
         """Place a symbol instance in the schematic.
 
         Returns (reference_designator, pins_dict) where pins_dict maps
         pin_number -> (schematic_x, schematic_y).
 
-        Pin positions come from kicad-cli ERC probing (done once at startup),
-        so no manual Y-negation or rotation math is needed.
+        For multi-unit symbols (e.g. 74LVC2G00), use ``unit`` to select which
+        unit to place and ``ref_override`` to share a reference designator
+        across units of the same physical IC.
+
+        Pin positions come from kicad-cli ERC probing (done once at startup)
+        for single-unit symbols, or from library fallback for multi-unit.
         """
         x, y = snap(x), snap(y)
         self._ensure_lib_symbol(lib_name)
-        ref = self._next_ref(ref_prefix)
+        if ref_override is not None:
+            ref = ref_override
+        else:
+            ref = self._next_ref(ref_prefix)
         if value is None:
             value = lib_name
 
@@ -85,7 +96,7 @@ class SchematicBuilder:
         lib_prefix = SYMBOL_LIB_MAP.get(lib_name, "")
         sym.libId = f"{lib_prefix}:{lib_name}" if lib_prefix else lib_name
         sym.position = Position(X=x, Y=y, angle=angle)
-        sym.unit = 1
+        sym.unit = unit
         sym.inBom = True
         sym.onBoard = True
         sym.uuid = uid()
@@ -149,18 +160,15 @@ class SchematicBuilder:
         if mirror:
             sym.mirror = mirror
 
-        # Pin UUIDs -- required for KiCad 9 wire connectivity
+        # Pin positions — ERC-probed for single-unit, library fallback for multi-unit
         key = (lib_name, angle)
-        if key in self._pin_offsets:
-            sym.pins = {pin: uid() for pin in self._pin_offsets[key]}
+        if key in self._pin_offsets and unit == 1:
+            pin_offsets = self._pin_offsets[key]
         else:
-            # For power symbols etc., get pins from the library symbol units
-            all_syms = get_lib_symbols()
-            if lib_name in all_syms:
-                lib_sym = all_syms[lib_name]
-                for unit in lib_sym.units:
-                    for p in unit.pins:
-                        sym.pins[p.number] = uid()
+            pin_offsets = _fallback_pin_offsets_unit(lib_name, angle, unit)
+
+        # Pin UUIDs -- required for KiCad 9 wire connectivity
+        sym.pins = {pin: uid() for pin in pin_offsets}
 
         # Instance data
         sym.instances.append(SymbolProjectInstance(
@@ -168,18 +176,14 @@ class SchematicBuilder:
             paths=[SymbolProjectPath(
                 sheetInstancePath=f"/{self.sch.uuid}/",
                 reference=ref,
-                unit=1,
+                unit=unit,
             )]
         ))
 
         self.sch.schematicSymbols.append(sym)
 
-        # Look up pin positions from pre-discovered offsets
-        if key in self._pin_offsets:
-            pins = {pin: (snap(x + dx), snap(y + dy))
-                    for pin, (dx, dy) in self._pin_offsets[key].items()}
-        else:
-            pins = {}
+        pins = {pin: (snap(x + dx), snap(y + dy))
+                for pin, (dx, dy) in pin_offsets.items()}
         return ref, pins
 
     # -- power wiring helpers --

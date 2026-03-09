@@ -684,6 +684,9 @@ def check_component_overlap(data):
         bbox_a = sch_bboxes[i]
         for j in range(i + 1, len(non_power)):
             ref_b, lib_b, bx, by, _ab = non_power[j]
+            # Skip units of the same multi-unit symbol (they share a reference)
+            if ref_a == ref_b:
+                continue
             bbox_b = sch_bboxes[j]
 
             if bbox_a and bbox_b:

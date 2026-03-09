@@ -42,9 +42,10 @@ OUTPUT_DIR = os.path.join(BOARD_DIR, "verify_output")
 SCHEMATIC_FILES = [
     "ram.kicad_sch",
     "address_decoder.kicad_sch",
+    "column_select.kicad_sch",
     "control_logic.kicad_sch",
-    "write_clk_gen.kicad_sch",
-    "read_oe_gen.kicad_sch",
+    "write_en_gen.kicad_sch",
+    "read_en_gen.kicad_sch",
     "byte.kicad_sch",
 ]
 
@@ -170,43 +171,58 @@ def check_netlist():
     # -- Define expected connections --
     issues = []
 
-    # 1. SEL0-7: addr decoder -> write_clk_gen AND read_oe_gen
-    for i in range(8):
-        ad = f"Address Decoder:SEL{i}"
-        wc = f"Write Clk Gen:SEL{i}"
-        ro = f"Read OE Gen:SEL{i}"
-        if not on_same_net(ad, wc):
-            issues.append(f"  {ad} not connected to {wc}")
-        if not on_same_net(ad, ro):
-            issues.append(f"  {ad} not connected to {ro}")
+    # 1. ROW_SEL_0-3: addr decoder -> write_en_gen AND read_en_gen
+    for i in range(4):
+        ad = f"Address Decoder:ROW_SEL_{i}"
+        we = f"Write Enable Gen:ROW_SEL_{i}"
+        re = f"Read Enable Gen:ROW_SEL_{i}"
+        if not on_same_net(ad, we):
+            issues.append(f"  {ad} not connected to {we}")
+        if not on_same_net(ad, re):
+            issues.append(f"  {ad} not connected to {re}")
 
-    # 2. WRITE_ACTIVE: control logic -> write_clk_gen
+    # 2. WRITE_ACTIVE: control logic -> write_en_gen
     if not on_same_net("Control Logic:WRITE_ACTIVE",
-                       "Write Clk Gen:WRITE_ACTIVE"):
+                       "Write Enable Gen:WRITE_ACTIVE"):
         issues.append(
             "  Control Logic:WRITE_ACTIVE not connected to "
-            "Write Clk Gen:WRITE_ACTIVE")
+            "Write Enable Gen:WRITE_ACTIVE")
 
-    # 3. READ_EN: control logic -> read_oe_gen
-    if not on_same_net("Control Logic:READ_EN", "Read OE Gen:READ_EN"):
+    # 3. READ_EN: control logic -> read_en_gen
+    if not on_same_net("Control Logic:READ_EN", "Read Enable Gen:READ_EN"):
         issues.append(
-            "  Control Logic:READ_EN not connected to Read OE Gen:READ_EN")
+            "  Control Logic:READ_EN not connected to Read Enable Gen:READ_EN")
 
-    # 4. WRITE_CLK_i: write_clk_gen -> byte_i
-    for i in range(8):
-        wc = f"Write Clk Gen:WRITE_CLK_{i}"
-        by = f"Byte {i}:WRITE_CLK"
-        if not on_same_net(wc, by):
-            issues.append(f"  {wc} not connected to {by}")
+    # 4. WRITE_EN_ROW_i: write_en_gen -> both bytes in row i
+    for i in range(4):
+        we = f"Write Enable Gen:WRITE_EN_ROW_{i}"
+        by0 = f"Byte {i}:WRITE_EN_ROW"
+        by1 = f"Byte {4 + i}:WRITE_EN_ROW"
+        if not on_same_net(we, by0):
+            issues.append(f"  {we} not connected to {by0}")
+        if not on_same_net(we, by1):
+            issues.append(f"  {we} not connected to {by1}")
 
-    # 5. BUF_OE_i: read_oe_gen -> byte_i
-    for i in range(8):
-        ro = f"Read OE Gen:BUF_OE_{i}"
-        by = f"Byte {i}:BUF_OE"
-        if not on_same_net(ro, by):
-            issues.append(f"  {ro} not connected to {by}")
+    # 5. READ_EN_ROW_i: read_en_gen -> both bytes in row i
+    for i in range(4):
+        re = f"Read Enable Gen:READ_EN_ROW_{i}"
+        by0 = f"Byte {i}:READ_EN_ROW"
+        by1 = f"Byte {4 + i}:READ_EN_ROW"
+        if not on_same_net(re, by0):
+            issues.append(f"  {re} not connected to {by0}")
+        if not on_same_net(re, by1):
+            issues.append(f"  {re} not connected to {by1}")
 
-    # 6. D0-D7: all byte sheet D_i pins connected via labels
+    # 6. COL_SEL_0 -> bytes 0-3, COL_SEL_1 -> bytes 4-7 (via labels)
+    for col_j in range(2):
+        lbl = f"label:COL_SEL_{col_j}"
+        for row_i in range(4):
+            byte_idx = col_j * 4 + row_i
+            pin_id = f"Byte {byte_idx}:COL_SEL"
+            if not on_same_net(lbl, pin_id):
+                issues.append(f"  {pin_id} not on label COL_SEL_{col_j} net")
+
+    # 7. D0-D7: all byte sheet D_i pins connected via labels
     for bit in range(8):
         lbl = f"label:D{bit}"
         for byte_idx in range(8):
@@ -214,13 +230,16 @@ def check_netlist():
             if not on_same_net(lbl, pin_id):
                 issues.append(f"  {pin_id} not on label D{bit} net")
 
-    # 7. A0-A2: connector -> address decoder (via wires)
-    for i in range(3):
+    # 8. A0, A1 -> address decoder; A2 -> column select (via wires)
+    for i in range(2):
         ad = f"Address Decoder:A{i}"
         if not id_exists(ad):
             issues.append(f"  {ad} not found in any net")
+    cs_a2 = "Column Select:A2"
+    if not id_exists(cs_a2):
+        issues.append(f"  {cs_a2} not found in any net")
 
-    # 8. nCE/nOE/nWE: connector -> control logic (via wires)
+    # 9. nCE/nOE/nWE: connector -> control logic (via wires)
     for sig in ["nCE", "nOE", "nWE"]:
         cl = f"Control Logic:{sig}"
         if not id_exists(cl):
@@ -229,17 +248,15 @@ def check_netlist():
     # -- Check signal isolation (different signals not merged) --
     isolation_pairs = [
         ("Address Decoder:A0", "Address Decoder:A1"),
-        ("Address Decoder:A0", "Address Decoder:A2"),
-        ("Address Decoder:A1", "Address Decoder:A2"),
+        ("Column Select:A2", "Address Decoder:A0"),
         ("Control Logic:nCE", "Control Logic:nOE"),
         ("Control Logic:nCE", "Control Logic:nWE"),
         ("Control Logic:nOE", "Control Logic:nWE"),
-        ("Address Decoder:SEL0", "Address Decoder:SEL1"),
-        ("Address Decoder:SEL0", "Address Decoder:SEL7"),
-        ("Write Clk Gen:WRITE_CLK_0", "Write Clk Gen:WRITE_CLK_1"),
-        ("Write Clk Gen:WRITE_CLK_0", "Write Clk Gen:WRITE_CLK_7"),
-        ("Read OE Gen:BUF_OE_0", "Read OE Gen:BUF_OE_1"),
-        ("Read OE Gen:BUF_OE_0", "Read OE Gen:BUF_OE_7"),
+        ("Address Decoder:ROW_SEL_0", "Address Decoder:ROW_SEL_1"),
+        ("Address Decoder:ROW_SEL_0", "Address Decoder:ROW_SEL_3"),
+        ("Write Enable Gen:WRITE_EN_ROW_0", "Write Enable Gen:WRITE_EN_ROW_1"),
+        ("Read Enable Gen:READ_EN_ROW_0", "Read Enable Gen:READ_EN_ROW_1"),
+        ("label:COL_SEL_0", "label:COL_SEL_1"),
         ("label:D0", "Address Decoder:A0"),
         ("label:D0", "Control Logic:nCE"),
         ("Control Logic:WRITE_ACTIVE", "Control Logic:READ_EN"),

@@ -113,6 +113,7 @@ def load_lib_symbols():
         "74xGxx.kicad_sym": [
             "74LVC1G00", "74LVC1G04", "74LVC1G08",
             "74LVC1G11", "74LVC1G79", "74LVC1G125",
+            "74LVC2G00",
         ],
         "Device.kicad_sym": ["R_Small", "LED_Small", "C_Small"],
         "power.kicad_sym": ["VCC", "GND", "PWR_FLAG"],
@@ -344,6 +345,37 @@ def _fallback_pin_offsets(sym_name, angle):
             lx, ly = pin.position.X, pin.position.Y
             rad = math.radians(angle)
             # Library Y-up -> Schematic Y-down, then CW rotation
+            bx, by = lx, -ly
+            dx = round(math.cos(rad) * bx + math.sin(rad) * by, 2)
+            dy = round(-math.sin(rad) * bx + math.cos(rad) * by, 2)
+            pins[pin.number] = (dx, dy)
+    return pins
+
+
+def _fallback_pin_offsets_unit(sym_name, angle, unit):
+    """Get pin offsets from library for a specific unit of a (multi-unit) symbol.
+
+    Filters sub-symbols by unit number.  Unit 0 sub-symbols (common to all
+    units) are always included.  For single-unit symbols called with unit=1
+    this is equivalent to ``_fallback_pin_offsets()``.
+    """
+    lib_sym = get_lib_symbols()[sym_name]
+    pins = {}
+    for sub_sym in lib_sym.units:
+        # Parse unit number from sub-symbol name: {name}_{unit}_{variant}
+        suffix = sub_sym.libId
+        if "_" in suffix:
+            parts = suffix.rsplit("_", 2)
+            if len(parts) >= 3:
+                try:
+                    sub_unit = int(parts[-2])
+                except ValueError:
+                    continue
+                if sub_unit != unit and sub_unit != 0:
+                    continue
+        for pin in sub_sym.pins:
+            lx, ly = pin.position.X, pin.position.Y
+            rad = math.radians(angle)
             bx, by = lx, -ly
             dx = round(math.cos(rad) * bx + math.sin(rad) * by, 2)
             dy = round(-math.sin(rad) * bx + math.cos(rad) * by, 2)

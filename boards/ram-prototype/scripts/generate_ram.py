@@ -2,21 +2,26 @@
 """
 Generate hierarchical KiCad schematics for the 8-byte discrete RAM prototype.
 
-Circuit architecture:
-  - 3 address bits (A0-A2) -> 3-to-8 address decoder using inverters + 3-input ANDs
-  - 8 data bits (D0-D7), bidirectional data bus
-  - Active-low control: /CE, /OE, /WE (NES SRAM interface)
-  - 8 bytes x 8 bits = 64 D flip-flops (74LVC1G79)
-  - 64 tri-state buffers (74LVC1G125) for read-back
+Circuit architecture (row/column addressing):
+  - A0, A1 -> 2-to-4 row decoder -> ROW_SEL_0..3
+  - A2 -> column select -> COL_SEL_0, COL_SEL_1
+  - Active-low control: /CE, /OE, /WE -> WRITE_ACTIVE, READ_EN
+  - Row enables: WRITE_EN_ROW_i = AND(WRITE_ACTIVE, ROW_SEL_i)
+                 READ_EN_ROW_i  = AND(READ_EN, ROW_SEL_i)
+  - Per-byte local NAND gating:
+      WRITE_CLK = NAND(WRITE_EN_ROW, COL_SEL)
+      BUF_OE    = NAND(READ_EN_ROW, COL_SEL)
+  - 8 bytes x 8 bits = 64 D flip-flops (74LVC1G79) + 64 tri-state buffers (74LVC1G125)
   - LED on EVERY gate output and stored bit
 
 Produces:
   ram.kicad_sch              -- root sheet with connector + bus LEDs + hierarchy refs
-  address_decoder.kicad_sch  -- 3 inverters + 8 three-input ANDs
+  address_decoder.kicad_sch  -- 2 inverters + 4 two-input ANDs (2-to-4 row decoder)
+  column_select.kicad_sch    -- 1 inverter (A2 -> COL_SEL_0/COL_SEL_1)
   control_logic.kicad_sch    -- /CE,/OE,/WE inversion + WRITE_ACTIVE, READ_EN logic
-  write_clk_gen.kicad_sch    -- 8 NANDs generating WRITE_CLK_0..7
-  read_oe_gen.kicad_sch      -- 8 NANDs generating BUF_OE_0..7
-  byte.kicad_sch             -- 8 DFFs + 8 tri-state buffers (shared by all 8 byte instances)
+  write_en_gen.kicad_sch     -- 4 ANDs generating WRITE_EN_ROW_0..3
+  read_en_gen.kicad_sch      -- 4 ANDs generating READ_EN_ROW_0..3
+  byte.kicad_sch             -- 1 dual NAND (74LVC2G00) + 8 DFFs + 8 BUFs (shared by all 8 byte instances)
 """
 
 import os
@@ -54,20 +59,15 @@ LED_GAP_X = 3 * GRID         # gap from output pin to LED chain center
 
 def generate_address_decoder():
     """
-    Address decoder: 3-to-8 using inverters and 3-input ANDs.
+    Address decoder: 2-to-4 row decoder using inverters and 2-input ANDs.
 
-    Inputs:  A0, A1, A2
-    Outputs: SEL0..SEL7
+    Inputs:  A0, A1 (only 2 bits — A2 goes to column select sheet)
+    Outputs: ROW_SEL_0..ROW_SEL_3
 
-    SEL0 = /A2 & /A1 & /A0
-    SEL1 = /A2 & /A1 &  A0
-    ...
-    SEL7 =  A2 &  A1 &  A0
-
-    Wiring approach:
-      - A0/A1/A2: hier label -> wire -> vertical trunk, branches to inverter + AND inputs
-      - A0_INV/A1_INV/A2_INV: inverter output -> LED T-junction -> vertical trunk -> AND inputs
-      - SEL0-SEL7: AND output -> LED T-junction -> wire -> hier label
+    ROW_SEL_0 = /A1 & /A0
+    ROW_SEL_1 = /A1 &  A0
+    ROW_SEL_2 =  A1 & /A0
+    ROW_SEL_3 =  A1 &  A0
     """
     b = SchematicBuilder(title="Address Decoder", page_size="A3",
                          project_name=PROJECT_NAME)
@@ -77,48 +77,48 @@ def generate_address_decoder():
     and_x = base_x + 42 * GRID
     hl_out_x = and_x + 22 * GRID
 
-    # X positions for 6 vertical trunks (A0, A1, A2, A0_INV, A1_INV, A2_INV)
-    inv_in_x = inv_x - 15.24  # 55.88: inverter input pin X (74LVC1G04 pin 2)
-    addr_trunk_x = [snap(inv_in_x - (1.5 + i) * GRID) for i in range(3)]
-    inv_trunk_x = [base_x + 31 * GRID + i * 2 * GRID for i in range(3)]
+    # X positions for 4 vertical trunks (A0, A1, A0_INV, A1_INV)
+    inv_in_x = inv_x - 15.24  # inverter input pin X (74LVC1G04 pin 2)
+    addr_trunk_x = [snap(inv_in_x - (1.5 + i) * GRID) for i in range(2)]
+    inv_trunk_x = [base_x + 31 * GRID + i * 2 * GRID for i in range(2)]
 
-    # The AND gates span 8 rows (SEL0-SEL7)
-    and_top_y = base_y
-    and_bot_y = base_y + 7 * SYM_SPACING_Y
-
-    # -- Hierarchical labels for A0-A2, wired to trunk tops --
-    for i in range(3):
+    # -- Hierarchical labels for A0-A1, wired to trunk tops --
+    for i in range(2):
         trunk_top_y = snap(base_y - (4 - i) * GRID)
         b.add_hier_label(f"A{i}", base_x, trunk_top_y, shape="input", justify="right")
         b.add_wire(base_x, trunk_top_y, addr_trunk_x[i], trunk_top_y)
 
-    # -- Three inverters for complemented address bits --
+    # -- Two inverters for complemented address bits --
     inv_in_pins = []
     inv_out_pins = []
-    for i in range(3):
+    for i in range(2):
         y = base_y + i * SYM_SPACING_Y + 5 * GRID
         _, pins = b.place_symbol("74LVC1G04", inv_x, y)
         b.connect_power(pins)
         inv_in_pins.append(pins["2"])
         inv_out_pins.append(pins["4"])
 
-    # Wire address trunks
+    # Decode table: (A1, A0) for each ROW_SEL
     decode_table = [
-        (0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1),
-        (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1),
+        (0, 0),  # ROW_SEL_0 = /A1 & /A0
+        (0, 1),  # ROW_SEL_1 = /A1 &  A0
+        (1, 0),  # ROW_SEL_2 =  A1 & /A0
+        (1, 1),  # ROW_SEL_3 =  A1 &  A0
     ]
-    addr_pin_map = {0: "3", 1: "1", 2: "6"}
 
-    # Place 8 AND gates first to get pin positions
+    # Place 4 AND gates (2-input) to get pin positions
     and_gate_pins = []
-    for sel_idx in range(8):
+    for sel_idx in range(4):
         y = base_y + sel_idx * SYM_SPACING_Y
-        _, pins = b.place_symbol("74LVC1G11", and_x, y)
-        b.connect_power(pins, gnd_pin="2")
+        _, pins = b.place_symbol("74LVC1G08", and_x, y)
+        b.connect_power(pins)
         and_gate_pins.append(pins)
 
-    # -- Wire each address bit trunk (A0, A1, A2) --
-    for addr_i in range(3):
+    # AND pin mapping: A0 -> pin "1", A1 -> pin "2"
+    addr_pin_map = {0: "1", 1: "2"}
+
+    # -- Wire each address bit trunk (A0, A1) --
+    for addr_i in range(2):
         trunk_x = addr_trunk_x[addr_i]
         trunk_top_y = snap(base_y - (4 - addr_i) * GRID)
         inv_in = inv_in_pins[addr_i]
@@ -127,7 +127,7 @@ def generate_address_decoder():
         trunk_ys = [trunk_top_y, inv_in[1]]
         branch_targets = [(inv_in[0], inv_in[1])]
         for sel_idx, bits in enumerate(decode_table):
-            if bits[2 - addr_i] == 1:
+            if bits[1 - addr_i] == 1:  # bits = (A1, A0), index 0=A1, 1=A0
                 target = and_gate_pins[sel_idx][pin_num]
                 trunk_ys.append(target[1])
                 branch_targets.append((target[0], target[1]))
@@ -137,8 +137,8 @@ def generate_address_decoder():
         for tx, ty in branch_targets:
             b.add_wire(trunk_x, ty, tx, ty)
 
-    # -- Wire each inverted bit trunk (A0_INV, A1_INV, A2_INV) --
-    for addr_i in range(3):
+    # -- Wire each inverted bit trunk (A0_INV, A1_INV) --
+    for addr_i in range(2):
         trunk_x = inv_trunk_x[addr_i]
         out_pin = inv_out_pins[addr_i]
         pin_num = addr_pin_map[addr_i]
@@ -146,12 +146,12 @@ def generate_address_decoder():
         led_jct_x = out_pin[0] + 2 * GRID
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], trunk_x, out_pin[1])
-        b.place_led_below(led_jct_x, out_pin[1], drop=4 * GRID)
+        b.place_led_below(led_jct_x, out_pin[1])  # default 3*GRID drop
 
         branch_targets = []
         trunk_ys = [out_pin[1]]
         for sel_idx, bits in enumerate(decode_table):
-            if bits[2 - addr_i] == 0:
+            if bits[1 - addr_i] == 0:
                 target = and_gate_pins[sel_idx][pin_num]
                 branch_targets.append((target[0], target[1]))
                 trunk_ys.append(target[1])
@@ -161,8 +161,8 @@ def generate_address_decoder():
             for tx, ty in branch_targets:
                 b.add_wire(trunk_x, ty, tx, ty)
 
-    # -- SEL outputs: AND output -> LED T-junction -> wire -> hier label --
-    for sel_idx in range(8):
+    # -- ROW_SEL outputs: AND output -> LED T-junction -> wire -> hier label --
+    for sel_idx in range(4):
         pins = and_gate_pins[sel_idx]
         out_pin = pins["4"]
 
@@ -170,7 +170,73 @@ def generate_address_decoder():
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
         b.place_led_below(led_jct_x, out_pin[1])
-        b.add_hier_label(f"SEL{sel_idx}", hl_out_x, out_pin[1], shape="output", justify="left")
+        b.add_hier_label(f"ROW_SEL_{sel_idx}", hl_out_x, out_pin[1],
+                         shape="output", justify="left")
+
+    return b
+
+
+def generate_column_select():
+    """
+    Column select: A2 -> two inverters -> COL_SEL_0, COL_SEL_1.
+
+    Inputs:  A2
+    Outputs: COL_SEL_0 = !A2  (column 0 selected when A2=0)
+             COL_SEL_1 = !!A2 (column 1 selected when A2=1, via double inversion)
+
+    Uses double inverter for COL_SEL_1 to create a clean separate net
+    (avoids ERC multiple_net_names warning) and provides an LED on each output.
+    """
+    b = SchematicBuilder(title="Column Select", page_size="A3",
+                         project_name=PROJECT_NAME)
+    base_x, base_y = 25.4, 30.48
+
+    inv1_x = base_x + 18 * GRID
+    inv2_x = inv1_x + 25 * GRID
+    hl_out_x = inv2_x + 22 * GRID
+
+    # -- A2 input --
+    a2_hier_y = base_y
+    b.add_hier_label("A2", base_x, a2_hier_y, shape="input", justify="right")
+
+    # -- INV1: COL_SEL_0 = !A2 --
+    _, inv1_pins = b.place_symbol("74LVC1G04", inv1_x, base_y)
+    b.connect_power(inv1_pins)
+    inv1_in = inv1_pins["2"]
+    inv1_out = inv1_pins["4"]
+
+    # Wire A2 to INV1 input
+    b.add_wire(base_x, a2_hier_y, inv1_in[0], inv1_in[1])
+
+    # INV1 output -> LED -> COL_SEL_0 label + wire to INV2
+    inv1_led_x = snap(inv1_out[0] + 2 * GRID)
+    b.add_wire(inv1_out[0], inv1_out[1], inv1_led_x, inv1_out[1])
+    b.add_wire(inv1_led_x, inv1_out[1], hl_out_x, inv1_out[1])
+    b.place_led_below(inv1_led_x, inv1_out[1])
+    b.add_hier_label("COL_SEL_0", hl_out_x, inv1_out[1],
+                     shape="output", justify="left")
+
+    # -- INV2: COL_SEL_1 = !!A2 (double inversion = A2) --
+    inv2_y = snap(base_y + SYM_SPACING_Y)
+    _, inv2_pins = b.place_symbol("74LVC1G04", inv2_x, inv2_y)
+    b.connect_power(inv2_pins)
+    inv2_in = inv2_pins["2"]
+    inv2_out = inv2_pins["4"]
+
+    # Wire COL_SEL_0 signal to INV2 input (branch from below INV1 LED)
+    # place_led_below already wires from (inv1_led_x, inv1_out_y) down to LED.
+    # Continue from LED junction Y down to INV2 input Y, avoiding overlap.
+    led_drop_y = snap(inv1_out[1] + 3 * GRID)  # LED drop = 3*GRID (default)
+    b.add_wire(inv1_led_x, led_drop_y, inv1_led_x, inv2_in[1])
+    b.add_wire(inv1_led_x, inv2_in[1], inv2_in[0], inv2_in[1])
+
+    # INV2 output -> LED -> COL_SEL_1
+    inv2_led_x = snap(inv2_out[0] + 2 * GRID)
+    b.add_wire(inv2_out[0], inv2_out[1], inv2_led_x, inv2_out[1])
+    b.add_wire(inv2_led_x, inv2_out[1], hl_out_x, inv2_out[1])
+    b.place_led_below(inv2_led_x, inv2_out[1])
+    b.add_hier_label("COL_SEL_1", hl_out_x, inv2_out[1],
+                     shape="output", justify="left")
 
     return b
 
@@ -314,97 +380,186 @@ def generate_control_logic():
     return b
 
 
-def _generate_nand_bank(title, enable_signal, output_prefix):
-    """Shared generator for write_clk_gen and read_oe_gen (8 NANDs each)."""
+def _generate_row_enable_bank(title, enable_signal, output_prefix):
+    """Shared generator for write_en_gen and read_en_gen (4 ANDs each).
+
+    Generates: OUTPUT_i = AND(enable_signal, ROW_SEL_i) for i in 0..3.
+    """
     b = SchematicBuilder(title=title, page_size="A3",
                          project_name=PROJECT_NAME)
     base_x, base_y = 25.4, 30.48
 
-    nand_x = base_x + 18 * GRID
-    hl_out_x = nand_x + 22 * GRID
+    and_x = base_x + 18 * GRID
+    hl_out_x = and_x + 22 * GRID
     enable_trunk_x = base_x + 10 * GRID
 
     enable_hier_y = snap(base_y - 2 * GRID)
-    b.add_hier_label(enable_signal, base_x, enable_hier_y, shape="input", justify="right")
+    b.add_hier_label(enable_signal, base_x, enable_hier_y,
+                     shape="input", justify="right")
     b.add_wire(base_x, enable_hier_y, enable_trunk_x, enable_hier_y)
 
-    nand_a_pins = []
-    nand_b_pins = []
-    nand_out_pins = []
-    for i in range(8):
+    and_a_pins = []
+    and_b_pins = []
+    and_out_pins = []
+    for i in range(4):
         y = base_y + i * SYM_SPACING_Y
-        _, pins = b.place_symbol("74LVC1G00", nand_x, y)
+        _, pins = b.place_symbol("74LVC1G08", and_x, y)
         b.connect_power(pins)
-        nand_a_pins.append(pins["1"])
-        nand_b_pins.append(pins["2"])
-        nand_out_pins.append(pins["4"])
+        and_a_pins.append(pins["1"])
+        and_b_pins.append(pins["2"])
+        and_out_pins.append(pins["4"])
 
-    trunk_ys = [enable_hier_y] + [nand_a_pins[i][1] for i in range(8)]
+    # Enable signal trunk to all AND pin A
+    trunk_ys = [enable_hier_y] + [and_a_pins[i][1] for i in range(4)]
     b.add_segmented_trunk(enable_trunk_x, trunk_ys)
-    for i in range(8):
-        a_pin = nand_a_pins[i]
+    for i in range(4):
+        a_pin = and_a_pins[i]
         b.add_wire(enable_trunk_x, a_pin[1], a_pin[0], a_pin[1])
 
-    for i in range(8):
-        b_pin = nand_b_pins[i]
-        b.add_hier_label(f"SEL{i}", base_x, b_pin[1], shape="input", justify="right")
+    # ROW_SEL_i inputs to AND pin B
+    for i in range(4):
+        b_pin = and_b_pins[i]
+        b.add_hier_label(f"ROW_SEL_{i}", base_x, b_pin[1],
+                         shape="input", justify="right")
         b.add_wire(base_x, b_pin[1], b_pin[0], b_pin[1])
 
-    for i in range(8):
-        out_pin = nand_out_pins[i]
+    # Outputs with LEDs
+    for i in range(4):
+        out_pin = and_out_pins[i]
         out_net = f"{output_prefix}{i}"
         led_jct_x = snap(out_pin[0] + 2 * GRID)
         b.add_wire(out_pin[0], out_pin[1], led_jct_x, out_pin[1])
         b.add_wire(led_jct_x, out_pin[1], hl_out_x, out_pin[1])
         b.place_led_below(led_jct_x, out_pin[1])
-        b.add_hier_label(out_net, hl_out_x, out_pin[1], shape="output", justify="left")
+        b.add_hier_label(out_net, hl_out_x, out_pin[1],
+                         shape="output", justify="left")
 
     return b
 
 
-def generate_write_clk_gen():
-    """Write clock generation: 8 NANDs. WRITE_CLK_n = NAND(WRITE_ACTIVE, SELn)"""
-    return _generate_nand_bank("Write Clock Generator", "WRITE_ACTIVE", "WRITE_CLK_")
+def generate_write_en_gen():
+    """Write enable gen: 4 ANDs. WRITE_EN_ROW_i = AND(WRITE_ACTIVE, ROW_SEL_i)"""
+    return _generate_row_enable_bank("Write Enable Generator",
+                                     "WRITE_ACTIVE", "WRITE_EN_ROW_")
 
 
-def generate_read_oe_gen():
-    """Read OE generation: 8 NANDs. BUF_OE_n = NAND(READ_EN, SELn)"""
-    return _generate_nand_bank("Read OE Generator", "READ_EN", "BUF_OE_")
+def generate_read_en_gen():
+    """Read enable gen: 4 ANDs. READ_EN_ROW_i = AND(READ_EN, ROW_SEL_i)"""
+    return _generate_row_enable_bank("Read Enable Generator",
+                                     "READ_EN", "READ_EN_ROW_")
 
 
 def generate_byte_sheet():
     """
-    Generate one memory byte (8 bits) -- reused for all 8 bytes.
+    Generate one memory byte (8 bits) with local NAND gating -- reused for all 8 bytes.
+
+    Inputs:  WRITE_EN_ROW, READ_EN_ROW, COL_SEL, D0-D7
+    Internal: WRITE_CLK_LOCAL = NAND(WRITE_EN_ROW, COL_SEL) -> DFF clocks
+              BUF_OE_LOCAL   = NAND(READ_EN_ROW, COL_SEL)  -> buffer OE
     """
-    b = SchematicBuilder(title="Memory Byte", page_size="A3",
+    b = SchematicBuilder(title="Memory Byte", page_size="A2",
                          project_name=PROJECT_NAME)
     base_x, base_y = 25.4, 30.48
+
+    # -- Local NAND gating section at top --
+    nand_x = base_x + 18 * GRID
+
+    # Hierarchy input labels
+    wen_hier_y = snap(base_y)
+    ren_hier_y = snap(base_y + SYM_SPACING_Y)
+    col_hier_y = snap(base_y + 2 * SYM_SPACING_Y)
+
+    b.add_hier_label("WRITE_EN_ROW", base_x, wen_hier_y,
+                     shape="input", justify="right")
+    b.add_hier_label("READ_EN_ROW", base_x, ren_hier_y,
+                     shape="input", justify="right")
+    b.add_hier_label("COL_SEL", base_x, col_hier_y,
+                     shape="input", justify="right")
+
+    # NAND1: WRITE_CLK_LOCAL = NAND(WRITE_EN_ROW, COL_SEL) — unit 1 of 74LVC2G00
+    nand1_y = snap(base_y + 4 * GRID)
+    nand_ref, nand1_pins = b.place_symbol("74LVC2G00", nand_x, nand1_y)
+    nand1_a = nand1_pins["1"]  # WRITE_EN_ROW
+    nand1_b = nand1_pins["2"]  # COL_SEL
+    nand1_out = nand1_pins["7"]
+
+    # NAND2: BUF_OE_LOCAL = NAND(READ_EN_ROW, COL_SEL) — unit 2 of 74LVC2G00
+    nand2_y = snap(nand1_y + SYM_SPACING_Y)
+    _, nand2_pins = b.place_symbol("74LVC2G00", nand_x, nand2_y,
+                                   unit=2, ref_override=nand_ref)
+    nand2_a = nand2_pins["5"]  # READ_EN_ROW
+    nand2_b = nand2_pins["6"]  # COL_SEL
+    nand2_out = nand2_pins["3"]
+
+    # Power unit (unit 3) — placed between the two NAND gates
+    nand_pwr_y = snap(nand1_y + SYM_SPACING_Y / 2)
+    _, nand_pwr_pins = b.place_symbol("74LVC2G00", nand_x, nand_pwr_y,
+                                      unit=3, ref_override=nand_ref)
+    b.connect_power(nand_pwr_pins, vcc_pin="8", gnd_pin="4")
+
+    # Wire WRITE_EN_ROW -> NAND1 pin A
+    b.add_wire(base_x, wen_hier_y, nand1_a[0], wen_hier_y)
+    if abs(wen_hier_y - nand1_a[1]) > 0.01:
+        b.add_wire(nand1_a[0], wen_hier_y, nand1_a[0], nand1_a[1])
+
+    # Wire READ_EN_ROW -> NAND2 pin A
+    b.add_wire(base_x, ren_hier_y, nand2_a[0], ren_hier_y)
+    if abs(ren_hier_y - nand2_a[1]) > 0.01:
+        b.add_wire(nand2_a[0], ren_hier_y, nand2_a[0], nand2_a[1])
+
+    # Wire COL_SEL -> both NAND pin B via trunk
+    col_trunk_x = snap(nand1_b[0] - 3 * GRID)
+    b.add_wire(base_x, col_hier_y, col_trunk_x, col_hier_y)
+    b.add_segmented_trunk(col_trunk_x,
+                          [col_hier_y, nand1_b[1], nand2_b[1]])
+    b.add_wire(col_trunk_x, nand1_b[1], nand1_b[0], nand1_b[1])
+    b.add_wire(col_trunk_x, nand2_b[1], nand2_b[0], nand2_b[1])
+
+    # NAND1 output -> LED -> route to WRITE_CLK trunk
+    nand1_led_x = snap(nand1_out[0] + 2 * GRID)
+    nand1_route_x = snap(nand1_led_x + 8 * GRID)  # offset right to avoid LED overlap
+    b.add_wire(nand1_out[0], nand1_out[1], nand1_led_x, nand1_out[1])
+    b.add_wire(nand1_led_x, nand1_out[1], nand1_route_x, nand1_out[1])
+    b.place_led_below(nand1_led_x, nand1_out[1])
+
+    # NAND2 output -> LED -> route to BUF_OE trunk
+    nand2_led_x = snap(nand2_out[0] + 2 * GRID)
+    nand2_route_x = snap(nand2_led_x + 10 * GRID)  # different X from NAND1
+    b.add_wire(nand2_out[0], nand2_out[1], nand2_led_x, nand2_out[1])
+    b.add_wire(nand2_led_x, nand2_out[1], nand2_route_x, nand2_out[1])
+    b.place_led_below(nand2_led_x, nand2_out[1])
+
+    # -- 8-bit DFF + buffer array (shifted down to make room for NANDs) --
+    bit_base_y = snap(nand2_y + 3 * SYM_SPACING_Y)
 
     dff_x = base_x + 18 * GRID
     buf_x = base_x + 52 * GRID
     wclk_trunk_x = base_x + 10 * GRID
     boe_trunk_x = buf_x - 8 * GRID
 
-    wclk_hier_y = snap(base_y - 4 * GRID)
-    b.add_hier_label("WRITE_CLK", base_x, wclk_hier_y, shape="input", justify="right")
-    b.add_wire(base_x, wclk_hier_y, wclk_trunk_x, wclk_hier_y)
-
-    boe_hier_y = snap(base_y - 6 * GRID)
-    b.add_hier_label("BUF_OE", base_x, boe_hier_y, shape="input", justify="right")
-    b.add_wire(base_x, boe_hier_y, boe_trunk_x, boe_hier_y)
+    # Route NAND outputs: right X → down to well above DFFs → left to trunk
+    nand_turn_y = snap(bit_base_y - 6 * GRID)  # clear of DFF bboxes
+    nand2_turn_y = snap(nand_turn_y + GRID)
+    # NAND1 -> WRITE_CLK trunk
+    b.add_wire(nand1_route_x, nand1_out[1], nand1_route_x, nand_turn_y)
+    b.add_wire(nand1_route_x, nand_turn_y, wclk_trunk_x, nand_turn_y)
+    # NAND2 -> BUF_OE trunk
+    b.add_wire(nand2_route_x, nand2_out[1], nand2_route_x, nand2_turn_y)
+    b.add_wire(nand2_route_x, nand2_turn_y, boe_trunk_x, nand2_turn_y)
 
     clk_pin_positions = []
     oe_pin_positions = []
 
     for bit in range(8):
-        y = base_y + bit * DFF_SPACING_Y
+        y = bit_base_y + bit * DFF_SPACING_Y
 
         _, dff_pins = b.place_symbol("74LVC1G79", dff_x, y)
         b.connect_power(dff_pins)
 
         d_pin = dff_pins["1"]
-        hl_y = base_y + bit * DFF_SPACING_Y
-        b.add_hier_label(f"D{bit}", base_x, hl_y, shape="bidirectional", justify="right")
+        hl_y = bit_base_y + bit * DFF_SPACING_Y
+        b.add_hier_label(f"D{bit}", base_x, hl_y,
+                         shape="bidirectional", justify="right")
         if snap(hl_y) != snap(d_pin[1]):
             b.add_wire(base_x, hl_y, base_x, d_pin[1])
         b.add_wire(base_x, d_pin[1], d_pin[0], d_pin[1])
@@ -445,12 +600,14 @@ def generate_byte_sheet():
         y_pin = buf_pins["4"]
         b.add_label(f"D{bit}", *y_pin, justify="right")
 
+    # WRITE_CLK trunk: from turn point down to all DFF CLK pins
     clk_ys = [p[1] for p in clk_pin_positions]
-    wclk_all_ys = sorted([wclk_hier_y] + clk_ys)
+    wclk_all_ys = sorted([nand_turn_y] + clk_ys)
     b.add_segmented_trunk(wclk_trunk_x, wclk_all_ys)
 
+    # BUF_OE trunk: from turn point down to all buffer OE pins
     oe_ys = [p[1] for p in oe_pin_positions]
-    boe_all_ys = sorted([boe_hier_y] + oe_ys)
+    boe_all_ys = sorted([nand2_turn_y] + oe_ys)
     b.add_segmented_trunk(boe_trunk_x, boe_all_ys)
 
     return b
@@ -463,6 +620,13 @@ def generate_byte_sheet():
 def generate_root_sheet():
     """
     Root sheet: connector, bus indicator LEDs, and hierarchical sheet references.
+
+    New row/column addressing architecture:
+      - Address Decoder: A0, A1 → ROW_SEL_0..3
+      - Column Select: A2 → COL_SEL_0, COL_SEL_1
+      - Write Enable Gen: WRITE_ACTIVE, ROW_SEL_0..3 → WRITE_EN_ROW_0..3
+      - Read Enable Gen: READ_EN, ROW_SEL_0..3 → READ_EN_ROW_0..3
+      - Bytes: WRITE_EN_ROW, READ_EN_ROW, COL_SEL, D0-D7
     """
     b = SchematicBuilder(title="8-Byte Discrete RAM", page_size="A2",
                          project_name=PROJECT_NAME)
@@ -474,7 +638,9 @@ def generate_root_sheet():
     def _sheet_height(num_pins):
         return snap(num_pins * 2.54 + 5.08)
 
-    byte_h_pre = _sheet_height(10)
+    # Pre-compute byte block height to set up layout
+    byte_pin_count = 11  # WRITE_EN_ROW, READ_EN_ROW, COL_SEL, D0-D7
+    byte_h_pre = _sheet_height(byte_pin_count)
     sheet_bottom_y = snap(base_y + 3 * (byte_h_pre + sheet_gap) + byte_h_pre)
     ensemble_center_y = snap((base_y + sheet_bottom_y) / 2)
 
@@ -543,10 +709,11 @@ def generate_root_sheet():
         return pin_positions
 
     yellow_fill = ColorRGBA(R=255, G=255, B=225, A=255, precision=4)
+    blue_fill = ColorRGBA(R=225, G=235, B=255, A=255, precision=4)
     green_fill = ColorRGBA(R=225, G=255, B=225, A=255, precision=4)
 
     # ================================================================
-    # 2-Column layout positions
+    # Layout positions
     # ================================================================
     col1_x = snap(base_x + 30 * GRID)
     col1_w = snap(28 * GRID)
@@ -560,64 +727,80 @@ def generate_root_sheet():
     byte_col2_x = snap(byte_col1_x + byte_w + byte_inter_gap)
 
     # ================================================================
-    # Place all sheet blocks
+    # Place sheet blocks — Column 1: Address Decoder, Column Select, Control Logic
     # ================================================================
 
-    addr_left_defs = [("A0", "input"), ("A1", "input"), ("A2", "input")]
-    addr_right_defs = [(f"SEL{i}", "output") for i in range(8)]
+    # Address Decoder: A0, A1 → ROW_SEL_0..3
+    addr_left_defs = [("A0", "input"), ("A1", "input")]
+    addr_right_defs = [(f"ROW_SEL_{i}", "output") for i in range(4)]
     addr_pin_defs = addr_left_defs + addr_right_defs
-    addr_right_names = {f"SEL{i}" for i in range(8)}
-    addr_num_left = len(addr_left_defs)
-    addr_num_right = len(addr_right_defs)
-    addr_h = _sheet_height(max(addr_num_left, addr_num_right))
+    addr_right_names = {f"ROW_SEL_{i}" for i in range(4)}
+    addr_h = _sheet_height(max(len(addr_left_defs), len(addr_right_defs)))
     addr_sy = base_y
     addr_pp = _add_sheet_block("Address Decoder", "address_decoder.kicad_sch",
                                addr_pin_defs, col1_x, addr_sy,
                                col1_w, addr_h, yellow_fill,
                                right_pins=addr_right_names)
 
+    # Column Select: A2 → COL_SEL_0, COL_SEL_1
+    colsel_left_defs = [("A2", "input")]
+    colsel_right_defs = [("COL_SEL_0", "output"), ("COL_SEL_1", "output")]
+    colsel_pin_defs = colsel_left_defs + colsel_right_defs
+    colsel_right_names = {"COL_SEL_0", "COL_SEL_1"}
+    colsel_h = _sheet_height(max(len(colsel_left_defs), len(colsel_right_defs)))
+    colsel_sy = snap(addr_sy + addr_h + sheet_gap)
+    colsel_pp = _add_sheet_block("Column Select", "column_select.kicad_sch",
+                                 colsel_pin_defs, col1_x, colsel_sy,
+                                 col1_w, colsel_h, blue_fill,
+                                 right_pins=colsel_right_names)
+
+    # Control Logic: nCE, nOE, nWE → WRITE_ACTIVE, READ_EN (unchanged)
     ctrl_left_defs = [("nCE", "input"), ("nOE", "input"), ("nWE", "input")]
     ctrl_right_defs = [("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
     ctrl_pin_defs = ctrl_left_defs + ctrl_right_defs
     ctrl_right_names = {"WRITE_ACTIVE", "READ_EN"}
-    ctrl_num_left = len(ctrl_left_defs)
-    ctrl_num_right = len(ctrl_right_defs)
-    ctrl_h = _sheet_height(max(ctrl_num_left, ctrl_num_right))
-    ctrl_sy = snap(addr_sy + addr_h + sheet_gap)
+    ctrl_h = _sheet_height(max(len(ctrl_left_defs), len(ctrl_right_defs)))
+    ctrl_sy = snap(colsel_sy + colsel_h + sheet_gap)
     ctrl_pp = _add_sheet_block("Control Logic", "control_logic.kicad_sch",
                                ctrl_pin_defs, col1_x, ctrl_sy,
                                col1_w, ctrl_h, yellow_fill,
                                right_pins=ctrl_right_names)
 
-    wclk_left_defs = [("WRITE_ACTIVE", "input")]
-    wclk_left_defs += [(f"SEL{i}", "input") for i in range(8)]
-    wclk_right_defs = [(f"WRITE_CLK_{i}", "output") for i in range(8)]
-    wclk_pin_defs = wclk_left_defs + wclk_right_defs
-    wclk_right_names = {f"WRITE_CLK_{i}" for i in range(8)}
-    wclk_num_left = len(wclk_left_defs)
-    wclk_num_right = len(wclk_right_defs)
-    wclk_h = _sheet_height(max(wclk_num_left, wclk_num_right))
-    wclk_sy = base_y
-    wclk_pp = _add_sheet_block("Write Clk Gen", "write_clk_gen.kicad_sch",
-                               wclk_pin_defs, col2_x, wclk_sy,
-                               col2_w, wclk_h, yellow_fill,
-                               right_pins=wclk_right_names)
+    # ================================================================
+    # Place sheet blocks — Column 2: Write Enable Gen, Read Enable Gen
+    # ================================================================
 
-    roe_left_defs = [("READ_EN", "input")]
-    roe_left_defs += [(f"SEL{i}", "input") for i in range(8)]
-    roe_right_defs = [(f"BUF_OE_{i}", "output") for i in range(8)]
-    roe_pin_defs = roe_left_defs + roe_right_defs
-    roe_right_names = {f"BUF_OE_{i}" for i in range(8)}
-    roe_num_left = len(roe_left_defs)
-    roe_num_right = len(roe_right_defs)
-    roe_h = _sheet_height(max(roe_num_left, roe_num_right))
-    roe_sy = snap(wclk_sy + wclk_h + sheet_gap)
-    roe_pp = _add_sheet_block("Read OE Gen", "read_oe_gen.kicad_sch",
-                              roe_pin_defs, col2_x, roe_sy,
-                              col2_w, roe_h, yellow_fill,
-                              right_pins=roe_right_names)
+    # Write Enable Gen: WRITE_ACTIVE, ROW_SEL_0..3 → WRITE_EN_ROW_0..3
+    wen_left_defs = [("WRITE_ACTIVE", "input")]
+    wen_left_defs += [(f"ROW_SEL_{i}", "input") for i in range(4)]
+    wen_right_defs = [(f"WRITE_EN_ROW_{i}", "output") for i in range(4)]
+    wen_pin_defs = wen_left_defs + wen_right_defs
+    wen_right_names = {f"WRITE_EN_ROW_{i}" for i in range(4)}
+    wen_h = _sheet_height(max(len(wen_left_defs), len(wen_right_defs)))
+    wen_sy = base_y
+    wen_pp = _add_sheet_block("Write Enable Gen", "write_en_gen.kicad_sch",
+                              wen_pin_defs, col2_x, wen_sy,
+                              col2_w, wen_h, yellow_fill,
+                              right_pins=wen_right_names)
 
-    byte_pin_defs = [("WRITE_CLK", "input"), ("BUF_OE", "input")]
+    # Read Enable Gen: READ_EN, ROW_SEL_0..3 → READ_EN_ROW_0..3
+    ren_left_defs = [("READ_EN", "input")]
+    ren_left_defs += [(f"ROW_SEL_{i}", "input") for i in range(4)]
+    ren_right_defs = [(f"READ_EN_ROW_{i}", "output") for i in range(4)]
+    ren_pin_defs = ren_left_defs + ren_right_defs
+    ren_right_names = {f"READ_EN_ROW_{i}" for i in range(4)}
+    ren_h = _sheet_height(max(len(ren_left_defs), len(ren_right_defs)))
+    ren_sy = snap(wen_sy + wen_h + sheet_gap)
+    ren_pp = _add_sheet_block("Read Enable Gen", "read_en_gen.kicad_sch",
+                              ren_pin_defs, col2_x, ren_sy,
+                              col2_w, ren_h, yellow_fill,
+                              right_pins=ren_right_names)
+
+    # ================================================================
+    # Byte sheet blocks (4 rows x 2 columns)
+    # ================================================================
+    byte_pin_defs = [("WRITE_EN_ROW", "input"), ("READ_EN_ROW", "input"),
+                     ("COL_SEL", "input")]
     byte_pin_defs += [(f"D{bit}", "bidirectional") for bit in range(8)]
     byte_h = _sheet_height(len(byte_pin_defs))
 
@@ -686,8 +869,10 @@ def generate_root_sheet():
     led_jct_x = snap(turn_base_x + (n_signals - 1) * turn_spacing + 3 * GRID)
     label_x = snap(led_jct_x + 6 * GRID)
 
+    # Direct wire destinations: A0, A1 → Address Decoder; A2 → Column Select
     direct_wire_dest = {
-        "A0": addr_pp["A0"], "A1": addr_pp["A1"], "A2": addr_pp["A2"],
+        "A0": addr_pp["A0"], "A1": addr_pp["A1"],
+        "A2": colsel_pp["A2"],
         "nCE": ctrl_pp["nCE"], "nOE": ctrl_pp["nOE"], "nWE": ctrl_pp["nWE"],
     }
 
@@ -717,7 +902,7 @@ def generate_root_sheet():
             b.add_label(sig, label_x, ty)
 
     # ================================================================
-    # Labels on byte sheet input pins
+    # D0-D7 labels on byte sheet input pins
     # ================================================================
     for byte_idx in range(8):
         pp = byte_pp[byte_idx]
@@ -728,16 +913,16 @@ def generate_root_sheet():
             b.add_label(sig, px - wire_stub, py, justify="right")
 
     # ================================================================
-    # Route C: Col1 RIGHT -> Col2 LEFT (SEL0-7 trunks)
+    # Route: Col1 RIGHT → Col2 LEFT (ROW_SEL_0-3 trunks)
     # ================================================================
     sel_trunk_base_x = snap(col2_x - 3 * GRID)
-    sel_trunk_x = [snap(sel_trunk_base_x - i * GRID) for i in range(8)]
+    sel_trunk_x = [snap(sel_trunk_base_x - i * GRID) for i in range(4)]
 
-    for i in range(8):
-        sig = f"SEL{i}"
+    for i in range(4):
+        sig = f"ROW_SEL_{i}"
         ax, ay = addr_pp[sig]
-        wx, wy = wclk_pp[sig]
-        rx, ry = roe_pp[sig]
+        wx, wy = wen_pp[sig]
+        rx, ry = ren_pp[sig]
         tx = sel_trunk_x[i]
 
         b.add_wire(ax, ay, tx, ay)
@@ -747,77 +932,65 @@ def generate_root_sheet():
         b.add_wire(tx, ry, rx, ry)
 
     # ================================================================
-    # Route D: Col1 RIGHT -> Col2 LEFT (WRITE_ACTIVE, READ_EN)
+    # Route: Col1 RIGHT → Col2 LEFT (WRITE_ACTIVE, READ_EN)
     # ================================================================
     wa_trunk_x = snap(sel_trunk_base_x + 1 * GRID)
     re_trunk_x = snap(sel_trunk_base_x + 2 * GRID)
 
     wa_src = ctrl_pp["WRITE_ACTIVE"]
-    wa_dst = wclk_pp["WRITE_ACTIVE"]
+    wa_dst = wen_pp["WRITE_ACTIVE"]
     b.add_wire(wa_src[0], wa_src[1], wa_trunk_x, wa_src[1])
     b.add_wire(wa_trunk_x, wa_src[1], wa_trunk_x, wa_dst[1])
     b.add_wire(wa_trunk_x, wa_dst[1], wa_dst[0], wa_dst[1])
 
     re_src = ctrl_pp["READ_EN"]
-    re_dst = roe_pp["READ_EN"]
+    re_dst = ren_pp["READ_EN"]
     b.add_wire(re_src[0], re_src[1], re_trunk_x, re_src[1])
     b.add_wire(re_trunk_x, re_src[1], re_trunk_x, re_dst[1])
     b.add_wire(re_trunk_x, re_dst[1], re_dst[0], re_dst[1])
 
     # ================================================================
-    # Route E: Col2 RIGHT -> Byte Col1 (WRITE_CLK_0-3)
+    # Route: Col2 RIGHT → Bytes (WRITE_EN_ROW_i, READ_EN_ROW_i)
+    # Use labels for clean routing — each row signal has a unique name.
     # ================================================================
-    route_e_base_x = snap(col2_x + col2_w + 2 * GRID)
-    route_e_sp = GRID
-    wclk_route_x = [snap(route_e_base_x + i * route_e_sp) for i in range(4)]
-
-    for i in range(4):
-        sig = f"WRITE_CLK_{i}"
-        src_x, src_y = wclk_pp[sig]
-        dst_x, dst_y = byte_pp[i]["WRITE_CLK"]
-        rx = wclk_route_x[i]
-        b.add_wire(src_x, src_y, rx, src_y)
-        if abs(src_y - dst_y) > 0.01:
-            b.add_wire(rx, src_y, rx, dst_y)
-        b.add_wire(rx, dst_y, dst_x, dst_y)
-
-    # ================================================================
-    # Route F: Col2 RIGHT -> Byte Col2 (WRITE_CLK_4-7)
-    # ================================================================
-    transit_y_base = snap(base_y - 1 * GRID)
-    route_f_gap1_x = [snap(route_e_base_x + (4 + i) * route_e_sp)
-                      for i in range(4)]
-    byte_gap_base_x = snap(byte_col1_x + byte_w + 2 * GRID)
-    byte_gap_sp = GRID
-    route_f_gap2_x = [snap(byte_gap_base_x + i * byte_gap_sp)
-                      for i in range(4)]
-
-    for i in range(4):
-        byte_idx = 4 + i
-        w_transit_y = snap(transit_y_base - i * GRID)
-
-        sig = f"WRITE_CLK_{byte_idx}"
-        src_x, src_y = wclk_pp[sig]
-        dst_x, dst_y = byte_pp[byte_idx]["WRITE_CLK"]
-        g1x = route_f_gap1_x[i]
-        g2x = route_f_gap2_x[i]
-        b.add_wire(src_x, src_y, g1x, src_y)
-        b.add_wire(g1x, src_y, g1x, w_transit_y)
-        b.add_wire(g1x, w_transit_y, g2x, w_transit_y)
-        b.add_wire(g2x, w_transit_y, g2x, dst_y)
-        b.add_wire(g2x, dst_y, dst_x, dst_y)
-
-    # ================================================================
-    # BUF_OE_0-7: labels
-    # ================================================================
-    for i in range(8):
-        sig = f"BUF_OE_{i}"
-        src_x, src_y = roe_pp[sig]
+    for row_i in range(4):
+        # WRITE_EN_ROW_i
+        wen_sig = f"WRITE_EN_ROW_{row_i}"
+        src_x, src_y = wen_pp[wen_sig]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
-        b.add_label(sig, src_x + wire_stub, src_y)
-        dst_x, dst_y = byte_pp[i]["BUF_OE"]
-        b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
-        b.add_label(sig, dst_x - wire_stub, dst_y, justify="right")
+        b.add_label(wen_sig, src_x + wire_stub, src_y)
+        for col_j in range(2):
+            byte_idx = col_j * 4 + row_i
+            dst_x, dst_y = byte_pp[byte_idx]["WRITE_EN_ROW"]
+            b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
+            b.add_label(wen_sig, dst_x - wire_stub, dst_y, justify="right")
+
+        # READ_EN_ROW_i
+        ren_sig = f"READ_EN_ROW_{row_i}"
+        src_x, src_y = ren_pp[ren_sig]
+        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
+        b.add_label(ren_sig, src_x + wire_stub, src_y)
+        for col_j in range(2):
+            byte_idx = col_j * 4 + row_i
+            dst_x, dst_y = byte_pp[byte_idx]["READ_EN_ROW"]
+            b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
+            b.add_label(ren_sig, dst_x - wire_stub, dst_y, justify="right")
+
+    # ================================================================
+    # Route: COL_SEL_0 → bytes 0-3 (col 0), COL_SEL_1 → bytes 4-7 (col 1)
+    # Use labels for clean routing.
+    # ================================================================
+    for col_j in range(2):
+        col_sig = f"COL_SEL_{col_j}"
+        src_x, src_y = colsel_pp[col_sig]
+        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
+        b.add_label(col_sig, src_x + wire_stub, src_y)
+
+        for row_i in range(4):
+            byte_idx = col_j * 4 + row_i
+            dst_x, dst_y = byte_pp[byte_idx]["COL_SEL"]
+            b.add_wire(dst_x, dst_y, dst_x - wire_stub, dst_y)
+            b.add_label(col_sig, dst_x - wire_stub, dst_y, justify="right")
 
     return b
 
@@ -841,7 +1014,14 @@ def count_components(builders):
 
 
 def fix_instance_paths(builders):
-    """Fix sub-sheet symbol instance paths and assign globally unique references."""
+    """Fix sub-sheet symbol instance paths and assign globally unique references.
+
+    Multi-unit symbols (e.g. 74LVC2G00) have multiple SchematicSymbol objects
+    sharing the same template reference.  They are grouped so that one global
+    reference is allocated per group, and each symbol keeps its own unit number.
+    """
+    from collections import defaultdict
+
     root_sch = builders["ram"].sch
     root_uuid = root_sch.uuid
 
@@ -872,49 +1052,55 @@ def fix_instance_paths(builders):
         if is_multi_instance and not is_first_instance:
             continue
 
+        # Group symbols by template reference (multi-unit symbols share a ref)
+        ref_groups = defaultdict(list)
+        for sym in builder.sch.schematicSymbols:
+            template_ref = ""
+            for p in sym.properties:
+                if p.key == "Reference":
+                    template_ref = p.value
+                    break
+            ref_groups[template_ref].append(sym)
+
         if is_multi_instance:
-            for sym in builder.sch.schematicSymbols:
-                prefix = ""
-                for p in sym.properties:
-                    if p.key == "Reference":
-                        prefix = p.value.rstrip("0123456789")
-                        break
+            for template_ref, syms in ref_groups.items():
+                prefix = template_ref.rstrip("0123456789")
 
-                existing = sym.instances[0] if sym.instances else None
-                if existing is None:
-                    existing = SymbolProjectInstance(name=PROJECT_NAME, paths=[])
-                    sym.instances = [existing]
+                # Ensure all symbols in the group have an instance object
+                for sym in syms:
+                    existing = sym.instances[0] if sym.instances else None
+                    if existing is None:
+                        existing = SymbolProjectInstance(name=PROJECT_NAME, paths=[])
+                        sym.instances = [existing]
 
+                # One global ref per group per sheet instance
                 for inst_block in all_sheet_blocks:
                     inst_path = f"/{root_uuid}/{inst_block.uuid}"
                     global_counters[prefix] = global_counters.get(prefix, 0) + 1
                     inst_ref = f"{prefix}{global_counters[prefix]}"
-                    existing.paths.append(SymbolProjectPath(
-                        sheetInstancePath=inst_path,
-                        reference=inst_ref,
-                        unit=1,
-                    ))
+                    for sym in syms:
+                        sym.instances[0].paths.append(SymbolProjectPath(
+                            sheetInstancePath=inst_path,
+                            reference=inst_ref,
+                            unit=sym.unit,
+                        ))
         else:
-            for sym in builder.sch.schematicSymbols:
-                prefix = ""
-                for p in sym.properties:
-                    if p.key == "Reference":
-                        prefix = p.value.rstrip("0123456789")
-                        break
-
+            for template_ref, syms in ref_groups.items():
+                prefix = template_ref.rstrip("0123456789")
                 global_counters[prefix] = global_counters.get(prefix, 0) + 1
                 new_ref = f"{prefix}{global_counters[prefix]}"
 
-                existing = sym.instances[0] if sym.instances else None
-                if existing is None:
-                    existing = SymbolProjectInstance(name=PROJECT_NAME, paths=[])
-                    sym.instances = [existing]
+                for sym in syms:
+                    existing = sym.instances[0] if sym.instances else None
+                    if existing is None:
+                        existing = SymbolProjectInstance(name=PROJECT_NAME, paths=[])
+                        sym.instances = [existing]
 
-                existing.paths.append(SymbolProjectPath(
-                    sheetInstancePath=hier_path,
-                    reference=new_ref,
-                    unit=1,
-                ))
+                    existing.paths.append(SymbolProjectPath(
+                        sheetInstancePath=hier_path,
+                        reference=new_ref,
+                        unit=sym.unit,
+                    ))
 
 
 def main():
@@ -932,14 +1118,17 @@ def main():
     builders["address_decoder"] = generate_address_decoder()
     print("  [+] address_decoder.kicad_sch")
 
+    builders["column_select"] = generate_column_select()
+    print("  [+] column_select.kicad_sch")
+
     builders["control_logic"] = generate_control_logic()
     print("  [+] control_logic.kicad_sch")
 
-    builders["write_clk_gen"] = generate_write_clk_gen()
-    print("  [+] write_clk_gen.kicad_sch")
+    builders["write_en_gen"] = generate_write_en_gen()
+    print("  [+] write_en_gen.kicad_sch")
 
-    builders["read_oe_gen"] = generate_read_oe_gen()
-    print("  [+] read_oe_gen.kicad_sch")
+    builders["read_en_gen"] = generate_read_en_gen()
+    print("  [+] read_en_gen.kicad_sch")
 
     builders["byte"] = generate_byte_sheet()
     print("  [+] byte.kicad_sch (shared by all 8 byte instances)")
@@ -976,6 +1165,9 @@ def main():
     for name, builder in builders.items():
         multiplier = 8 if name == "byte" else 1
         for sym in builder.sch.schematicSymbols:
+            # Skip non-primary units to avoid double-counting multi-unit ICs
+            if getattr(sym, 'unit', 1) != 1:
+                continue
             if sym.properties and sym.properties[0].value.startswith("U") or \
                (len(sym.properties) > 0 and any(p.key == "Reference" and p.value.startswith("U") for p in sym.properties)):
                 lib_id = sym.libId if hasattr(sym, 'libId') else sym.entryName
