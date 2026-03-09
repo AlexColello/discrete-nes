@@ -4,14 +4,17 @@ Generate KiCad PCB layout for the 8-byte discrete RAM prototype.
 
 Places all 512 components (161 ICs, 175 LEDs, 175 resistors, 1 connector)
 in a grouped layout matching the schematic hierarchy.  All DSBGA ICs are
-rotated 90° CW so pin 4 (output) faces right toward its R+LED chain.
+at 180° rotation (outputs at top, inputs at bottom).  LEDs and resistors
+at 90° (vertical, anode above).
 After placement, pre-routes repetitive local connections:
   - Power vias (GND/VCC pads to inner planes)
-  - IC→LED L-traces (output to indicator LED anode)
-  - LED→R L-traces (LED cathode to resistor)
-  - DFF Q→Buffer A (3-segment vertical/diagonal/vertical on F.Cu)
-  - CLK fanout (horizontal F.Cu bus + vertical stubs per byte)
+  - IC→LED traces (output to indicator LED anode)
+  - LED→R cathode vias (LED cathode to B.Cu resistor)
+  - DFF Q→Buffer A (F.Cu bypass around nOE pin)
+  - CLK fanout (horizontal F.Cu trace per byte)
   - OE fanout (horizontal F.Cu bus + vertical stubs per byte)
+  - D* data bus (1 via per bit per byte, In1.Cu vertical trunk)
+  - Connector signal→LED stubs
 
 Layout:
   +------+-----------+-----------+-----------+
@@ -62,9 +65,9 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 # Cell layout dimensions (mm)
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
 IC_CELL_W = 4.5      # horizontal spacing between IC centers (R on B.Cu, tight)
-IC_CELL_H = 3.0      # vertical spacing between IC rows (RAM bytes — tight)
+IC_CELL_H = 4.0      # vertical spacing between IC rows (courtyard 3.4mm at 0°)
 CTRL_CELL_W = 5.5    # horizontal spacing for control logic (wider for routing)
-CTRL_CELL_H = 3.5    # vertical spacing for control logic (wider for routing)
+CTRL_CELL_H = 4.0    # vertical spacing for control logic (wider for routing)
 LED_OFFSET_X = 2.2   # LED center offset from IC center (closest, vertical 270°)
 # R is placed directly behind LED on B.Cu (same x,y as LED)
 
@@ -291,6 +294,39 @@ VIA_DRILL = 0.4      # mm drill
 POWER_TRACE_W = 0.3  # mm trace width for power stubs
 SIGNAL_TRACE_W = 0.2 # mm trace width for signals
 VIA_OFFSET = 0.6     # mm offset from pad center to via center
+DEFAULT_CLEARANCE = 0.15  # mm netclass clearance (matches Elecrow minimum)
+
+
+def _set_project_clearance(pcb_path, clearance=DEFAULT_CLEARANCE):
+    """Set default netclass settings in the .kicad_pro project file.
+
+    KiCad reads DRC clearance and via sizes from the project file's
+    net_settings, not from the PCB file. We set clearance to 0.15mm
+    (Elecrow minimum) and via diameter/drill to match our board
+    constraints (0.8mm/0.4mm) so the autorouter uses correct sizes.
+    """
+    import json
+
+    pro_path = os.path.splitext(pcb_path)[0] + ".kicad_pro"
+    if not os.path.exists(pro_path):
+        return
+
+    with open(pro_path, "r", encoding="utf-8") as f:
+        project = json.load(f)
+
+    # Update default netclass settings
+    net_settings = project.get("net_settings", {})
+    classes = net_settings.get("classes", [])
+    for nc in classes:
+        if nc.get("name") == "Default":
+            nc["clearance"] = clearance
+            nc["via_diameter"] = VIA_SIZE
+            nc["via_drill"] = VIA_DRILL
+            break
+
+    with open(pro_path, "w", encoding="utf-8") as f:
+        json.dump(project, f, indent=2)
+        f.write("\n")
 
 
 def _build_net_pad_index(pcb):
@@ -324,13 +360,13 @@ def _build_net_pad_index(pcb):
 def preroute_power_vias(pcb):
     """Drop vias from every IC GND/VCC pad and R GND pad to inner planes.
 
-    - IC pin 3 (GND) -> via to In1.Cu (GND plane)
+    - IC pin 3 (GND) -> via to B.Cu (GND plane)
     - IC pin 5 (VCC) -> via to In2.Cu (VCC plane)
-    - R GND pads      -> via to In1.Cu (GND plane)
+    - R GND pads      -> via to B.Cu (GND plane)
 
     Via offset direction:
     - DSBGA ICs: away from IC center (outward from body)
-    - LEDs/Rs: downward (+Y direction) into the gap between rows
+    - LEDs/Rs: rightward (+X direction)
 
     Returns (via_count, trace_count).
     """
@@ -376,7 +412,7 @@ def preroute_power_vias(pcb):
             abs_y = round(fp_y - px * sin_a + py * cos_a, 2)
 
             if net_name == "GND":
-                target_layers = ["F.Cu", "In1.Cu"]
+                target_layers = ["F.Cu", "B.Cu"]
             else:  # VCC
                 target_layers = ["F.Cu", "In2.Cu"]
 
@@ -392,9 +428,7 @@ def preroute_power_vias(pcb):
                     via_x = abs_x
                     via_y = round(abs_y + VIA_OFFSET, 2)
             else:
-                # LEDs and Rs: offset rightward (+X, away from IC cell
-                # center) to avoid crossing into CLK/OE fanout buses
-                # that run below each IC row
+                # LEDs and Rs: offset rightward (+X)
                 via_x = round(abs_x + VIA_OFFSET, 2)
                 via_y = abs_y
 
@@ -417,7 +451,7 @@ def preroute_bcu_resistors(pcb, netlist_data):
     Each R is on B.Cu directly behind its LED on F.Cu (same x,y position).
     The cathode via at the LED cathode / R pad 1 position bridges the two
     layers.  R pad 2 (GND) is left unconnected — the autorouter will
-    connect it to the GND plane on In1.Cu via a via it places itself.
+    connect it to the GND plane on B.Cu via a via it places itself.
 
     Returns (via_count, trace_count).
     """
@@ -473,15 +507,26 @@ def preroute_bcu_resistors(pcb, netlist_data):
 
 
 def preroute_ic_to_led(pcb, netlist_data):
-    """Route IC output (pin 4) to LED anode using chamfered L-traces.
+    """Route IC output pin to LED anode using near-horizontal traces.
 
-    With ICs rotated 90° CW, pin 4 (Q) faces right at (IC_x+0.50, by+0.25)
-    and pin 5 (VCC) is above at (IC_x+0.50, by-0.25), so VCC does NOT block
-    the rightward route to LED.  A simple horizontal-first L-trace suffices.
+    At 180° rotation, DSBGA-5 pin 4 (output) is at (IC_x+0.25, IC_y-0.50)
+    and pin 5 (VCC) is at (IC_x-0.25, IC_y-0.50) — VCC on the LEFT.
+    IC→LED trace goes RIGHT from pin 4 without crossing VCC.
+
+    DSBGA-6 (SN74LVC1G11) is skipped — at 180°, output (pin 5) is at
+    top-left and GND (pin 4) at top-right blocks the rightward path.
+    Left to autorouter.
+
+    Route strategy (2 segments):
+      1. Near-45° diagonal RIGHT from output pin toward LED anode Y
+      2. Horizontal RIGHT to LED anode X
+
+    LED anode at 90° rotation: pad 2 at (led_x, led_y-0.55).
 
     Returns number of trace segments added.
     """
     net_to_pads = _build_net_pad_index(pcb)
+    ref_to_part = _build_ref_to_part(netlist_data)
     traces = 0
 
     for fp in pcb.board.footprints:
@@ -489,8 +534,16 @@ def preroute_ic_to_led(pcb, netlist_data):
         if not ref.startswith("U"):
             continue
 
-        # Get IC output pin (pin 4) net
-        ic_out_net = pcb.get_pad_net(ref, "4")
+        part = ref_to_part.get(ref, "")
+
+        # Skip DSBGA-6 (74LVC1G11) — at 180°, output (pin 5) at top-left,
+        # GND (pin 4) at top-right blocks rightward path to LED
+        if part == "74LVC1G11":
+            continue
+
+        out_pin = "4"  # All DSBGA-5 ICs: output on pin 4
+
+        ic_out_net = pcb.get_pad_net(ref, out_pin)
         if ic_out_net is None or ic_out_net == 0:
             continue
 
@@ -513,14 +566,25 @@ def preroute_ic_to_led(pcb, netlist_data):
         if led_ref is None:
             continue
 
-        # Route from IC pin 4 to LED anode pad using L-trace (horizontal first)
-        pin4_pos = pcb.get_pad_position(ref, "4")
+        out_pos = pcb.get_pad_position(ref, out_pin)
         led_anode_pos = pcb.get_pad_position(led_ref, led_pad_num)
 
-        segs = pcb.add_l_trace(
-            pin4_pos, led_anode_pos, ic_out_net,
-            SIGNAL_TRACE_W, "F.Cu", horizontal_first=True)
-        traces += len(segs)
+        # 45° diagonal UP-RIGHT from output pin to LED anode Y,
+        # then horizontal RIGHT to LED anode X
+        dy = out_pos[1] - led_anode_pos[1]  # positive (going up)
+        diag_end_x = round(out_pos[0] + dy, 2)  # 45°: dx = dy
+        diag_end_y = round(led_anode_pos[1], 2)
+
+        # Segment 1: diagonal
+        pcb.add_trace(out_pos, (diag_end_x, diag_end_y), ic_out_net,
+                       SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Segment 2: horizontal to LED anode (if needed)
+        if abs(diag_end_x - led_anode_pos[0]) > 0.01:
+            pcb.add_trace((diag_end_x, diag_end_y), led_anode_pos, ic_out_net,
+                           SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
 
     return traces
 
@@ -537,14 +601,19 @@ def _build_ref_to_part(netlist_data):
 def preroute_dff_to_buffer(pcb, netlist_data):
     """Route DFF Q (pin 4) to Buffer A (pin 2) on F.Cu.
 
-    With ICs at 90° CW:
-      DFF pin 4 (Q):    (IC_x + 0.50, by + 0.25)
-      Buffer pin 2 (A): (IC_x,        by + 4.75)   [Buffer at IC_x, by + 4.5]
+    T-junction off the existing IC→LED horizontal trace (same Q net),
+    then straight DOWN to BUF row, then LEFT to BUF pin 2.
 
-    3-segment route:
-      1) vertical   (IC_x+0.50, by+0.25)  → (IC_x+0.50, by+3.75)
-      2) 45° diag   (IC_x+0.50, by+3.75)  → (IC_x,      by+4.25)
-      3) vertical   (IC_x,      by+4.25)  → (IC_x,      by+4.75)
+    The IC→LED trace runs horizontally at dff_y-0.55 from ~(x+0.30)
+    to (x+2.2).  The T-junction at x+1.0 on this horizontal gives a
+    clean vertical drop to buf_y that clears all obstacles:
+      - CLK pin 2 at (x+0.25, dff_y):     X gap = 0.75mm
+      - DFF pin 1 at (x+0.25, dff_y+0.50): X gap = 0.75mm
+      - Data bus via at (x+0.25, ~dff_y+2): X gap = 0.75mm, clearance 0.25mm
+
+    2-segment route:
+      1. DOWN: (x+1.0, dff_y-0.55) → (x+1.0, buf_y)
+      2. LEFT: (x+1.0, buf_y)      → (x+0.25, buf_y)
 
     Only matches 74LVC1G79 (DFF) to 74LVC1G125 (Buffer) pairs.
 
@@ -553,6 +622,8 @@ def preroute_dff_to_buffer(pcb, netlist_data):
     ref_to_part = _build_ref_to_part(netlist_data)
     net_to_pads = _build_net_pad_index(pcb)
     traces = 0
+
+    T_X_OFFSET = 1.0  # T-junction X relative to IC center (on IC→LED trace)
 
     for fp in pcb.board.footprints:
         ref = fp.properties.get("Reference", "")
@@ -587,39 +658,44 @@ def preroute_dff_to_buffer(pcb, netlist_data):
         if buf_ref is None:
             continue
 
-        # Get exact pad positions
-        dff_q_pos = pcb.get_pad_position(ref, "4")
+        # Find DFF LED anode to get the IC→LED horizontal trace Y
+        led_anode_y = None
+        for pad_ref, pad_num, px, py, pnet in pads_on_net:
+            if pad_ref.startswith("D"):
+                led_anode_y = py
+                break
+        if led_anode_y is None:
+            led_anode_y = round(dff_y - 0.55, 2)  # fallback
 
-        # 3-segment route: vertical → 45° diagonal → vertical
-        # Midpoint 1: same X as DFF Q, Y = buffer_Y - 2.0 (pushed up
-        # to clear buffer VCC power stub at buf_y + 4.25)
-        mid1_x = dff_q_pos[0]
-        mid1_y = round(buf_pad2_pos[1] - 2.0, 2)
-        # Midpoint 2: same X as Buffer A, Y = mid1_y + dx offset for 45°
-        mid2_x = buf_pad2_pos[0]
-        mid2_y = round(mid1_y + abs(mid1_x - mid2_x), 2)
+        t_x = round(dff_x + T_X_OFFSET, 2)
+        t_y = round(led_anode_y, 2)
 
-        pcb.add_trace(dff_q_pos, (mid1_x, mid1_y), dff_q_net,
-                       SIGNAL_TRACE_W, "F.Cu")
-        pcb.add_trace((mid1_x, mid1_y), (mid2_x, mid2_y), dff_q_net,
-                       SIGNAL_TRACE_W, "F.Cu")
-        pcb.add_trace((mid2_x, mid2_y), buf_pad2_pos, dff_q_net,
-                       SIGNAL_TRACE_W, "F.Cu")
-        traces += 3
+        # Segment 1: vertical DOWN from T-junction to buffer row
+        pcb.add_trace((t_x, t_y), (t_x, buf_pad2_pos[1]),
+                       dff_q_net, SIGNAL_TRACE_W, "F.Cu")
+        # Segment 2: horizontal LEFT to Buffer A (pin 2)
+        pcb.add_trace((t_x, buf_pad2_pos[1]), buf_pad2_pos,
+                       dff_q_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 2
 
     return traces
 
 
 def preroute_clk_fanout(pcb, netlist_data):
-    """Route CLK fanout bus for each byte group on F.Cu.
+    """Route CLK fanout for each byte group on F.Cu.
 
-    DFF CLK is pin 2. At 90° CW, pin 2 is at (IC_x, by + 0.25).
-    All 8 DFFs in a byte share the same CLK net.
+    DFF CLK is pin 2.  At 180° rotation, pin 2 is at (IC_x+0.25, IC_y).
+    A straight horizontal bus at dff_y is too close to LED cathode vias
+    at (x+2.2, dff_y+0.55).
 
-    Creates a horizontal bus at Y = by - 1.5 with vertical stubs
-    down to each CLK pin:
-      Bus:   (X_0, by-1.5) → → → (X_7, by-1.5)   [7 segments]
-      Stubs: (X_i, by-1.5) → (X_i, by+0.25)       [8 stubs, 1.75mm each]
+    Solution: L-shaped stubs going LEFT then UP, with a bus above the
+    DFF row at dff_y-1.7:
+      1. Horizontal LEFT from pin 2: (x+0.25, dff_y) → (x-1.2, dff_y)
+      2. Vertical UP:                (x-1.2, dff_y)  → (x-1.2, dff_y-1.7)
+      3. Bus at dff_y-1.7 connects adjacent stubs horizontally
+
+    x-1.2 clears VCC via at ~(x-0.52, dff_y-1.04) by 0.18mm.
+    Bus at dff_y-1.7 clears VCC via Y by 0.16mm.
 
     Only matches 74LVC1G79 (DFF) ICs.
 
@@ -627,6 +703,9 @@ def preroute_clk_fanout(pcb, netlist_data):
     """
     ref_to_part = _build_ref_to_part(netlist_data)
     traces = 0
+
+    CLK_STUB_X_OFFSET = -1.2   # stub X relative to IC center
+    CLK_BUS_Y_OFFSET = -1.7    # bus Y relative to DFF center
 
     # Group DFF pin 2 (CLK) by net number
     clk_groups = defaultdict(list)
@@ -643,7 +722,9 @@ def preroute_clk_fanout(pcb, netlist_data):
             continue
 
         pad_pos = pcb.get_pad_position(ref, "2")
-        clk_groups[clk_net].append((ref, pad_pos[0], pad_pos[1]))
+        ic_cx = fp.position.X
+        ic_cy = fp.position.Y
+        clk_groups[clk_net].append((ref, pad_pos[0], pad_pos[1], ic_cx, ic_cy))
 
     for net_num, members in clk_groups.items():
         if len(members) < 2:
@@ -652,20 +733,27 @@ def preroute_clk_fanout(pcb, netlist_data):
         # Sort by X position (left to right)
         members.sort(key=lambda m: m[1])
 
-        # Bus Y: 1.5mm above the CLK pin Y
-        bus_y = round(members[0][2] - 1.5, 2)
+        dff_y = members[0][4]  # all DFFs in a byte share the same Y
+        bus_y = round(dff_y + CLK_BUS_Y_OFFSET, 2)
 
-        # Horizontal bus segments between adjacent members
-        for i in range(len(members) - 1):
-            x1 = members[i][1]
-            x2 = members[i + 1][1]
-            pcb.add_trace((x1, bus_y), (x2, bus_y), net_num,
+        for i, (ref, pin_x, pin_y, ic_cx, ic_cy) in enumerate(members):
+            stub_x = round(ic_cx + CLK_STUB_X_OFFSET, 2)
+
+            # Segment 1: horizontal LEFT from pin 2 to stub X
+            pcb.add_trace((pin_x, pin_y), (stub_x, pin_y), net_num,
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-        # Vertical stubs from bus down to each CLK pin
-        for ref, pin_x, pin_y in members:
-            pcb.add_trace((pin_x, bus_y), (pin_x, pin_y), net_num,
+            # Segment 2: vertical UP from stub to bus
+            pcb.add_trace((stub_x, pin_y), (stub_x, bus_y), net_num,
+                           SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+        # Segment 3: horizontal bus connecting adjacent stubs
+        for i in range(len(members) - 1):
+            stub_x1 = round(members[i][3] + CLK_STUB_X_OFFSET, 2)
+            stub_x2 = round(members[i + 1][3] + CLK_STUB_X_OFFSET, 2)
+            pcb.add_trace((stub_x1, bus_y), (stub_x2, bus_y), net_num,
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
@@ -675,14 +763,14 @@ def preroute_clk_fanout(pcb, netlist_data):
 def preroute_oe_fanout(pcb, netlist_data):
     """Route OE fanout bus for each byte group on F.Cu.
 
-    Buffer OE is pin 1. At 90° CW, pin 1 is at (IC_x - 0.50, by + 4.75).
+    Buffer OE is pin 1. At 180° rotation, pin 1 (nOE) is at
+    (IC_x+0.25, IC_y+0.50).  Pin 3 (GND) is at (IC_x-0.25, IC_y+0.50)
+    — same Y as nOE, so a horizontal bus at pin Y crosses adjacent GND pads.
 
-    All F.Cu routing (no B.Cu or vias needed — B.Cu approach fails because
-    through-hole power vias have copper on all layers including B.Cu):
-      F.Cu bus:   (X_0-0.50, by+6.0) → → → (X_7-0.50, by+6.0)  [7 segments]
-      F.Cu stubs: (X_i-0.50, by+6.0) → (X_i-0.50, by+4.75)     [8 stubs, 1.25mm each]
-
-    Bus at Y = OE_pin_Y + 1.25 clears LED GND vias at Y ≈ pin_Y + 0.35.
+    Solution: bus at buf_y + 2.0 (below BUF row, in the byte gap)
+    with vertical stubs up to each pin 1:
+      F.Cu bus:   (X_0, bus_y) → → → (X_7, bus_y)   [7 segments]
+      F.Cu stubs: (X_i, pin1_y) → (X_i, bus_y)      [8 stubs]
 
     Only matches 74LVC1G125 (Buffer) ICs.
 
@@ -706,7 +794,8 @@ def preroute_oe_fanout(pcb, netlist_data):
             continue
 
         pad_pos = pcb.get_pad_position(ref, "1")
-        oe_groups[oe_net].append((ref, pad_pos[0], pad_pos[1]))
+        fp_y = fp.position.Y  # IC center Y
+        oe_groups[oe_net].append((ref, pad_pos[0], pad_pos[1], fp_y))
 
     for net_num, members in oe_groups.items():
         if len(members) < 2:
@@ -715,8 +804,8 @@ def preroute_oe_fanout(pcb, netlist_data):
         # Sort by X position (left to right)
         members.sort(key=lambda m: m[1])
 
-        # Bus Y: 1.25mm below OE pin Y (clears LED GND vias)
-        bus_y = round(members[0][2] + 1.25, 2)
+        # Bus Y: 2.0mm below BUF center (in the byte gap)
+        bus_y = round(members[0][3] + 2.0, 2)
 
         # F.Cu horizontal bus segments between adjacent members
         for i in range(len(members) - 1):
@@ -726,8 +815,8 @@ def preroute_oe_fanout(pcb, netlist_data):
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-        # F.Cu vertical stubs from bus up to each OE pin
-        for ref, pin_x, pin_y in members:
+        # F.Cu vertical stubs from bus down to each OE pin
+        for ref, pin_x, pin_y, _ in members:
             pcb.add_trace((pin_x, bus_y), (pin_x, pin_y), net_num,
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
@@ -842,24 +931,17 @@ def preroute_connector_leds(pcb, netlist_data):
 
 
 def preroute_data_bus(pcb, netlist_data, col_boundary_x):
-    """Preroute D* data bus with F.Cu vias and B.Cu trunk routing.
+    """Preroute D* data bus with single via per bit per byte.
 
-    For each data bit (D0-D7), within each byte column (4 bytes):
-      1. DFF pin 1: F.Cu stub down 0.60mm to via (F.Cu -> B.Cu)
-      2. BUF pin 4: F.Cu stub down 0.40mm to via (F.Cu -> B.Cu)
-      3. B.Cu vertical trunk at IC center X, chaining all 8 vias
-      4. B.Cu horizontal stubs from trunk to each via (0.50mm)
+    At 180° rotation, DFF.D (pin 1) and BUF.Y (pin 4) are both at x+0.25
+    relative to IC center.  This enables a single shared via per bit
+    per byte (saves 64 vias compared to the old 2-via-per-bit approach).
 
-    Clearance verification (all pass with 0.20mm min clearance):
-      DFF via at (pin1_x, pin1_y+0.60):
-        - DFF GND via: 1.47mm c-c (need 1.05) OK
-        - CLK bus: 2.1mm gap OK
-      BUF via at (pin4_x, pin4_y+0.53):
-        - BUF pin 2 pad: 0.73mm (need 0.72) OK
-        - BUF VCC via: 1.41mm c-c (need 1.05) OK
-        - OE bus F.Cu edge gap: 0.22mm (need 0.20) OK
-      B.Cu trunk at IC center X:
-        - All power vias: 1.04mm X distance (need 0.70) OK
+    For each data bit (D0-D7), within each byte:
+      1. DFF pin 1 (D): F.Cu horizontal RIGHT stub to via X, vertical to via
+      2. BUF pin 4 (Y): F.Cu horizontal RIGHT stub to via X, vertical to via
+      3. Single via at (x+1.0, midpoint_y) between DFF and BUF
+      4. In1.Cu vertical trunk at x+1.0 connects across bytes in same column
 
     Args:
         pcb: PCBBuilder instance with components placed
@@ -874,9 +956,6 @@ def preroute_data_bus(pcb, netlist_data, col_boundary_x):
 
     DBUS_VIA_SIZE = VIA_SIZE    # 0.8mm
     DBUS_VIA_DRILL = VIA_DRILL  # 0.4mm
-    DFF_VIA_DY = 0.60           # via offset below DFF pin 1
-    BUF_VIA_DY = 0.53           # via offset below BUF pin 4
-    # BUF_VIA_DY bounds: >=0.52 for pin 2 pad clearance, <=0.55 for OE bus
 
     vias = 0
     traces = 0
@@ -902,13 +981,13 @@ def preroute_data_bus(pcb, netlist_data, col_boundary_x):
             net_name = pads_on_net[0][4] if pads_on_net else f"net_{d_net}"
             dbus_nets[d_net] = net_name
 
-    # For each D* net, collect DFF and BUF pad positions, grouped by column
+    # For each D* net, collect DFF pin 1 and BUF pin 4 positions by byte
     for net_num, net_name in sorted(dbus_nets.items(), key=lambda x: x[1]):
         pads_on_net = net_to_pads.get(net_num, [])
 
-        # Collect DFF pin 1 and BUF pin 4 positions with their IC centers
-        # Each entry: (ic_center_x, via_x, via_y, is_buf, pad_x, pad_y)
-        via_entries = []
+        # Collect DFF pin 1 and BUF pin 4 positions
+        # Each entry: (ic_center_x, pad_x, pad_y, is_buf)
+        entries = []
 
         for pad_ref, pad_num, px, py, pnet in pads_on_net:
             if not pad_ref.startswith("U"):
@@ -916,64 +995,97 @@ def preroute_data_bus(pcb, netlist_data, col_boundary_x):
             part = ref_to_part.get(pad_ref)
 
             if part == "74LVC1G79" and pad_num == "1":
-                # DFF pin 1 at (IC_x - 0.50, IC_y + 0.25)
-                # IC center X = pin1_x + 0.50
-                ic_cx = round(px + 0.50, 2)
-                via_x = round(px, 2)
-                via_y = round(py + DFF_VIA_DY, 2)
-                via_entries.append((ic_cx, via_x, via_y, False, px, py))
+                # DFF pin 1 at (IC_x + 0.25, IC_y + 0.50) at 180°
+                ic_cx = round(px - 0.25, 2)
+                entries.append((ic_cx, px, py, False))
 
             elif part == "74LVC1G125" and pad_num == "4":
-                # BUF pin 4 at (IC_x + 0.50, IC_y + 0.25)
-                # IC center X = pin4_x - 0.50
-                ic_cx = round(px - 0.50, 2)
-                via_x = round(px, 2)
-                via_y = round(py + BUF_VIA_DY, 2)
-                via_entries.append((ic_cx, via_x, via_y, True, px, py))
+                # BUF pin 4 at (IC_x + 0.25, IC_y - 0.50) at 180°
+                ic_cx = round(px - 0.25, 2)
+                entries.append((ic_cx, px, py, True))
 
         # Group by column using col_boundary_x
-        col0 = [e for e in via_entries if e[0] < col_boundary_x]
-        col1 = [e for e in via_entries if e[0] >= col_boundary_x]
+        col0 = [e for e in entries if e[0] < col_boundary_x]
+        col1 = [e for e in entries if e[0] >= col_boundary_x]
 
         for col_entries in [col0, col1]:
             if len(col_entries) < 2:
                 continue
 
-            # Sort by Y (top to bottom): DFF0, BUF0, DFF1, BUF1, ...
+            # Sort by Y (top to bottom)
             col_entries.sort(key=lambda e: e[2])
 
-            # All entries in a column share the same IC center X
-            trunk_x = col_entries[0][0]
+            # Group into DFF-BUF pairs (same IC center X within a byte)
+            # Each pair shares one via
+            pairs = []  # [(dff_entry, buf_entry), ...]
+            unpaired_dffs = []
+            unpaired_bufs = []
 
-            # Place vias and F.Cu stubs
-            via_positions = []  # (via_x, via_y) in Y order
-            for ic_cx, via_x, via_y, is_buf, pad_x, pad_y in col_entries:
-                # F.Cu stub from pad to via
-                pcb.add_trace((pad_x, pad_y), (via_x, via_y),
+            dffs = [e for e in col_entries if not e[3]]
+            bufs = [e for e in col_entries if e[3]]
+
+            for dff in dffs:
+                # Find matching BUF at same X (same bit column)
+                matched = None
+                for buf in bufs:
+                    if abs(dff[0] - buf[0]) < 0.1:  # Same IC center X
+                        matched = buf
+                        break
+                if matched:
+                    bufs.remove(matched)
+                    pairs.append((dff, matched))
+                else:
+                    unpaired_dffs.append(dff)
+
+            # Process pairs: one via between DFF and BUF
+            # At 180°, DFF.D (pin 1) and BUF.Y (pin 4) are both at x+0.25.
+            # Via goes directly at (x+0.25, midpoint) — straight vertical.
+            via_positions = []  # (via_x, via_y) for In1.Cu trunk
+            for dff, buf in pairs:
+                dff_cx, dff_px, dff_py, _ = dff
+                buf_cx, buf_px, buf_py, _ = buf
+
+                # Via at pin X, midpoint Y between DFF.D and BUF.Y
+                via_x = round(dff_px, 2)
+                via_y = round((dff_py + buf_py) / 2, 2)
+
+                # F.Cu straight vertical from DFF pin 1 to via
+                pcb.add_trace((dff_px, dff_py), (via_x, via_y),
                               net_num, SIGNAL_TRACE_W, "F.Cu")
                 traces += 1
 
-                # Via F.Cu -> B.Cu
+                # F.Cu straight vertical from BUF pin 4 to via
+                pcb.add_trace((buf_px, buf_py), (via_x, via_y),
+                              net_num, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+
+                # Single via F.Cu -> In1.Cu
                 pcb.add_via((via_x, via_y), net_num,
-                            DBUS_VIA_SIZE, DBUS_VIA_DRILL, ["F.Cu", "B.Cu"])
+                            DBUS_VIA_SIZE, DBUS_VIA_DRILL, ["F.Cu", "In1.Cu"])
                 vias += 1
 
                 via_positions.append((via_x, via_y))
 
-            # B.Cu routing: vertical trunk at trunk_x with horizontal stubs
-            # Chain all vias in Y order
-            for i, (vx, vy) in enumerate(via_positions):
-                # Horizontal stub: via to trunk
-                if abs(vx - trunk_x) > 0.01:
-                    pcb.add_trace((vx, vy), (trunk_x, vy),
-                                  net_num, SIGNAL_TRACE_W, "B.Cu")
-                    traces += 1
+            # In1.Cu vertical trunk connecting vias across bytes
+            if len(via_positions) > 1:
+                via_positions.sort(key=lambda v: v[1])  # Sort by Y
+                trunk_x = via_positions[0][0]
 
-                # Vertical trunk segment to next via's Y
-                if i < len(via_positions) - 1:
-                    next_vy = via_positions[i + 1][1]
-                    pcb.add_trace((trunk_x, vy), (trunk_x, next_vy),
-                                  net_num, SIGNAL_TRACE_W, "B.Cu")
+                for i in range(len(via_positions) - 1):
+                    vx1, vy1 = via_positions[i]
+                    vx2, vy2 = via_positions[i + 1]
+                    # Horizontal stub to trunk if needed
+                    if abs(vx1 - trunk_x) > 0.01:
+                        pcb.add_trace((vx1, vy1), (trunk_x, vy1),
+                                      net_num, SIGNAL_TRACE_W, "In1.Cu")
+                        traces += 1
+                    if abs(vx2 - trunk_x) > 0.01:
+                        pcb.add_trace((vx2, vy2), (trunk_x, vy2),
+                                      net_num, SIGNAL_TRACE_W, "In1.Cu")
+                        traces += 1
+                    # Vertical trunk segment
+                    pcb.add_trace((trunk_x, vy1), (trunk_x, vy2),
+                                  net_num, SIGNAL_TRACE_W, "In1.Cu")
                     traces += 1
 
     return vias, traces
@@ -1070,7 +1182,7 @@ def add_layer_test_grid(pcb, origin_x, origin_y):
         row_outline = [(row_x0, row_y0), (row_x1, row_y0),
                        (row_x1, row_y1), (row_x0, row_y1)]
 
-        # Block In1.Cu (GND) zone where this row does NOT want In1.Cu fill
+        # Block In1.Cu zone where this row does NOT want In1.Cu fill
         if fill_layer != "In1.Cu":
             pcb.add_keepout_zone("In1.Cu", row_outline)
 
@@ -1188,9 +1300,11 @@ def main():
     # Register all nets
     pcb.add_nets_from_netlist(netlist_data)
 
-    # Configure 4-layer stackup (B.Cu is GND plane for B.Cu resistor pads)
+    # Configure 4-layer stackup
+    # B.Cu = GND plane, In2.Cu = VCC plane, In1.Cu = signal/jumper layer
     pcb.set_4layer_stackup()
-    pcb.set_layer_type("B.Cu", "power")  # Prevent autorouter from using B.Cu for signals
+    pcb.set_layer_type("B.Cu", "power")   # GND plane — prevent autorouter use
+    pcb.set_layer_type("In1.Cu", "signal")  # Jumper layer for data bus trunks
 
     # Step 5: Place components
     print("\n[5/7] Placing components...")
@@ -1237,6 +1351,15 @@ def main():
 
         placements = compute_group_layout(ic_cells, standalone, max_cols,
                                           cell_w=cw, cell_h=ch)
+
+        # Move buffer row up 0.5mm to tighten DFF-BUF spacing
+        if is_ram:
+            buf_row_y = ch  # buffer row is at 1 * IC_CELL_H
+            placements = [
+                (comp, rx, round(ry - 0.5, 2)) if abs(ry - buf_row_y) < 0.1
+                else (comp, rx, ry)
+                for comp, rx, ry in placements
+            ]
 
         # Add connector and other non-IC components
         if others:
@@ -1486,19 +1609,19 @@ def main():
     print(f"  Power vias: {pwr_vias} vias, {pwr_traces} stub traces")
 
     ic_led_traces = preroute_ic_to_led(pcb, netlist_data)
-    print(f"  IC->LED chains: {ic_led_traces} trace segments")
+    print(f"  IC->LED: {ic_led_traces} trace segments")
 
     bcu_r_vias, bcu_r_traces = preroute_bcu_resistors(pcb, netlist_data)
     print(f"  B.Cu resistors: {bcu_r_vias} vias, {bcu_r_traces} B.Cu traces")
-
-    dff_buf_traces = preroute_dff_to_buffer(pcb, netlist_data)
-    print(f"  DFF Q->Buffer A: {dff_buf_traces} trace segments")
 
     clk_traces = preroute_clk_fanout(pcb, netlist_data)
     print(f"  CLK fanout: {clk_traces} trace segments")
 
     oe_traces = preroute_oe_fanout(pcb, netlist_data)
     print(f"  OE fanout: {oe_traces} trace segments")
+
+    dff_buf_traces = preroute_dff_to_buffer(pcb, netlist_data)
+    print(f"  DFF->Buffer: {dff_buf_traces} trace segments")
 
     conn_traces = preroute_connector_leds(pcb, netlist_data)
     print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
@@ -1508,7 +1631,8 @@ def main():
     print(f"  D* data bus: {dbus_vias} vias, {dbus_traces} trace segments")
 
     total_vias = pwr_vias + bcu_r_vias + dbus_vias
-    total_traces = pwr_traces + ic_led_traces + bcu_r_traces + dff_buf_traces + clk_traces + oe_traces + conn_traces + dbus_traces
+    total_traces = (pwr_traces + ic_led_traces + bcu_r_traces + clk_traces
+                    + oe_traces + dff_buf_traces + conn_traces + dbus_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
     # Layer visibility test grid (for clear PCB) — right of control row
@@ -1589,12 +1713,10 @@ def main():
         (origin_x + board_w, origin_y + board_h),
         (origin_x, origin_y + board_h),
     ]
-    pcb.add_zone("GND", "In1.Cu", outline, clearance=0.3)
     pcb.add_zone("VCC", "In2.Cu", outline, clearance=0.3)
     pcb.add_zone("GND", "B.Cu", outline, clearance=0.3, pad_connection="yes")
-    print("  Added GND zone on In1.Cu")
     print("  Added VCC zone on In2.Cu")
-    print("  Added GND zone on B.Cu (solid fill for R GND pads)")
+    print("  Added GND zone on B.Cu (solid fill for R GND pads + GND plane)")
 
     # Board info text block — bottom-left corner
     info_x = round(origin_x + BOARD_MARGIN, 2)
@@ -1614,6 +1736,7 @@ def main():
     # Save PCB (hide all footprint text to avoid silk_overlap/silk_over_copper)
     pcb_path = os.path.join(BOARD_DIR, "ram.kicad_pcb")
     pcb.save(pcb_path, hide_text=True)
+    _set_project_clearance(pcb_path)
     print(f"\nSaved: {pcb_path}")
 
     # Cleanup netlist
@@ -1640,7 +1763,7 @@ def main():
     print(f"  Components: {total_placed}")
     print(f"  Pre-routed: {total_vias} vias + {total_traces} traces")
     print(f"  Board size: {board_w} x {board_h} mm")
-    print(f"  Layers: 4 (F.Cu, In1.Cu=GND, In2.Cu=VCC, B.Cu)")
+    print(f"  Layers: 4 (F.Cu, In1.Cu=jumper, In2.Cu=VCC, B.Cu=GND)")
     print()
 
     return 0
@@ -1678,12 +1801,12 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
     else:
         angle = 0
         if part == "LED_Small":
-            angle = 270  # IC-adjacent LEDs: vertical, anode below (toward IC pin 4)
+            angle = 90   # Vertical, anode (pad 2) above at y-0.55, cathode below
         elif part == "R_Small":
-            angle = 270  # Vertical, pin 1 above (toward LED cathode), pin 2/GND below
+            angle = 90   # Vertical, pad 1 below at y+0.55, pad 2/GND above at y-0.55
             layer = "B.Cu"  # Directly behind LED on back side
         elif "74LVC1G" in part:
-            angle = 90  # 90° CW: pin 4 (Q) faces right, VCC above Q
+            angle = 180  # 180°: output at top-right, inputs at bottom-right
         elif part == "Conn_01x16":
             angle = 180  # Pins face left toward board edge
             layer = "B.Cu"  # Soldered on back side

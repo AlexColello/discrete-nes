@@ -12,7 +12,7 @@ Plus board-specific checks:
 - Board outline within sheet border (12mm margin)
 - All components within board outline
 - All netlist components placed
-- Power planes defined (GND on In1.Cu, VCC on In2.Cu)
+- Power planes defined (GND on B.Cu, VCC on In2.Cu)
 
 Usage:
     python scripts/verify_pcb.py                # Run all checks (pre-routing)
@@ -43,7 +43,7 @@ PCB_ROUTED_PATH = os.path.join(BOARD_DIR, "ram_routed.kicad_pcb")
 OUTPUT_DIR = os.path.join(BOARD_DIR, "verify_output")
 RULES_DIR = os.path.join(BOARD_DIR, "rules")
 
-EXPECTED_COMPONENT_COUNT = 512  # 161 ICs + 175 LEDs + 175 Rs + 1 connector
+EXPECTED_COMPONENT_COUNT = 384  # 161 ICs + 111 LEDs + 111 Rs + 1 connector
 
 # DRC violation types to skip before routing is done
 # These are expected with placement-only boards (no traces)
@@ -150,19 +150,19 @@ def check_power_planes(board):
         net_name = zone.netName or ""
 
         if "GND" in net_name:
-            if any("In1.Cu" in l for l in layers):
+            if any("B.Cu" in l for l in layers):
                 gnd_zone = True
         if "VCC" in net_name:
             if any("In2.Cu" in l for l in layers):
                 vcc_zone = True
 
     if not gnd_zone:
-        issues.append("  No GND zone found on In1.Cu")
+        issues.append("  No GND zone found on B.Cu")
     if not vcc_zone:
         issues.append("  No VCC zone found on In2.Cu")
 
     if gnd_zone and vcc_zone:
-        print("  Power planes: GND on In1.Cu, VCC on In2.Cu")
+        print("  Power planes: GND on B.Cu, VCC on In2.Cu")
 
     return issues
 

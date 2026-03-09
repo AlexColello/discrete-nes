@@ -443,8 +443,6 @@ def generate_byte_sheet():
         b.add_wire(boe_trunk_x, oe_pin[1], oe_pin[0], oe_pin[1])
 
         y_pin = buf_pins["4"]
-        led_in = b.place_led_indicator(y_pin[0] + LED_GAP_X, y_pin[1])
-        b.add_wire(*y_pin, *led_in)
         b.add_label(f"D{bit}", *y_pin, justify="right")
 
     clk_ys = [p[1] for p in clk_pin_positions]

@@ -32,7 +32,8 @@
       "WebFetch(domain:freerouting.org)",
       "WebFetch(domain:dev-docs.kicad.org)",
       "WebFetch(domain:forum.kicad.info)",
-      "WebFetch(domain:gitlab.com)"
+      "WebFetch(domain:gitlab.com)",
+      "mcp__ide__executeCode"
     ],
     "deny": [],
     "ask": []

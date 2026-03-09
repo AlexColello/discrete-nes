@@ -187,6 +187,12 @@ def import_ses(pcb_input, ses_path, pcb_output):
     # Copy unrouted board to output path first (import modifies in place)
     shutil.copy2(pcb_input, pcb_output)
 
+    # Copy .kicad_pro so routed board inherits project settings (clearance etc.)
+    pro_src = os.path.splitext(pcb_input)[0] + ".kicad_pro"
+    pro_dst = os.path.splitext(pcb_output)[0] + ".kicad_pro"
+    if os.path.isfile(pro_src):
+        shutil.copy2(pro_src, pro_dst)
+
     script = textwrap.dedent(f"""\
         import pcbnew
         board = pcbnew.LoadBoard(r"{pcb_output}")
