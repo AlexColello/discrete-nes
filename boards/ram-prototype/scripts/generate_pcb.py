@@ -989,77 +989,103 @@ def preroute_nand_connections(pcb, netlist_data):
         clk_led = find_led_anode(clk_net)
         oe_led = find_led_anode(oe_net)
 
-        # === CLK output routing (topmost pin, escapes UP) ===
-        # Seg 1: escape UP from CLK pin to CLK bus Y
-        pcb.add_trace(clk_pos, (clk_pos[0], clk_bus_y),
+        # === CLK output routing (topmost pin, escapes UP then diagonal UP-RIGHT) ===
+        # Seg 1: vertical UP 0.50mm
+        vert_up_y = round(clk_pos[1] - 0.50, 2)
+        pcb.add_trace(clk_pos, (clk_pos[0], vert_up_y),
                       clk_net, SIGNAL_TRACE_W, "F.Cu")
         traces += 1
 
-        # Seg 2: CLK bus extension RIGHT to leftmost DFF stub
-        pcb.add_trace((clk_pos[0], clk_bus_y), (clk_bus_end_x, clk_bus_y),
+        # Seg 2: 45° UP-RIGHT to CLK bus Y
+        diag_dy = abs(clk_bus_y - vert_up_y)
+        diag_end_x = round(clk_pos[0] + diag_dy, 2)
+        pcb.add_trace((clk_pos[0], vert_up_y), (diag_end_x, clk_bus_y),
                       clk_net, SIGNAL_TRACE_W, "F.Cu")
         traces += 1
 
-        # CLK LED detour: LEFT at bus Y, DOWN to LED, RIGHT to LED anode
+        # Seg 3: CLK bus extension RIGHT to leftmost DFF stub
+        pcb.add_trace((diag_end_x, clk_bus_y), (clk_bus_end_x, clk_bus_y),
+                      clk_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # CLK LED detour: RIGHT-side vertical trunk down to LED
         if clk_led:
-            detour_x = round(byte_x - 0.6, 2)
-
-            # Seg 3: horizontal LEFT at CLK bus Y
-            pcb.add_trace((clk_pos[0], clk_bus_y), (detour_x, clk_bus_y),
+            # Seg 4: 45° DOWN-RIGHT from T-junction (0.30mm)
+            dr_len = 0.30
+            trunk_x = round(diag_end_x + dr_len, 2)
+            trunk_start_y = round(clk_bus_y + dr_len, 2)
+            pcb.add_trace((diag_end_x, clk_bus_y), (trunk_x, trunk_start_y),
                           clk_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 4: vertical DOWN to LED Y
-            pcb.add_trace((detour_x, clk_bus_y), (detour_x, clk_led[1]),
+            # Seg 5: vertical DOWN to turn point
+            led_dx = trunk_x - clk_led[0]
+            turn_y = round(clk_led[1] - led_dx, 2)
+            pcb.add_trace((trunk_x, trunk_start_y), (trunk_x, turn_y),
                           clk_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 5: horizontal RIGHT to LED anode
-            pcb.add_trace((detour_x, clk_led[1]), clk_led,
+            # Seg 6: 45° DOWN-LEFT to LED anode
+            pcb.add_trace((trunk_x, turn_y), clk_led,
                           clk_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-        # === OE output routing (lower pin, all F.Cu through LED) ===
-        trunk_x = round(byte_x + 3.0, 2)
-
+        # === OE output routing (escape RIGHT, vertical trunk through LEDs, diagonal to OE bus) ===
         if oe_led:
-            # Seg 1a: short horizontal RIGHT escape (0.10mm) from OE pin.
-            # This pushes the diagonal start away from pin 1 (below),
-            # ensuring 0.19mm clearance (vs 0.12mm without the stub).
-            oe_stub_len = 0.10
-            oe_stub_end = (round(oe_pos[0] + oe_stub_len, 2), oe_pos[1])
+            # Seg 1a: stub RIGHT (0.10mm) — clearance from pin 1 below
+            oe_stub_end = (round(oe_pos[0] + 0.10, 2), oe_pos[1])
             pcb.add_trace(oe_pos, oe_stub_end,
                           oe_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 1b: 45° diagonal DOWN-RIGHT to LED X.
-            # Moves OE copper away from pin 5 (above), freeing space
-            # for the COL_SEL via.
-            diag_dx = round(oe_led[0] - oe_stub_end[0], 2)
-            diag_end = (oe_led[0], round(oe_stub_end[1] + abs(diag_dx), 2))
-            pcb.add_trace(oe_stub_end, diag_end,
+            # Seg 1b: 45° DOWN-RIGHT escape (0.60mm each axis)
+            dr_end = (round(oe_stub_end[0] + 0.60, 2), round(oe_stub_end[1] + 0.60, 2))
+            pcb.add_trace(oe_stub_end, dr_end,
                           oe_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 2: vertical DOWN from diagonal end to LED anode
-            pcb.add_trace(diag_end, oe_led,
+            # Seg 2: short vertical DOWN (0.65mm)
+            vert_end = (dr_end[0], round(dr_end[1] + 0.65, 2))
+            pcb.add_trace(dr_end, vert_end,
                           oe_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 3: horizontal RIGHT from LED anode to trunk X
-            pcb.add_trace(oe_led, (trunk_x, oe_led[1]),
+            # Seg 3: 45° DOWN-LEFT back to pin column X
+            dl_dx = round(dr_end[0] - oe_pos[0], 2)
+            dl_end = (oe_pos[0], round(vert_end[1] + dl_dx, 2))
+            pcb.add_trace(vert_end, dl_end,
                           oe_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 4: vertical DOWN from trunk to OE bus Y
-            pcb.add_trace((trunk_x, oe_led[1]), (trunk_x, oe_bus_y),
+            # Seg 4a: vertical DOWN to LED Y (trunk between LEDs)
+            pcb.add_trace(dl_end, (dl_end[0], oe_led[1]),
                           oe_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 5: horizontal RIGHT OE bus extension
-            pcb.add_trace((trunk_x, oe_bus_y), (leftmost_buf_oe_x, oe_bus_y),
+            # Seg 4b: horizontal LEFT to LED anode
+            pcb.add_trace((dl_end[0], oe_led[1]), oe_led,
                           oe_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
+
+            # Seg 5: extend trunk DOWN past LED cathode vias (1.5mm below anode)
+            trunk_x = dl_end[0]
+            trunk_ext_y = round(oe_led[1] + 1.5, 2)
+            pcb.add_trace((trunk_x, oe_led[1]), (trunk_x, trunk_ext_y),
+                          oe_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+            # Seg 6: 45° DOWN-RIGHT diagonal to OE bus Y
+            bus_dy = round(oe_bus_y - trunk_ext_y, 2)
+            bus_diag_end = (round(trunk_x + bus_dy, 2), oe_bus_y)
+            pcb.add_trace((trunk_x, trunk_ext_y), bus_diag_end,
+                          oe_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+            # Seg 7: horizontal RIGHT to BUF OE bus
+            if abs(bus_diag_end[0] - leftmost_buf_oe_x) > 0.01:
+                pcb.add_trace(bus_diag_end, (leftmost_buf_oe_x, oe_bus_y),
+                              oe_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
 
         # === NAND Power Vias ===
         pwr_via_x = round(byte_x + 0.15, 2)
@@ -1850,6 +1876,8 @@ def main():
 
             # Place both NAND LEDs side by side below the NAND IC
             # (shifted +1.0mm X to match NAND nudge)
+            # Reverse so pin 3 (OE) LED goes LEFT (x=0.5), pin 7 (CLK) LED RIGHT (x=2.0)
+            nand_led_pairs = list(reversed(nand_led_pairs))
             nand_led_y = round(ch - 0.5, 2)  # same Y as buffer row
             for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
                 lx = round(0.5 + i * 1.5, 2)  # below NAND IC
