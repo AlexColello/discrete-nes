@@ -17,14 +17,14 @@ After placement, pre-routes repetitive local connections:
   - Connector signal→LED stubs
 
 Layout:
-  +------+-----------+-----------+-----------+
-  |      | ADDR DEC  | BYTE 0    | BYTE 4    |
-  |      |           | BYTE 1    | BYTE 5    |
-  | CONN +-----------+ BYTE 2    | BYTE 6    |
-  |      | CTRL LOGIC| BYTE 3    | BYTE 7    |
-  +------+-----------+-----------+-----------+
-                     | COL SEL |WRITE EN|READ EN|
-                     +---------+--------+-------+
+  +------+-----------+---------+---------+-----------+-----------+
+  |      | CTRL LOGIC|         |         | BYTE 0    | BYTE 4    |
+  |      |           |WRITE EN | READ EN | BYTE 1    | BYTE 5    |
+  | CONN +-----------+         |         | BYTE 2    | BYTE 6    |
+  |      | ADDR DEC  |         |         | BYTE 3    | BYTE 7    |
+  +------+-----------+---------+---------+-----------+-----------+
+                                         | COL SEL |TEST GRID|
+                                         +---------+---------+
 
   Each byte has 1 NAND (74LVC2G00) + 8 DFFs + 8 buffers in 9 columns.
   Bytes sorted by address: top-left going down first, then right.
@@ -1834,7 +1834,9 @@ def main():
         elif is_ram:
             max_cols = 9  # NAND + 8 bits per line (DFFs row + buffers row)
         elif name == "addr_decoder":
-            max_cols = 3  # 2 INV + 4 AND2
+            max_cols = 2  # INVs in top row, ANDs below (custom layout below)
+        elif name in ("write_en_gen", "read_en_gen"):
+            max_cols = 1  # Single column for vertical alignment
         else:
             max_cols = 3
 
@@ -1871,8 +1873,61 @@ def main():
             # Spacer before BUFs so they align at col 1 (matching DFF columns)
             ic_cells = nand_cells + list(reversed(dff_cells)) + [(None, None, None)] + list(reversed(buf_cells))
 
-        placements = compute_group_layout(ic_cells, standalone, max_cols,
-                                          cell_w=cw, cell_h=ch)
+        # Custom addr_decoder layout: INVs in top row, ANDs in column below
+        if name == "addr_decoder":
+            inv_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G04"]
+            and_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] != "74LVC1G04"]
+            # INVs across top (max_cols=2), then ANDs in single column below
+            ic_cells = inv_cells + and_cells
+            # Use 2 cols for INV row, then force ANDs into col 0 only
+            placements = []
+            row, col = 0, 0
+            inv_count = len(inv_cells)
+            for idx, (ic, r, led) in enumerate(ic_cells):
+                if idx < inv_count:
+                    # INV row: max_cols=2
+                    x = col * cw
+                    y = row * ch
+                    if ic is not None:
+                        placements.append((ic, x, y))
+                    if led:
+                        placements.append((led, x + LED_OFFSET_X, y))
+                    if r:
+                        placements.append((r, x + LED_OFFSET_X, y))
+                    col += 1
+                    if col >= 2:
+                        col = 0
+                        row += 1
+                else:
+                    # AND column: max_cols=1
+                    if idx == inv_count:
+                        # Start ANDs on next row after INVs, col 0
+                        if col > 0:
+                            row += 1
+                        col = 0
+                    x = col * cw
+                    y = row * ch
+                    if ic is not None:
+                        placements.append((ic, x, y))
+                    if led:
+                        placements.append((led, x + LED_OFFSET_X, y))
+                    if r:
+                        placements.append((r, x + LED_OFFSET_X, y))
+                    row += 1
+            # Add standalone components
+            if standalone:
+                if col > 0:
+                    row += 1
+                for r_s, led_s in standalone:
+                    x = 0
+                    y = row * ch
+                    placements.append((r_s, x, y))
+                    if led_s:
+                        placements.append((led_s, x + 1.5, y))
+                    row += 1
+        else:
+            placements = compute_group_layout(ic_cells, standalone, max_cols,
+                                              cell_w=cw, cell_h=ch)
 
         if is_ram:
             # Nudge NAND IC: +1mm right, +0.25mm down relative to bits
@@ -1956,37 +2011,25 @@ def main():
         group_sizes[name] = compute_group_size(placements, cell_w=cw, cell_h=ch)
 
     # --- Compute absolute positions ---
+    # Layout: Connector | ctrl_logic+addr_dec | write_en | read_en | RAM
+    #         Below RAM: column_select (centered) + layer_test
     total_placed = 0
 
-    # Column 0: Connector (root group) on the far left
-    col0_x = PLACEMENT_ORIGIN
-    col0_y = PLACEMENT_ORIGIN
     root_w, root_h = group_sizes.get("root", (0, 0))
-
-    # Column 1: addr_decoder + control_logic stacked
-    col1_x = col0_x + root_w + GROUP_GAP_X
-    col1_y = PLACEMENT_ORIGIN
     dec_w, dec_h = group_sizes.get("addr_decoder", (0, 0))
     ctrl_w, ctrl_h = group_sizes.get("control_logic", (0, 0))
-    col1_w = max(dec_w, ctrl_w)
-
-    # Column 2+: RAM bytes in 2-col × 4-row grid (column-major: down first)
-    #   Col 0: byte_0, byte_1, byte_2, byte_3
-    #   Col 1: byte_4, byte_5, byte_6, byte_7
-    ram_x = col1_x + col1_w + GROUP_GAP_X
-    ram_y = PLACEMENT_ORIGIN
+    wen_w, wen_h = group_sizes.get("write_en_gen", (0, 0))
+    ren_w, ren_h = group_sizes.get("read_en_gen", (0, 0))
+    colsel_w, colsel_h = group_sizes.get("column_select", (0, 0))
 
     byte_col0 = ["byte_0", "byte_1", "byte_2", "byte_3"]
     byte_col1 = ["byte_4", "byte_5", "byte_6", "byte_7"]
     all_bytes = byte_col0 + byte_col1
 
-    # Compute byte grid dimensions from actual placement positions
-    # (not from compute_group_size which adds IC_CELL_W/IC_CELL_H padding)
+    # Compute byte grid dimensions
     byte_col_w = max((group_sizes.get(b, (0, 0))[0] for b in all_bytes), default=0)
     byte_row_h = max((group_sizes.get(b, (0, 0))[1] for b in all_bytes), default=0)
 
-    # Byte column center span: compute from actual placement positions (not
-    # compute_group_size which adds IC_CELL_W padding).
     byte_center_span_x = 0
     for b in all_bytes:
         layout = group_layouts.get(b, [])
@@ -1994,13 +2037,31 @@ def main():
             xs = [x for _, x, _ in layout]
             byte_center_span_x = max(byte_center_span_x, max(xs) - min(xs))
 
-    # Total RAM area height
     ram_total_h = 4 * byte_row_h + 3 * GROUP_GAP_Y
 
-    # Vertically center connector and decode/ctrl column with RAM area
-    col0_y = PLACEMENT_ORIGIN + max(0, (ram_total_h - root_h) / 2)
-    # Stack decoder + ctrl to fill the height next to RAM
-    col1_y = PLACEMENT_ORIGIN + 4.0  # shifted down 4mm
+    # Col 1: control_logic on top, addr_decoder below with gap
+    col1_x = PLACEMENT_ORIGIN + root_w + GROUP_GAP_X
+    col1_y = PLACEMENT_ORIGIN
+    ctrl_abs_y = col1_y  # control_logic at top
+    dec_abs_y = ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3  # addr_decoder below with extra gap
+    col1_w = max(dec_w, ctrl_w)
+    col1_total_h = (dec_abs_y + dec_h) - col1_y
+
+    # Col 0: connector centered with ctrl+addr stack
+    col0_x = PLACEMENT_ORIGIN
+    col0_y = col1_y + max(0, (col1_total_h - root_h) / 2)
+
+    # Col 2: write_en_gen (single column, top-aligned with col 1)
+    col2_x = col1_x + col1_w + GROUP_GAP_X
+    col2_y = col1_y
+
+    # Col 3: read_en_gen (single column, top-aligned)
+    col3_x = col2_x + wen_w + GROUP_GAP_X
+    col3_y = col1_y
+
+    # Col 4+: RAM bytes (2×4 grid, top-aligned)
+    ram_x = col3_x + ren_w + GROUP_GAP_X
+    ram_y = col1_y
 
     # Place connector (root) — connector bus LEDs horizontal (180°),
     # connector Rs horizontal (0°) for clean LED→R trace clearance
@@ -2017,40 +2078,43 @@ def main():
             total_placed += 1
 
     # Add silkscreen pin name labels to the left of the connector
-    # Pin ordering: pin 1 (GND) at bottom, pin 16 (VCC) at top
-    # After 180° rotation + normalization (shift = 14*pitch, since pin 15
-    # is the highest signal pin — VCC/GND excluded from LED placements),
-    # pin N is at rel_y = (15 - N) * CONN_PIN_PITCH
     conn_pin_names = {
-        1: "GND", 2: "D7", 3: "D6", 4: "D5", 5: "D4",
-        6: "D3", 7: "D2", 8: "D1", 9: "D0", 10: "nCE",
-        11: "nWE", 12: "nOE", 13: "A2", 14: "A1", 15: "A0", 16: "VCC",
+        1: "GND", 2: "A2", 3: "D7", 4: "D6", 5: "D5", 6: "D4",
+        7: "D3", 8: "D2", 9: "D1", 10: "D0", 11: "A0",
+        12: "A1", 13: "nCE", 14: "nWE", 15: "nOE", 16: "VCC",
     }
-    label_x = round(col0_x - 3.0, 2)  # 3mm to the left of connector center
+    label_x = round(col0_x - 3.0, 2)
     for pin_num, pin_name in conn_pin_names.items():
         label_y = round(col0_y + (15 - pin_num) * CONN_PIN_PITCH, 2)
         pcb.add_silkscreen_text(pin_name, label_x, label_y, size=0.8)
 
-    # Place addr_decoder (top of column 1)
-    if "addr_decoder" in group_layouts:
-        for comp, rel_x, rel_y in group_layouts["addr_decoder"]:
-            _place_component(pcb, comp, col1_x + rel_x, col1_y + rel_y, netlist_data)
-            total_placed += 1
-
-    # Place control_logic (below addr_decoder in column 1)
-    ctrl_y = col1_y + dec_h + GROUP_GAP_Y
+    # Place control_logic (top of column 1)
     if "control_logic" in group_layouts:
         for comp, rel_x, rel_y in group_layouts["control_logic"]:
-            _place_component(pcb, comp, col1_x + rel_x, ctrl_y + rel_y, netlist_data)
+            _place_component(pcb, comp, col1_x + rel_x, ctrl_abs_y + rel_y, netlist_data)
+            total_placed += 1
+
+    # Place addr_decoder (below control_logic in column 1)
+    if "addr_decoder" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["addr_decoder"]:
+            _place_component(pcb, comp, col1_x + rel_x, dec_abs_y + rel_y, netlist_data)
+            total_placed += 1
+
+    # Place write_en_gen (column 2)
+    if "write_en_gen" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["write_en_gen"]:
+            _place_component(pcb, comp, col2_x + rel_x, col2_y + rel_y, netlist_data)
+            total_placed += 1
+
+    # Place read_en_gen (column 3)
+    if "read_en_gen" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["read_en_gen"]:
+            _place_component(pcb, comp, col3_x + rel_x, col3_y + rel_y, netlist_data)
             total_placed += 1
 
     # Place RAM bytes: column-major (down first, then right)
-    # Track absolute positions for silkscreen annotation
-    byte_bounds = {}  # name -> (min_x, min_y, max_x, max_y)
+    byte_bounds = {}
     for col_idx, byte_col in enumerate([byte_col0, byte_col1]):
-        # Column offset: center span already includes R positions (rightmost R
-        # at last_IC_x + R_OFFSET_X). Just add R courtyard half-width + gap +
-        # IC courtyard half-width to get actual physical gap = BYTE_COL_GAP.
         bx = ram_x + col_idx * (byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75)
         for row_idx, name in enumerate(byte_col):
             if name not in group_layouts:
@@ -2070,9 +2134,8 @@ def main():
                 byte_bounds[name] = (min(xs), min(ys), max(xs), max(ys))
 
     # Add unified silkscreen grid around all 8 bytes
-    SILK_MARGIN = 3.0  # mm margin around component centers
+    SILK_MARGIN = 3.0
     if byte_bounds:
-        # Compute outer bounding box of all bytes
         all_min_x = min(b[0] for b in byte_bounds.values())
         all_min_y = min(b[1] for b in byte_bounds.values())
         all_max_x = max(b[2] for b in byte_bounds.values())
@@ -2083,19 +2146,15 @@ def main():
         grid_x2 = round(all_max_x + SILK_MARGIN, 2)
         grid_y2 = round(all_max_y + SILK_MARGIN, 2)
 
-        # Outer rectangle
         pcb.add_silkscreen_rect(grid_x1, grid_y1,
                                 round(grid_x2 - grid_x1, 2),
                                 round(grid_y2 - grid_y1, 2))
 
-        # Vertical divider between column 0 and column 1
-        # Midpoint of gap between the two byte columns
         col0_max_x = max(byte_bounds[b][2] for b in byte_col0 if b in byte_bounds)
         col1_min_x = min(byte_bounds[b][0] for b in byte_col1 if b in byte_bounds)
         div_x = round((col0_max_x + col1_min_x) / 2 - 0.25, 2)
         pcb.add_silkscreen_line(div_x, grid_y1, div_x, grid_y2)
 
-        # 3 horizontal dividers between rows
         for row in range(3):
             top_name = f"byte_{row}"
             bot_name = f"byte_{row + 1}"
@@ -2105,33 +2164,28 @@ def main():
                 div_y = round((top_max_y + bot_min_y) / 2, 2)
                 pcb.add_silkscreen_line(grid_x1, div_y, grid_x2, div_y)
 
-        # Address labels on the outside border of the grid
         for name, (bmin_x, bmin_y, bmax_x, bmax_y) in byte_bounds.items():
             byte_idx = int(name.split("_")[1])
             label = f"0x{byte_idx}"
-            # Vertically center label in the byte's row
             label_y = round((bmin_y + bmax_y) / 2, 2)
             if byte_idx < 4:
-                # Left column: label on left edge, outside the grid
                 label_x = round(grid_x1 - 1.5, 2)
             else:
-                # Right column: label on right edge, outside the grid
                 label_x = round(grid_x2 + 1.5, 2)
             pcb.add_silkscreen_text(label, label_x, label_y, size=1.0)
 
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
-    # Place control logic below RAM: column_select + write_en_gen + read_en_gen
+    # Place column_select below RAM, centered horizontally with RAM area
     ctrl_row_y = ram_y + ram_total_h + CTRL_ROW_GAP
-    ctrl_row_x = ram_x
-    for name in ["column_select", "write_en_gen", "read_en_gen"]:
-        if name not in group_layouts:
-            continue
-        w, h = group_sizes[name]
-        for comp, rel_x, rel_y in group_layouts[name]:
-            _place_component(pcb, comp, ctrl_row_x + rel_x, ctrl_row_y + rel_y, netlist_data)
+    ram_center_x = ram_x + (byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75) / 2
+    colsel_x = round(ram_center_x - colsel_w / 2, 2)
+    if "column_select" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["column_select"]:
+            _place_component(pcb, comp, colsel_x + rel_x, ctrl_row_y + rel_y, netlist_data)
             total_placed += 1
-        ctrl_row_x += w + CTRL_GROUP_GAP_X
+    # Track end position for layer test grid
+    ctrl_row_x = colsel_x + colsel_w + CTRL_GROUP_GAP_X
 
     print(f"  Total components placed: {total_placed}")
 
