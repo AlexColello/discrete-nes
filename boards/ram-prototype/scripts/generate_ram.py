@@ -9,8 +9,8 @@ Circuit architecture (row/column addressing):
   - Row enables: WRITE_EN_ROW_i = AND(WRITE_ACTIVE, ROW_SEL_i)
                  READ_EN_ROW_i  = AND(READ_EN, ROW_SEL_i)
   - Per-byte local NAND gating:
-      WRITE_CLK = NAND(WRITE_EN_ROW, COL_SEL)
-      BUF_OE    = NAND(READ_EN_ROW, COL_SEL)
+      WRITE_CLK = NAND(COL_SEL, WRITE_EN_ROW)
+      BUF_OE    = NAND(COL_SEL, READ_EN_ROW)
   - 8 bytes x 8 bits = 64 D flip-flops (74LVC1G79) + 64 tri-state buffers (74LVC1G125)
   - LED on EVERY gate output and stored bit
 
@@ -454,8 +454,8 @@ def generate_byte_sheet():
     Generate one memory byte (8 bits) with local NAND gating -- reused for all 8 bytes.
 
     Inputs:  WRITE_EN_ROW, READ_EN_ROW, COL_SEL, D0-D7
-    Internal: WRITE_CLK_LOCAL = NAND(WRITE_EN_ROW, COL_SEL) -> DFF clocks
-              BUF_OE_LOCAL   = NAND(READ_EN_ROW, COL_SEL)  -> buffer OE
+    Internal: WRITE_CLK_LOCAL = NAND(COL_SEL, WRITE_EN_ROW) -> DFF clocks
+              BUF_OE_LOCAL   = NAND(COL_SEL, READ_EN_ROW)  -> buffer OE
     """
     b = SchematicBuilder(title="Memory Byte", page_size="A2",
                          project_name=PROJECT_NAME)
@@ -464,31 +464,32 @@ def generate_byte_sheet():
     # -- Local NAND gating section at top --
     nand_x = base_x + 18 * GRID
 
-    # Hierarchy input labels
-    wen_hier_y = snap(base_y)
-    ren_hier_y = snap(base_y + SYM_SPACING_Y)
-    col_hier_y = snap(base_y + 2 * SYM_SPACING_Y)
+    # Hierarchy input labels — COL_SEL first so WRITE/READ_EN_ROW verticals
+    # go UP to pin B without passing through pin A (same X column)
+    col_hier_y = snap(base_y)
+    wen_hier_y = snap(base_y + SYM_SPACING_Y)
+    ren_hier_y = snap(base_y + 2 * SYM_SPACING_Y)
 
+    b.add_hier_label("COL_SEL", base_x, col_hier_y,
+                     shape="input", justify="right")
     b.add_hier_label("WRITE_EN_ROW", base_x, wen_hier_y,
                      shape="input", justify="right")
     b.add_hier_label("READ_EN_ROW", base_x, ren_hier_y,
                      shape="input", justify="right")
-    b.add_hier_label("COL_SEL", base_x, col_hier_y,
-                     shape="input", justify="right")
 
-    # NAND1: WRITE_CLK_LOCAL = NAND(WRITE_EN_ROW, COL_SEL) — unit 1 of 74LVC2G00
+    # NAND1: WRITE_CLK_LOCAL = NAND(COL_SEL, WRITE_EN_ROW) — unit 1 of 74LVC2G00
     nand1_y = snap(base_y + 4 * GRID)
     nand_ref, nand1_pins = b.place_symbol("74LVC2G00", nand_x, nand1_y)
-    nand1_a = nand1_pins["1"]  # WRITE_EN_ROW
-    nand1_b = nand1_pins["2"]  # COL_SEL
+    nand1_a = nand1_pins["1"]  # COL_SEL
+    nand1_b = nand1_pins["2"]  # WRITE_EN_ROW
     nand1_out = nand1_pins["7"]
 
-    # NAND2: BUF_OE_LOCAL = NAND(READ_EN_ROW, COL_SEL) — unit 2 of 74LVC2G00
+    # NAND2: BUF_OE_LOCAL = NAND(COL_SEL, READ_EN_ROW) — unit 2 of 74LVC2G00
     nand2_y = snap(nand1_y + SYM_SPACING_Y)
     _, nand2_pins = b.place_symbol("74LVC2G00", nand_x, nand2_y,
                                    unit=2, ref_override=nand_ref)
-    nand2_a = nand2_pins["5"]  # READ_EN_ROW
-    nand2_b = nand2_pins["6"]  # COL_SEL
+    nand2_a = nand2_pins["5"]  # COL_SEL
+    nand2_b = nand2_pins["6"]  # READ_EN_ROW
     nand2_out = nand2_pins["3"]
 
     # Power unit (unit 3) — placed between the two NAND gates
@@ -497,23 +498,29 @@ def generate_byte_sheet():
                                       unit=3, ref_override=nand_ref)
     b.connect_power(nand_pwr_pins, vcc_pin="8", gnd_pin="4")
 
-    # Wire WRITE_EN_ROW -> NAND1 pin A
-    b.add_wire(base_x, wen_hier_y, nand1_a[0], wen_hier_y)
-    if abs(wen_hier_y - nand1_a[1]) > 0.01:
-        b.add_wire(nand1_a[0], wen_hier_y, nand1_a[0], nand1_a[1])
-
-    # Wire READ_EN_ROW -> NAND2 pin A
-    b.add_wire(base_x, ren_hier_y, nand2_a[0], ren_hier_y)
-    if abs(ren_hier_y - nand2_a[1]) > 0.01:
-        b.add_wire(nand2_a[0], ren_hier_y, nand2_a[0], nand2_a[1])
-
-    # Wire COL_SEL -> both NAND pin B via trunk
-    col_trunk_x = snap(nand1_b[0] - 3 * GRID)
+    # Wire COL_SEL -> both NAND pin A via trunk
+    col_trunk_x = snap(nand1_a[0] - 3 * GRID)
     b.add_wire(base_x, col_hier_y, col_trunk_x, col_hier_y)
     b.add_segmented_trunk(col_trunk_x,
-                          [col_hier_y, nand1_b[1], nand2_b[1]])
-    b.add_wire(col_trunk_x, nand1_b[1], nand1_b[0], nand1_b[1])
-    b.add_wire(col_trunk_x, nand2_b[1], nand2_b[0], nand2_b[1])
+                          [col_hier_y, nand1_a[1], nand2_a[1]])
+    b.add_wire(col_trunk_x, nand1_a[1], nand1_a[0], nand1_a[1])
+    b.add_wire(col_trunk_x, nand2_a[1], nand2_a[0], nand2_a[1])
+
+    # Wire WRITE_EN_ROW -> NAND1 pin B
+    # Route vertical at offset X to avoid ghost pins at nand1_b[0] (x=55.88)
+    wen_vert_x = snap(nand1_b[0] - GRID)  # 53.34 — clears all pins at 55.88
+    b.add_wire(base_x, wen_hier_y, wen_vert_x, wen_hier_y)
+    if abs(wen_hier_y - nand1_b[1]) > 0.01:
+        b.add_wire(wen_vert_x, wen_hier_y, wen_vert_x, nand1_b[1])
+        b.add_wire(wen_vert_x, nand1_b[1], nand1_b[0], nand1_b[1])
+
+    # Wire READ_EN_ROW -> NAND2 pin B
+    # Route vertical at offset X to avoid ghost pins at nand2_b[0] (x=55.88)
+    ren_vert_x = snap(nand2_b[0] - GRID)  # 53.34 — clears all pins at 55.88
+    b.add_wire(base_x, ren_hier_y, ren_vert_x, ren_hier_y)
+    if abs(ren_hier_y - nand2_b[1]) > 0.01:
+        b.add_wire(ren_vert_x, ren_hier_y, ren_vert_x, nand2_b[1])
+        b.add_wire(ren_vert_x, nand2_b[1], nand2_b[0], nand2_b[1])
 
     # NAND1 output -> LED -> route to WRITE_CLK trunk
     nand1_led_x = snap(nand1_out[0] + 2 * GRID)
@@ -799,8 +806,8 @@ def generate_root_sheet():
     # ================================================================
     # Byte sheet blocks (4 rows x 2 columns)
     # ================================================================
-    byte_pin_defs = [("WRITE_EN_ROW", "input"), ("READ_EN_ROW", "input"),
-                     ("COL_SEL", "input")]
+    byte_pin_defs = [("COL_SEL", "input"),
+                     ("WRITE_EN_ROW", "input"), ("READ_EN_ROW", "input")]
     byte_pin_defs += [(f"D{bit}", "bidirectional") for bit in range(8)]
     byte_h = _sheet_height(len(byte_pin_defs))
 
