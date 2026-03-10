@@ -17,14 +17,14 @@ After placement, pre-routes repetitive local connections:
   - Connector signal→LED stubs
 
 Layout:
-  +------+-----------+---------+---------+-----------+-----------+-----------+
-  |      | CTRL LOGIC|         |         | BYTE 0    | BYTE 4    |           |
-  |      |           |WRITE EN | READ EN | BYTE 1    | BYTE 5    | TEST GRID |
-  | CONN +-----------+         |         | BYTE 2    | BYTE 6    |           |
-  |      | ADDR DEC  |         |         | BYTE 3    | BYTE 7    |           |
-  +------+-----------+---------+---------+-----------+-----------+-----------+
-                                              | COL SEL |
-                                              +---------+
+  +------+-----------+---------+-----------+-----------+-----------+
+  |      | CTRL LOGIC|ROW CTRL | BYTE 0    | BYTE 4    |           |
+  |      |           |  0..3   | BYTE 1    | BYTE 5    | TEST GRID |
+  | CONN +-----------+         | BYTE 2    | BYTE 6    |           |
+  |      | ADDR DEC  |         | BYTE 3    | BYTE 7    |           |
+  +------+-----------+---------+-----------+-----------+-----------+
+                                     | COL SEL |
+                                     +---------+
 
   Each byte has 1 NAND (74LVC2G00) + 8 DFFs + 8 buffers in 9 columns.
   Bytes sorted by address: top-left going down first, then right.
@@ -107,10 +107,11 @@ def group_components(netlist_data):
             groups["control_logic"].append(comp)
         elif "Column Select" in sheetpath:
             groups["column_select"].append(comp)
-        elif "Write Enable Gen" in sheetpath:
-            groups["write_en_gen"].append(comp)
-        elif "Read Enable Gen" in sheetpath:
-            groups["read_en_gen"].append(comp)
+        elif "Row Control" in sheetpath:
+            for i in range(4):
+                if f"Row Control {i}" in sheetpath:
+                    groups[f"row_ctrl_{i}"].append(comp)
+                    break
         else:
             # Byte sheets: /Byte 0/, /Byte 1/, etc.
             for i in range(8):
@@ -1817,7 +1818,7 @@ def main():
     #   Column 0: Connector (root) on the left
     #   Column 1: addr_decoder (top) + control_logic (bottom)
     #   Columns 2+: RAM bytes in 4-col x 2-row grid
-    #   Below RAM: column_select + write_en_gen + read_en_gen
+    #   Below RAM: column_select
 
     # Pre-compute layouts for each group
     group_layouts = {}
@@ -1827,15 +1828,15 @@ def main():
     for name, comps in groups.items():
         # Determine max columns and cell dimensions based on group type
         is_ram = name.startswith("byte")
-        is_ctrl = name in ("addr_decoder", "control_logic", "column_select",
-                           "write_en_gen", "read_en_gen")
+        is_ctrl = name in ("addr_decoder", "control_logic", "column_select") or \
+                  name.startswith("row_ctrl_")
         if name == "root":
             max_cols = 3  # Connector + root LEDs
         elif is_ram:
             max_cols = 9  # NAND + 8 bits per line (DFFs row + buffers row)
         elif name == "addr_decoder":
             max_cols = 2  # INVs in top row, ANDs below (custom layout below)
-        elif name in ("write_en_gen", "read_en_gen"):
+        elif name.startswith("row_ctrl_"):
             max_cols = 1  # Single column for vertical alignment
         else:
             max_cols = 3
@@ -1999,16 +2000,20 @@ def main():
         group_sizes[name] = compute_group_size(placements, cell_w=cw, cell_h=ch)
 
     # --- Compute absolute positions ---
-    # Layout: Connector | ctrl_logic+addr_dec | write_en | read_en | RAM | layer_test
+    # Layout: Connector | ctrl_logic+addr_dec | row_ctrl(x4) | RAM | layer_test
     #         Below RAM: column_select (centered under full RAM block)
     total_placed = 0
 
     root_w, root_h = group_sizes.get("root", (0, 0))
     dec_w, dec_h = group_sizes.get("addr_decoder", (0, 0))
     ctrl_w, ctrl_h = group_sizes.get("control_logic", (0, 0))
-    wen_w, wen_h = group_sizes.get("write_en_gen", (0, 0))
-    ren_w, ren_h = group_sizes.get("read_en_gen", (0, 0))
     colsel_w, colsel_h = group_sizes.get("column_select", (0, 0))
+
+    # Row control groups — compute max width for column alignment
+    rc_names = [f"row_ctrl_{i}" for i in range(4)]
+    rc_sizes = [group_sizes.get(n, (0, 0)) for n in rc_names]
+    rc_w = max((s[0] for s in rc_sizes), default=0)
+    rc_h_each = max((s[1] for s in rc_sizes), default=0)
 
     byte_col0 = ["byte_0", "byte_1", "byte_2", "byte_3"]
     byte_col1 = ["byte_4", "byte_5", "byte_6", "byte_7"]
@@ -2036,16 +2041,12 @@ def main():
     dec_abs_y = ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3  # addr_decoder below with extra gap
     col1_w = max(dec_w, ctrl_w)
 
-    # Col 2: write_en_gen (single column, top-aligned with col 1)
+    # Col 2: row_ctrl (single column, 4 groups stacked vertically)
     col2_x = col1_x + col1_w + GROUP_GAP_X
     col2_y = col1_y
 
-    # Col 3: read_en_gen (single column, top-aligned)
-    col3_x = col2_x + wen_w + GROUP_GAP_X
-    col3_y = col1_y
-
-    # Col 4+: RAM bytes (2×4 grid, top-aligned)
-    ram_x = col3_x + ren_w + GROUP_GAP_X
+    # Col 3: RAM bytes (2×4 grid, top-aligned)
+    ram_x = col2_x + rc_w + GROUP_GAP_X
     ram_y = col1_y
 
     # Compute total board content height (RAM + column_select below)
@@ -2092,16 +2093,14 @@ def main():
             _place_component(pcb, comp, col1_x + rel_x, dec_abs_y + rel_y, netlist_data)
             total_placed += 1
 
-    # Place write_en_gen (column 2)
-    if "write_en_gen" in group_layouts:
-        for comp, rel_x, rel_y in group_layouts["write_en_gen"]:
-            _place_component(pcb, comp, col2_x + rel_x, col2_y + rel_y, netlist_data)
-            total_placed += 1
-
-    # Place read_en_gen (column 3)
-    if "read_en_gen" in group_layouts:
-        for comp, rel_x, rel_y in group_layouts["read_en_gen"]:
-            _place_component(pcb, comp, col3_x + rel_x, col3_y + rel_y, netlist_data)
+    # Place row_ctrl groups (column 2, stacked vertically)
+    for rc_i in range(4):
+        rc_name = f"row_ctrl_{rc_i}"
+        if rc_name not in group_layouts:
+            continue
+        rc_abs_y = col2_y + rc_i * (rc_h_each + GROUP_GAP_Y)
+        for comp, rel_x, rel_y in group_layouts[rc_name]:
+            _place_component(pcb, comp, col2_x + rel_x, rc_abs_y + rel_y, netlist_data)
             total_placed += 1
 
     # Place RAM bytes: column-major (down first, then right)

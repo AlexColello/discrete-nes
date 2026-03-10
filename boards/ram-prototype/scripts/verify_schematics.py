@@ -44,8 +44,7 @@ SCHEMATIC_FILES = [
     "address_decoder.kicad_sch",
     "column_select.kicad_sch",
     "control_logic.kicad_sch",
-    "write_en_gen.kicad_sch",
-    "read_en_gen.kicad_sch",
+    "row_control.kicad_sch",
     "byte.kicad_sch",
 ]
 
@@ -171,47 +170,46 @@ def check_netlist():
     # -- Define expected connections --
     issues = []
 
-    # 1. ROW_SEL_0-3: addr decoder -> write_en_gen AND read_en_gen
+    # 1. ROW_SEL_0-3: addr decoder -> Row Control i
     for i in range(4):
         ad = f"Address Decoder:ROW_SEL_{i}"
-        we = f"Write Enable Gen:ROW_SEL_{i}"
-        re = f"Read Enable Gen:ROW_SEL_{i}"
-        if not on_same_net(ad, we):
-            issues.append(f"  {ad} not connected to {we}")
-        if not on_same_net(ad, re):
-            issues.append(f"  {ad} not connected to {re}")
+        rc = f"Row Control {i}:ROW_SEL"
+        if not on_same_net(ad, rc):
+            issues.append(f"  {ad} not connected to {rc}")
 
-    # 2. WRITE_ACTIVE: control logic -> write_en_gen
-    if not on_same_net("Control Logic:WRITE_ACTIVE",
-                       "Write Enable Gen:WRITE_ACTIVE"):
-        issues.append(
-            "  Control Logic:WRITE_ACTIVE not connected to "
-            "Write Enable Gen:WRITE_ACTIVE")
-
-    # 3. READ_EN: control logic -> read_en_gen
-    if not on_same_net("Control Logic:READ_EN", "Read Enable Gen:READ_EN"):
-        issues.append(
-            "  Control Logic:READ_EN not connected to Read Enable Gen:READ_EN")
-
-    # 4. WRITE_EN_ROW_i: write_en_gen -> both bytes in row i
+    # 2. WRITE_ACTIVE: control logic -> all Row Control blocks
     for i in range(4):
-        we = f"Write Enable Gen:WRITE_EN_ROW_{i}"
+        rc = f"Row Control {i}:WRITE_ACTIVE"
+        if not on_same_net("Control Logic:WRITE_ACTIVE", rc):
+            issues.append(
+                f"  Control Logic:WRITE_ACTIVE not connected to {rc}")
+
+    # 3. READ_EN: control logic -> all Row Control blocks
+    for i in range(4):
+        rc = f"Row Control {i}:READ_EN"
+        if not on_same_net("Control Logic:READ_EN", rc):
+            issues.append(
+                f"  Control Logic:READ_EN not connected to {rc}")
+
+    # 4. WRITE_EN_ROW_i: Row Control i -> both bytes in row i
+    for i in range(4):
+        rc = f"Row Control {i}:WRITE_EN_ROW"
         by0 = f"Byte {i}:WRITE_EN_ROW"
         by1 = f"Byte {4 + i}:WRITE_EN_ROW"
-        if not on_same_net(we, by0):
-            issues.append(f"  {we} not connected to {by0}")
-        if not on_same_net(we, by1):
-            issues.append(f"  {we} not connected to {by1}")
+        if not on_same_net(rc, by0):
+            issues.append(f"  {rc} not connected to {by0}")
+        if not on_same_net(rc, by1):
+            issues.append(f"  {rc} not connected to {by1}")
 
-    # 5. READ_EN_ROW_i: read_en_gen -> both bytes in row i
+    # 5. READ_EN_ROW_i: Row Control i -> both bytes in row i
     for i in range(4):
-        re = f"Read Enable Gen:READ_EN_ROW_{i}"
+        rc = f"Row Control {i}:READ_EN_ROW"
         by0 = f"Byte {i}:READ_EN_ROW"
         by1 = f"Byte {4 + i}:READ_EN_ROW"
-        if not on_same_net(re, by0):
-            issues.append(f"  {re} not connected to {by0}")
-        if not on_same_net(re, by1):
-            issues.append(f"  {re} not connected to {by1}")
+        if not on_same_net(rc, by0):
+            issues.append(f"  {rc} not connected to {by0}")
+        if not on_same_net(rc, by1):
+            issues.append(f"  {rc} not connected to {by1}")
 
     # 6. COL_SEL_0 -> bytes 0-3, COL_SEL_1 -> bytes 4-7 (via labels)
     for col_j in range(2):
@@ -254,8 +252,8 @@ def check_netlist():
         ("Control Logic:nOE", "Control Logic:nWE"),
         ("Address Decoder:ROW_SEL_0", "Address Decoder:ROW_SEL_1"),
         ("Address Decoder:ROW_SEL_0", "Address Decoder:ROW_SEL_3"),
-        ("Write Enable Gen:WRITE_EN_ROW_0", "Write Enable Gen:WRITE_EN_ROW_1"),
-        ("Read Enable Gen:READ_EN_ROW_0", "Read Enable Gen:READ_EN_ROW_1"),
+        ("Row Control 0:WRITE_EN_ROW", "Row Control 1:WRITE_EN_ROW"),
+        ("Row Control 0:READ_EN_ROW", "Row Control 1:READ_EN_ROW"),
         ("label:COL_SEL_0", "label:COL_SEL_1"),
         ("label:D0", "Address Decoder:A0"),
         ("label:D0", "Control Logic:nCE"),
