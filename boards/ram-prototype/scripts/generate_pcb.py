@@ -17,14 +17,14 @@ After placement, pre-routes repetitive local connections:
   - Connector signal→LED stubs
 
 Layout:
-  +------+-----------+---------+---------+-----------+-----------+
-  |      | CTRL LOGIC|         |         | BYTE 0    | BYTE 4    |
-  |      |           |WRITE EN | READ EN | BYTE 1    | BYTE 5    |
-  | CONN +-----------+         |         | BYTE 2    | BYTE 6    |
-  |      | ADDR DEC  |         |         | BYTE 3    | BYTE 7    |
-  +------+-----------+---------+---------+-----------+-----------+
-                                         | COL SEL |TEST GRID|
-                                         +---------+---------+
+  +------+-----------+---------+---------+-----------+-----------+-----------+
+  |      | CTRL LOGIC|         |         | BYTE 0    | BYTE 4    |           |
+  |      |           |WRITE EN | READ EN | BYTE 1    | BYTE 5    | TEST GRID |
+  | CONN +-----------+         |         | BYTE 2    | BYTE 6    |           |
+  |      | ADDR DEC  |         |         | BYTE 3    | BYTE 7    |           |
+  +------+-----------+---------+---------+-----------+-----------+-----------+
+                                              | COL SEL |
+                                              +---------+
 
   Each byte has 1 NAND (74LVC2G00) + 8 DFFs + 8 buffers in 9 columns.
   Bytes sorted by address: top-left going down first, then right.
@@ -1873,58 +1873,46 @@ def main():
             # Spacer before BUFs so they align at col 1 (matching DFF columns)
             ic_cells = nand_cells + list(reversed(dff_cells)) + [(None, None, None)] + list(reversed(buf_cells))
 
-        # Custom addr_decoder layout: INVs in top row, ANDs in column below
+        # Custom addr_decoder layout: INVs in left column, ANDs in right
+        # column (matching schematic flow), centered vertically with each other
         if name == "addr_decoder":
             inv_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G04"]
             and_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] != "74LVC1G04"]
-            # INVs across top (max_cols=2), then ANDs in single column below
-            ic_cells = inv_cells + and_cells
-            # Use 2 cols for INV row, then force ANDs into col 0 only
-            placements = []
-            row, col = 0, 0
             inv_count = len(inv_cells)
-            for idx, (ic, r, led) in enumerate(ic_cells):
-                if idx < inv_count:
-                    # INV row: max_cols=2
-                    x = col * cw
-                    y = row * ch
-                    if ic is not None:
-                        placements.append((ic, x, y))
-                    if led:
-                        placements.append((led, x + LED_OFFSET_X, y))
-                    if r:
-                        placements.append((r, x + LED_OFFSET_X, y))
-                    col += 1
-                    if col >= 2:
-                        col = 0
-                        row += 1
-                else:
-                    # AND column: max_cols=1
-                    if idx == inv_count:
-                        # Start ANDs on next row after INVs, col 0
-                        if col > 0:
-                            row += 1
-                        col = 0
-                    x = col * cw
-                    y = row * ch
-                    if ic is not None:
-                        placements.append((ic, x, y))
-                    if led:
-                        placements.append((led, x + LED_OFFSET_X, y))
-                    if r:
-                        placements.append((r, x + LED_OFFSET_X, y))
-                    row += 1
-            # Add standalone components
-            if standalone:
-                if col > 0:
-                    row += 1
-                for r_s, led_s in standalone:
-                    x = 0
-                    y = row * ch
-                    placements.append((r_s, x, y))
-                    if led_s:
-                        placements.append((led_s, x + 1.5, y))
-                    row += 1
+            and_count = len(and_cells)
+
+            # Each column's total height
+            inv_col_h = inv_count * ch
+            and_col_h = and_count * ch
+            max_col_h = max(inv_col_h, and_col_h)
+
+            # Vertical centering offsets
+            inv_y0 = (max_col_h - inv_col_h) / 2
+            and_y0 = (max_col_h - and_col_h) / 2
+
+            # IC cell width including LED+R
+            col_step_x = cw + LED_OFFSET_X + 1.0  # IC + LED/R + gap
+
+            placements = []
+            for i, (ic, r, led) in enumerate(inv_cells):
+                x = 0
+                y = round(inv_y0 + i * ch, 2)
+                if ic is not None:
+                    placements.append((ic, x, y))
+                if led:
+                    placements.append((led, x + LED_OFFSET_X, y))
+                if r:
+                    placements.append((r, x + LED_OFFSET_X, y))
+
+            for i, (ic, r, led) in enumerate(and_cells):
+                x = round(col_step_x, 2)
+                y = round(and_y0 + i * ch, 2)
+                if ic is not None:
+                    placements.append((ic, x, y))
+                if led:
+                    placements.append((led, x + LED_OFFSET_X, y))
+                if r:
+                    placements.append((r, x + LED_OFFSET_X, y))
         else:
             placements = compute_group_layout(ic_cells, standalone, max_cols,
                                               cell_w=cw, cell_h=ch)
@@ -2011,8 +1999,8 @@ def main():
         group_sizes[name] = compute_group_size(placements, cell_w=cw, cell_h=ch)
 
     # --- Compute absolute positions ---
-    # Layout: Connector | ctrl_logic+addr_dec | write_en | read_en | RAM
-    #         Below RAM: column_select (centered) + layer_test
+    # Layout: Connector | ctrl_logic+addr_dec | write_en | read_en | RAM | layer_test
+    #         Below RAM: column_select (centered under full RAM block)
     total_placed = 0
 
     root_w, root_h = group_sizes.get("root", (0, 0))
@@ -2038,6 +2026,8 @@ def main():
             byte_center_span_x = max(byte_center_span_x, max(xs) - min(xs))
 
     ram_total_h = 4 * byte_row_h + 3 * GROUP_GAP_Y
+    # Total RAM width (both byte columns)
+    ram_total_w = 2 * (byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75) - BYTE_COL_GAP
 
     # Col 1: control_logic on top, addr_decoder below with gap
     col1_x = PLACEMENT_ORIGIN + root_w + GROUP_GAP_X
@@ -2045,11 +2035,6 @@ def main():
     ctrl_abs_y = col1_y  # control_logic at top
     dec_abs_y = ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3  # addr_decoder below with extra gap
     col1_w = max(dec_w, ctrl_w)
-    col1_total_h = (dec_abs_y + dec_h) - col1_y
-
-    # Col 0: connector centered with ctrl+addr stack
-    col0_x = PLACEMENT_ORIGIN
-    col0_y = col1_y + max(0, (col1_total_h - root_h) / 2)
 
     # Col 2: write_en_gen (single column, top-aligned with col 1)
     col2_x = col1_x + col1_w + GROUP_GAP_X
@@ -2062,6 +2047,13 @@ def main():
     # Col 4+: RAM bytes (2×4 grid, top-aligned)
     ram_x = col3_x + ren_w + GROUP_GAP_X
     ram_y = col1_y
+
+    # Compute total board content height (RAM + column_select below)
+    total_content_h = ram_total_h + CTRL_ROW_GAP + colsel_h
+
+    # Col 0: connector centered with the full left edge of the board
+    col0_x = PLACEMENT_ORIGIN
+    col0_y = col1_y + max(0, (total_content_h - root_h) / 2)
 
     # Place connector (root) — connector bus LEDs horizontal (180°),
     # connector Rs horizontal (0°) for clean LED→R trace clearance
@@ -2176,16 +2168,14 @@ def main():
 
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
-    # Place column_select below RAM, centered horizontally with RAM area
+    # Place column_select below RAM, centered horizontally with full RAM block
     ctrl_row_y = ram_y + ram_total_h + CTRL_ROW_GAP
-    ram_center_x = ram_x + (byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75) / 2
+    ram_center_x = ram_x + ram_total_w / 2
     colsel_x = round(ram_center_x - colsel_w / 2, 2)
     if "column_select" in group_layouts:
         for comp, rel_x, rel_y in group_layouts["column_select"]:
             _place_component(pcb, comp, colsel_x + rel_x, ctrl_row_y + rel_y, netlist_data)
             total_placed += 1
-    # Track end position for layer test grid
-    ctrl_row_x = colsel_x + colsel_w + CTRL_GROUP_GAP_X
 
     print(f"  Total components placed: {total_placed}")
 
@@ -2239,13 +2229,9 @@ def main():
                     + colsel_traces + cs_traces + conn_traces + dbus_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
-    # Layer visibility test grid (for clear PCB) — right of control row
-    # Place test grid to the right of control row, below OE fanout traces
-    ctrl_h_max = max(group_sizes.get("column_select", (0, 0))[1],
-                     group_sizes.get("write_en_gen", (0, 0))[1],
-                     group_sizes.get("read_en_gen", (0, 0))[1])
-    test_x = ctrl_row_x
-    test_y = ctrl_row_y + ctrl_h_max + 3.0
+    # Layer visibility test grid (for clear PCB) — right of RAM
+    test_x = ram_x + ram_total_w + GROUP_GAP_X + 3.0
+    test_y = ram_y
     test_grid_w, test_grid_h = add_layer_test_grid(pcb, test_x, test_y)
     print(f"\n  Layer test grid: {test_grid_w:.0f} x {test_grid_h:.0f} mm "
           f"at ({test_x:.1f}, {test_y:.1f})")
@@ -2323,9 +2309,9 @@ def main():
     print("  Added VCC zone on In2.Cu")
     print("  Added GND zone on B.Cu (solid fill for R GND pads + GND plane)")
 
-    # Board info text block — bottom-left corner
-    info_x = round(origin_x + BOARD_MARGIN, 2)
-    info_y = round(origin_y + board_h - BOARD_MARGIN, 2)
+    # Board info text block — below layer test grid, right side
+    info_x = round(test_x + test_grid_w / 2, 2)
+    info_y = round(test_y + test_grid_h + 5.0, 2)
     info_lines = [
         "Discrete NES - RAM Prototype",
         "8 bytes (3-bit address, 8-bit data)",
@@ -2334,8 +2320,7 @@ def main():
     line_spacing = 1.6  # mm between lines
     for i, line in enumerate(info_lines):
         ly = round(info_y - (len(info_lines) - 1 - i) * line_spacing, 2)
-        pcb.add_silkscreen_text(line, info_x, ly, size=0.8,
-                                justify="left")
+        pcb.add_silkscreen_text(line, info_x, ly, size=0.8)
     print(f"  Board info text at ({info_x}, {info_y})")
 
     # Save PCB (hide all footprint text to avoid silk_overlap/silk_over_copper)
