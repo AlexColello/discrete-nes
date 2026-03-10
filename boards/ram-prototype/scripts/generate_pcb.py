@@ -1090,14 +1090,16 @@ def preroute_nand_connections(pcb, netlist_data):
         # === NAND Power Vias ===
         pwr_via_x = round(byte_x + 0.15, 2)
 
-        # Pin 8 (VCC) -> via to In2.Cu
+        # Pin 8 (VCC) -> 45° UP-LEFT diagonal to via on In2.Cu
         pin8_pos = pcb.get_pad_position(ref, "8")
         pin8_net = pcb.get_pad_net(ref, "8")
         if pin8_pos and pin8_net:
-            pcb.add_trace(pin8_pos, (pwr_via_x, pin8_pos[1]),
+            dx = round(pin8_pos[0] - pwr_via_x, 2)
+            via8_y = round(pin8_pos[1] - dx, 2)
+            pcb.add_trace(pin8_pos, (pwr_via_x, via8_y),
                           pin8_net, POWER_TRACE_W, "F.Cu")
             traces += 1
-            pcb.add_via((pwr_via_x, pin8_pos[1]), pin8_net,
+            pcb.add_via((pwr_via_x, via8_y), pin8_net,
                         VIA_SIZE, VIA_DRILL, ["F.Cu", "In2.Cu"])
             vias += 1
 
