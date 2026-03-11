@@ -228,36 +228,78 @@ def check_netlist():
             if not on_same_net(lbl, pin_id):
                 issues.append(f"  {pin_id} not on label D{bit} net")
 
-    # 8. A0, A1 -> address decoder; A2 -> column select (via wires)
-    for i in range(2):
+    # 8. A0-A6 -> address decoder (via wires)
+    for i in range(7):
         ad = f"Address Decoder:A{i}"
         if not id_exists(ad):
             issues.append(f"  {ad} not found in any net")
-    cs_a2 = "Column Select:A2"
-    if not id_exists(cs_a2):
-        issues.append(f"  {cs_a2} not found in any net")
 
-    # 9. nCE/nOE/nWE: connector -> control logic (via wires)
+    # 9. A7-A10 -> column select (via wires)
+    for i in range(7, 11):
+        cs = f"Column Select:A{i}"
+        if not id_exists(cs):
+            issues.append(f"  {cs} not found in any net")
+
+    # 10. nCE/nOE/nWE: connector -> control logic (via wires)
     for sig in ["nCE", "nOE", "nWE"]:
         cl = f"Control Logic:{sig}"
         if not id_exists(cl):
             issues.append(f"  {cl} not found in any net")
 
+    # 11. RS1-RS4 probe signals: decoder -> probe header (via labels)
+    for i in range(1, 5):
+        sig = f"RS{i}"
+        ad = f"Address Decoder:{sig}"
+        lbl = f"label:{sig}"
+        if not on_same_net(ad, lbl):
+            issues.append(f"  {ad} not connected to label:{sig}")
+
+    # 12. GA0-GA3, GB0-GB3 probe signals: col select -> probe header (via labels)
+    for prefix in ["GA", "GB"]:
+        for g in range(4):
+            sig = f"{prefix}{g}"
+            cs = f"Column Select:{sig}"
+            lbl = f"label:{sig}"
+            if not on_same_net(cs, lbl):
+                issues.append(f"  {cs} not connected to label:{sig}")
+
+    # 13. COL_SEL_2-15: col select -> unused column header (via labels)
+    for col_idx in range(2, 16):
+        sig = f"COL_SEL_{col_idx}"
+        cs = f"Column Select:{sig}"
+        lbl = f"label:{sig}"
+        if not on_same_net(cs, lbl):
+            issues.append(f"  {cs} not connected to label:{sig}")
+
     # -- Check signal isolation (different signals not merged) --
     isolation_pairs = [
+        # Address bits isolated from each other
         ("Address Decoder:A0", "Address Decoder:A1"),
-        ("Column Select:A2", "Address Decoder:A0"),
+        ("Address Decoder:A0", "Address Decoder:A6"),
+        ("Column Select:A7", "Column Select:A8"),
+        ("Column Select:A7", "Column Select:A10"),
+        ("Address Decoder:A0", "Column Select:A7"),
+        # Control signals isolated
         ("Control Logic:nCE", "Control Logic:nOE"),
         ("Control Logic:nCE", "Control Logic:nWE"),
         ("Control Logic:nOE", "Control Logic:nWE"),
+        # ROW_SEL lines isolated
         ("Address Decoder:ROW_SEL_0", "Address Decoder:ROW_SEL_1"),
         ("Address Decoder:ROW_SEL_0", "Address Decoder:ROW_SEL_3"),
+        # Row control outputs isolated
         ("Row Control 0:WRITE_EN_ROW", "Row Control 1:WRITE_EN_ROW"),
         ("Row Control 0:READ_EN_ROW", "Row Control 1:READ_EN_ROW"),
+        # COL_SEL lines isolated
         ("label:COL_SEL_0", "label:COL_SEL_1"),
+        ("label:COL_SEL_0", "label:COL_SEL_15"),
+        # Cross-domain isolation
         ("label:D0", "Address Decoder:A0"),
         ("label:D0", "Control Logic:nCE"),
         ("Control Logic:WRITE_ACTIVE", "Control Logic:READ_EN"),
+        # Probe signals isolated from each other
+        ("label:RS1", "label:RS2"),
+        ("label:GA0", "label:GA1"),
+        ("label:GB0", "label:GB1"),
     ]
     for id_a, id_b in isolation_pairs:
         if on_same_net(id_a, id_b):

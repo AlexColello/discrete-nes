@@ -208,7 +208,10 @@ SYMBOL_LIB_MAP = {
     "VCC": "power",
     "GND": "power",
     "PWR_FLAG": "power",
+    "Conn_01x12": "Connector_Generic",
+    "Conn_01x14": "Connector_Generic",
     "Conn_01x16": "Connector_Generic",
+    "Conn_01x24": "Connector_Generic",
 }
 
 
@@ -231,7 +234,10 @@ FOOTPRINT_MAP = {
     "74LVC2G00": "DSBGA_Packages:DSBGA-8_NumericPads",
     "R_Small": "Resistor_SMD:R_0402_1005Metric",
     "LED_Small": "LED_SMD:LED_0402_1005Metric",
+    "Conn_01x12": "Connector_PinHeader_2.54mm:PinHeader_1x12_P2.54mm_Vertical",
+    "Conn_01x14": "Connector_PinHeader_2.54mm:PinHeader_1x14_P2.54mm_Vertical",
     "Conn_01x16": "Connector_PinHeader_2.54mm:PinHeader_1x16_P2.54mm_Vertical",
+    "Conn_01x24": "Connector_PinHeader_2.54mm:PinHeader_1x24_P2.54mm_Vertical",
 }
 
 # DSBGA pin number to BGA ball name mapping (TI convention)

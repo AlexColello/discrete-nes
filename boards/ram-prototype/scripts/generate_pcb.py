@@ -2,7 +2,7 @@
 """
 Generate KiCad PCB layout for the 8-byte discrete RAM prototype.
 
-Places all 391 components (158 ICs, 116 LEDs, 116 resistors, 1 connector)
+Places all components (ICs, LEDs, resistors, connectors)
 in a grouped layout matching the schematic hierarchy.  DFFs at 90° and
 buffers at 270° (power pins outward, signal pins facing each other).
 Other DSBGA ICs at 180°.  LEDs and resistors at 90° (vertical, anode above).
@@ -17,14 +17,17 @@ After placement, pre-routes repetitive local connections:
   - Connector signal→LED stubs
 
 Layout:
-  +------+-----------+---------+-----------+-----------+-----------+
-  |      | CTRL LOGIC|ROW CTRL | BYTE 0    | BYTE 4    |           |
-  |      |           |  0..3   | BYTE 1    | BYTE 5    | TEST GRID |
-  | CONN +-----------+         | BYTE 2    | BYTE 6    |           |
-  |      | ADDR DEC  |         | BYTE 3    | BYTE 7    |           |
-  +------+-----------+---------+-----------+-----------+-----------+
-                                     | COL SEL |
-                                     +---------+
+  +------+-------------+---------+-----------+-----------+-----------+
+  |      | CTRL LOGIC  |ROW CTRL | BYTE 0    | BYTE 4    |           |
+  |      |             |  0..3   | BYTE 1    | BYTE 5    | TEST GRID |
+  | CONN +-------------+         | BYTE 2    | BYTE 6    |           |
+  |  J1  | ADDR DEC    |         | BYTE 3    | BYTE 7    |           |
+  | 24p  | (7 INV+10AND|         |           |           |           |
+  +------+---+---------+---------+-----------+-----------+-----------+
+              |J2 PROBE|              | COL SEL (4 INV+24 AND) |
+              +---------+             +---+--------------------+
+                                          |J3 UNUSED COL       |
+                                          +--------------------+
 
   Each byte has 1 NAND (74LVC2G00) + 8 DFFs + 8 buffers in 9 columns.
   Bytes sorted by address: top-left going down first, then right.
@@ -597,6 +600,13 @@ def preroute_ic_to_led(pcb, netlist_data):
 
         # Skip BUF at 270° — output (pin 4/Y) is on left side, away from LED
         if part == "74LVC1G125":
+            continue
+
+        # Skip any IC not at 180° — L-trace geometry assumes 180° orientation.
+        # Column select ICs at 90° have different pin positions that cause
+        # trace/via conflicts with cathode vias.
+        angle = fp.position.angle or 0
+        if abs(angle - 180) > 1:
             continue
 
         out_pins = ["4"]  # standard DSBGA-5
@@ -1825,6 +1835,7 @@ def main():
     group_sizes = {}
     # Track which cell dimensions each group uses (for compute_group_size)
     group_cell_dims = {}
+    extra_root_connectors = []  # J2, J3 — placed after main layout
     for name, comps in groups.items():
         # Determine max columns and cell dimensions based on group type
         is_ram = name.startswith("byte")
@@ -1914,6 +1925,61 @@ def main():
                     placements.append((led, x + LED_OFFSET_X, y))
                 if r:
                     placements.append((r, x + LED_OFFSET_X, y))
+
+        # Custom column_select layout: horizontal rows, bottom-to-top decode
+        # Row 0 (top, y=0):    16 Level-2 ANDs (COL_SEL_0-15 outputs)
+        # Row 1 (middle):       8 Level-1 ANDs (GA0-3, GB0-3 intermediates)
+        # Row 2 (bottom):       4 INVs (address inverters, inputs from below)
+        elif name == "column_select":
+            inv_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G04"]
+            and_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] != "74LVC1G04"]
+            level1_ands = and_cells[:8]   # GA0-3, GB0-3
+            level2_ands = and_cells[8:]   # COL_SEL_0-15
+
+            col_w = IC_CELL_W     # 5.0mm horizontal spacing
+            row_h = CTRL_CELL_H   # 4.0mm vertical spacing between rows
+            top_count = len(level2_ands)  # 16
+
+            placements = []
+
+            # Row 0 (top, y=0): 16 level-2 ANDs
+            for i, (ic, r, led) in enumerate(level2_ands):
+                x = round(i * col_w, 2)
+                y = 0
+                if ic is not None:
+                    placements.append((ic, x, y))
+                if led:
+                    placements.append((led, x + LED_OFFSET_X, y))
+                if r:
+                    placements.append((r, x + LED_OFFSET_X, y))
+
+            # Row 1 (middle, y=row_h): 8 level-1 ANDs, centered
+            l1_offset = round((top_count - len(level1_ands)) * col_w / 2, 2)
+            for i, (ic, r, led) in enumerate(level1_ands):
+                x = round(l1_offset + i * col_w, 2)
+                y = row_h
+                if ic is not None:
+                    placements.append((ic, x, y))
+                if led:
+                    placements.append((led, x + LED_OFFSET_X, y))
+                if r:
+                    placements.append((r, x + LED_OFFSET_X, y))
+
+            # Row 2 (bottom, y=2*row_h): 4 INVs, centered
+            inv_offset = round((top_count - len(inv_cells)) * col_w / 2, 2)
+            for i, (ic, r, led) in enumerate(inv_cells):
+                x = round(inv_offset + i * col_w, 2)
+                y = 2 * row_h
+                if ic is not None:
+                    placements.append((ic, x, y))
+                if led:
+                    placements.append((led, x + LED_OFFSET_X, y))
+                if r:
+                    placements.append((r, x + LED_OFFSET_X, y))
+
+            # Override cell dims for group size computation
+            group_cell_dims[name] = (col_w, row_h)
+
         else:
             placements = compute_group_layout(ic_cells, standalone, max_cols,
                                               cell_w=cw, cell_h=ch)
@@ -1944,13 +2010,20 @@ def main():
             if name == "root":
                 # Root group: connector on the left, bus LEDs aligned to
                 # their matching connector pin Y positions.
-                # PinHeader_1x16 pad Y: pin N at (N-1)*2.54mm
                 conn_x = 0.0
                 led_x = 7.0   # LED offset right of connector (closer)
                 r_x = 10.0   # R offset right of connector (further, more gap)
 
-                # Find connector pin-to-net mapping (excluding power nets)
-                j1 = others[0]  # J1 is the only non-R/D/U in root
+                # Find J1 (main connector) and store extras (J2, J3)
+                j1 = None
+                for comp in others:
+                    if comp["ref"] == "J1":
+                        j1 = comp
+                    else:
+                        extra_root_connectors.append(comp)
+                if j1 is None:
+                    print("  WARNING: J1 not found in root group")
+                    continue
                 pin_y_by_net = {}
                 for pin_num, net_name in j1["pins"].items():
                     if net_name not in ("GND", "VCC"):
@@ -2049,8 +2122,8 @@ def main():
     ram_x = col2_x + rc_w + GROUP_GAP_X
     ram_y = col1_y
 
-    # Compute total board content height (RAM + column_select below)
-    total_content_h = ram_total_h + CTRL_ROW_GAP + colsel_h
+    # Compute total board content height (column_select below RAM with 20mm fanout gap)
+    total_content_h = ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h
 
     # Col 0: connector centered with the full left edge of the board
     col0_x = PLACEMENT_ORIGIN
@@ -2072,13 +2145,17 @@ def main():
 
     # Add silkscreen pin name labels to the left of the connector
     conn_pin_names = {
-        1: "GND", 2: "A2", 3: "D7", 4: "D6", 5: "D5", 6: "D4",
-        7: "D3", 8: "D2", 9: "D1", 10: "D0", 11: "A0",
-        12: "A1", 13: "nCE", 14: "nWE", 15: "nOE", 16: "VCC",
+        1: "GND", 2: "A7", 3: "A8", 4: "A9", 5: "A10",
+        6: "D7", 7: "D6", 8: "D5", 9: "D4",
+        10: "D3", 11: "D2", 12: "D1", 13: "D0",
+        14: "A0", 15: "A1", 16: "A2", 17: "A3",
+        18: "A4", 19: "A5", 20: "A6",
+        21: "nCE", 22: "nWE", 23: "nOE", 24: "VCC",
     }
     label_x = round(col0_x - 3.0, 2)
+    n_conn_pins = max(conn_pin_names.keys())
     for pin_num, pin_name in conn_pin_names.items():
-        label_y = round(col0_y + (15 - pin_num) * CONN_PIN_PITCH, 2)
+        label_y = round(col0_y + (n_conn_pins - 1 - pin_num) * CONN_PIN_PITCH, 2)
         pcb.add_silkscreen_text(pin_name, label_x, label_y, size=0.8)
 
     # Place control_logic (top of column 1)
@@ -2167,13 +2244,51 @@ def main():
 
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
-    # Place column_select below RAM, centered horizontally with full RAM block
-    ctrl_row_y = ram_y + ram_total_h + CTRL_ROW_GAP
+    # Place column_select below RAM block, centered horizontally under it
+    # Pre-compute test grid position (depends only on ram_x/ram_total_w)
+    test_x = ram_x + ram_total_w + GROUP_GAP_X + 3.0
+    test_y = ram_y
     ram_center_x = ram_x + ram_total_w / 2
     colsel_x = round(ram_center_x - colsel_w / 2, 2)
+    colsel_y = round(ram_y + ram_total_h + GROUP_GAP_Y * 3 + 20.0, 2)
     if "column_select" in group_layouts:
         for comp, rel_x, rel_y in group_layouts["column_select"]:
-            _place_component(pcb, comp, colsel_x + rel_x, ctrl_row_y + rel_y, netlist_data)
+            # Column select ICs at 90° for bottom-to-top signal flow
+            override = 90 if comp["ref"].startswith("U") else None
+            _place_component(pcb, comp, colsel_x + rel_x, colsel_y + rel_y,
+                             netlist_data, angle_override=override)
+            total_placed += 1
+
+    # Place extra connectors (J2 probe header, J3 unused column header)
+    # At angle 0 on B.Cu, pin 1 is at origin and pins extend downward (+Y)
+    for comp in extra_root_connectors:
+        ref = comp["ref"]
+        n_pins = int(comp["part"].replace("Conn_01x", ""))
+        pin_span = (n_pins - 1) * CONN_PIN_PITCH
+        if ref == "J2":
+            # Probe header below addr_decoder
+            j2_x = round(col1_x, 2)
+            j2_y = round(dec_abs_y + dec_h + GROUP_GAP_Y * 5, 2)
+            _place_component(pcb, comp, j2_x, j2_y, netlist_data,
+                             angle_override=0)
+            total_placed += 1
+            pcb.add_silkscreen_text("PROBE", round(j2_x - 4.0, 2),
+                                    round(j2_y + pin_span / 2, 2), size=0.8)
+        elif ref == "J3":
+            # Unused column header below test grid, horizontal (90°)
+            # At 90° on B.Cu, pin 1 is at origin and pins extend rightward (+X)
+            test_grid_h_est = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
+            j3_x = round(test_x, 2)
+            j3_y = round(test_y + test_grid_h_est + GROUP_GAP_Y * 3 + 3.0, 2)
+            _place_component(pcb, comp, j3_x, j3_y, netlist_data,
+                             angle_override=90)
+            total_placed += 1
+            pcb.add_silkscreen_text("COL_SEL", round(j3_x + pin_span / 2, 2),
+                                    round(j3_y - 3.0, 2), size=0.8)
+        else:
+            _place_component(pcb, comp, round(colsel_x + 20, 2),
+                             round(colsel_y + colsel_h + GROUP_GAP_Y * 5, 2),
+                             netlist_data, angle_override=0)
             total_placed += 1
 
     print(f"  Total components placed: {total_placed}")
@@ -2229,8 +2344,7 @@ def main():
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
     # Layer visibility test grid (for clear PCB) — right of RAM
-    test_x = ram_x + ram_total_w + GROUP_GAP_X + 3.0
-    test_y = ram_y
+    # (test_x, test_y already computed above for column_select positioning)
     test_grid_w, test_grid_h = add_layer_test_grid(pcb, test_x, test_y)
     print(f"\n  Layer test grid: {test_grid_w:.0f} x {test_grid_h:.0f} mm "
           f"at ({test_x:.1f}, {test_y:.1f})")
@@ -2308,18 +2422,21 @@ def main():
     print("  Added VCC zone on In2.Cu")
     print("  Added GND zone on B.Cu (solid fill for R GND pads + GND plane)")
 
-    # Board info text block — below layer test grid, right side
-    info_x = round(test_x + test_grid_w / 2, 2)
-    info_y = round(test_y + test_grid_h + 5.0, 2)
+    # Board info text block — left-justified, bottom-right corner
+    info_margin = 3.0  # mm inset from board edge
+    # Estimate text width: longest line ~33 chars at 0.8mm font ≈ 20mm
+    info_text_w = 22.0
+    info_x = round(origin_x + board_w - info_margin - info_text_w, 2)
+    info_y = round(origin_y + board_h - info_margin, 2)
     info_lines = [
         "Discrete NES - RAM Prototype",
-        "8 bytes (3-bit address, 8-bit data)",
-        "v2.0  2026-03-09  Row/Col architecture",
+        "8 bytes (11-bit address, 8-bit data)",
+        "v3.0  2026-03-10  2K-depth decoders",
     ]
     line_spacing = 1.6  # mm between lines
     for i, line in enumerate(info_lines):
         ly = round(info_y - (len(info_lines) - 1 - i) * line_spacing, 2)
-        pcb.add_silkscreen_text(line, info_x, ly, size=0.8)
+        pcb.add_silkscreen_text(line, info_x, ly, size=0.8, justify="left")
     print(f"  Board info text at ({info_x}, {info_y})")
 
     # Save PCB (hide all footprint text to avoid silk_overlap/silk_over_copper)
@@ -2383,8 +2500,14 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
         if net_name and not net_name.startswith("unconnected"):
             net_map[pin_num] = net_name
 
-    # Determine rotation and layer
+    # Determine layer (independent of angle)
     layer = "F.Cu"
+    if part == "R_Small":
+        layer = "B.Cu"  # Directly behind LED on back side
+    elif part.startswith("Conn_01x"):
+        layer = "B.Cu"  # Soldered on back side
+
+    # Determine rotation
     if angle_override is not None:
         angle = angle_override
     else:
@@ -2393,16 +2516,14 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
             angle = 90   # Vertical, anode (pad 2) above at y-0.55, cathode below
         elif part == "R_Small":
             angle = 90   # Vertical, pad 1 below at y+0.55, pad 2/GND above at y-0.55
-            layer = "B.Cu"  # Directly behind LED on back side
         elif part == "74LVC1G79":
             angle = 90   # DFF: VCC/GND on top, signal pins D/CLK/Q on bottom
         elif part == "74LVC1G125":
             angle = 270  # Buffer: VCC/GND on bottom, signal pins nOE/A/Y on top
         elif "74LVC" in part:
             angle = 180  # Other logic (INV, AND, NAND) unchanged
-        elif part == "Conn_01x16":
+        elif part.startswith("Conn_01x"):
             angle = 180  # Pins face left toward board edge
-            layer = "B.Cu"  # Soldered on back side
 
     pcb.place_component(
         ref=ref,
@@ -2416,7 +2537,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
     )
 
     # Connector on B.Cu: keep silkscreen on F.SilkS (visible from front)
-    if part == "Conn_01x16" and layer == "B.Cu":
+    if part.startswith("Conn_01x") and layer == "B.Cu":
         fp = pcb.board.footprints[-1]  # just placed
         for gi in fp.graphicItems:
             if hasattr(gi, 'layer') and gi.layer == "B.SilkS":
