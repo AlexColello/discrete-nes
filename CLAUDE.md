@@ -80,13 +80,11 @@ discrete-nes/
 # Create virtual environment (first time only)
 python -m venv venv
 
-# Activate virtual environment
-source venv/bin/activate      # Linux/Mac
-venv\Scripts\activate         # Windows
-
 # Install dependencies
-pip install -r requirements.txt
+source venv/Scripts/activate && pip install -r requirements.txt
 ```
+
+**CRITICAL: Always activate the venv before running ANY Python script.** Prefix every Python command with `source venv/Scripts/activate &&` (the venv is at the repo root). Shell state doesn't persist between Bash tool calls, so you must source it every time.
 
 ### Generate & Verify (mandatory workflow)
 
@@ -94,8 +92,8 @@ Every board has a generate script and a verify script. **Always run both.** This
 
 ```bash
 cd boards/ram-prototype
-python scripts/generate_ram.py
-python scripts/verify_schematics.py
+source ../../venv/Scripts/activate && python scripts/generate_ram.py
+source ../../venv/Scripts/activate && python scripts/verify_schematics.py
 ```
 
 **IMPORTANT:** After ANY change to a generate script, you MUST:

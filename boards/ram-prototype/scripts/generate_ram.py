@@ -1240,14 +1240,14 @@ def generate_root_sheet():
 
     # ================================================================
     # Connector pin mapping (24-pin)
-    # Pin 1=GND, 2-5=A7-A10, 6-8=nCE/nWE/nOE, 9-16=D0-D7, 17-23=A0-A6, 24=VCC
+    # Pin 1=GND, 2-5=A7-A10, 6-13=D0-D7, 14-16=nCE/nWE/nOE, 17-23=A0-A6, 24=VCC
     # At 180° orientation: pin 24 (VCC) at top, pin 1 (GND) at bottom
-    # Visual top-to-bottom: VCC, A0-A6, D0-D7, ctrl, A7-A10, GND
+    # Visual top-to-bottom: VCC, A0-A6, ctrl, D0-D7, A7-A10, GND
     # ================================================================
     signal_names = [
         "A7", "A8", "A9", "A10",                           # pins 2-5
-        "nCE", "nWE", "nOE",                               # pins 6-8
-        "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",  # pins 9-16
+        "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",  # pins 6-13
+        "nCE", "nWE", "nOE",                               # pins 14-16
         "A0", "A1", "A2", "A3", "A4", "A5", "A6",         # pins 17-23
     ]
     conn_signal_pos = {}
