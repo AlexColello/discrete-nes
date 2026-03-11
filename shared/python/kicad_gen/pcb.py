@@ -668,7 +668,7 @@ class PCBBuilder:
         for pad in fp.pads:
             if pad.number == pad_number:
                 px, py = pad.position.X, pad.position.Y
-                # KiCad uses clockwise rotation (positive angle = CW in Y-down coords)
+                # KiCad uses CCW rotation (Y-down coords) (positive angle = CW in Y-down coords)
                 # B.Cu pads use the same coordinate system (no X mirror)
                 abs_x = fp_x + px * cos_a + py * sin_a
                 abs_y = fp_y - px * sin_a + py * cos_a

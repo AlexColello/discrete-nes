@@ -229,14 +229,13 @@ python scripts/verify_pcb.py --post-routing  # Stricter DRC on ram_routed.kicad_
 - Route as: horizontal/vertical → 45° diagonal → horizontal/vertical (chamfered L-shape)
 - This improves signal integrity and is standard PCB design practice
 
-**KiCad pad position rotation (CRITICAL — DO NOT use standard math rotation):**
+**KiCad pad position rotation (Y-down coordinate system):**
 
-- KiCad uses **clockwise** rotation (positive angle = clockwise in Y-down screen coords)
+- KiCad uses **counterclockwise** rotation on screen (positive angle = CCW when viewed in the GUI)
+- Because KiCad's Y axis points **down**, the rotation matrix differs from standard Y-up math — the sin terms involving Y are negated
 - Correct formula: `abs_x = fp_x + px*cos(θ) + py*sin(θ)`, `abs_y = fp_y - px*sin(θ) + py*cos(θ)`
-- Standard math CCW formula (`abs_x = fp_x + px*cos(θ) - py*sin(θ)`, `abs_y = fp_y + px*sin(θ) + py*cos(θ)`) is WRONG
-- The difference is invisible at 0° and 180° (sin=0) but flips pad positions at 90°/270° (sin=±1)
-- This means the bug only manifests for R_Small components (placed at 90°), not ICs (0°) or LEDs (180°)
-- Symptom: traces starting from wrong pad → DRC "shorting_items" errors on every R→LED connection
+- Standard Y-up math formula (`abs_x = fp_x + px*cos(θ) - py*sin(θ)`, `abs_y = fp_y + px*sin(θ) + py*cos(θ)`) is WRONG — it gives CW rotation (the opposite direction) and flips pad positions at 90°/270° (invisible at 0°/180° where sin=0)
+- Symptom of using wrong formula: traces starting from wrong pad → DRC "shorting_items" errors on rotated components
 
 **Custom DSBGA footprints (pin numbering mismatch):**
 

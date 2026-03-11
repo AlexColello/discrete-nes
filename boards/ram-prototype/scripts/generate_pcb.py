@@ -374,7 +374,7 @@ def _build_net_pad_index(pcb):
         for pad in fp.pads:
             if pad.net and pad.net.number and pad.net.number > 0:
                 px, py = pad.position.X, pad.position.Y
-                # KiCad uses clockwise rotation (positive angle = CW in Y-down)
+                # KiCad uses CCW rotation (Y-down coords) (positive angle = CW in Y-down)
                 abs_x = round(fp_x + px * cos_a + py * sin_a, 2)
                 abs_y = round(fp_y - px * sin_a + py * cos_a, 2)
                 net_to_pads[pad.net.number].append(
@@ -439,7 +439,7 @@ def preroute_power_vias(pcb):
             net_num = pad.net.number
 
             px, py = pad.position.X, pad.position.Y
-            # KiCad uses clockwise rotation (positive angle = CW in Y-down)
+            # KiCad uses CCW rotation (Y-down coords) (positive angle = CW in Y-down)
             abs_x = round(fp_x + px * cos_a + py * sin_a, 2)
             abs_y = round(fp_y - px * sin_a + py * cos_a, 2)
 
@@ -1229,24 +1229,16 @@ def preroute_column_select(pcb, netlist_data):
 
 
 def preroute_col_sel_vias(pcb, netlist_data):
-    """Add vias for NAND COL_SEL input pins and connect with vertical In1.Cu traces.
+    """Add vias for NAND COL_SEL input pins and connect with In1.Cu traces.
 
-    After the pin swap, pin A of each NAND gate (pin 1 for unit 1, pin 5
-    for unit 2) carries the COL_SEL signal.  Both pins are in the RIGHT
-    pad column at pin_x = byte_x + 1.25.
-
-    The OE output (pin 3) exits at 45deg diagonal down-right, so OE
-    copper diverges from pin 5 Y immediately rather than running
-    horizontal at byte_y+0.75.
+    The 74LVC2G00 dual NAND is at 90° CW rotation.  Pin A of each NAND gate
+    (pin 1 for unit 1, pin 5 for unit 2) carries the COL_SEL signal.
+    At 90°, both COL_SEL pins are in the BOTTOM pad row (sharing Y),
+    with pin 1 at x=ic_cx-0.75 and pin 5 at x=ic_cx+0.25.
 
     Routing strategy per byte:
-      Pin 5 (byte_y+0.25): F.Cu stub RIGHT 0.5mm to via.
-        Clears pin 3 pad (0.707mm diagonal, 0.167mm edge gap).
-      Pin 1 (byte_y+1.25): F.Cu stub DOWN 0.75mm to via.
-        Straight down from bottommost NAND pad.
-
-    Both vias drop to In1.Cu.  In1.Cu L-trace connects pin 5 via back to
-    pin 1 via X, then the trunk runs vertically at pin_x on In1.Cu.
+      Both pins: F.Cu stub DOWN 0.55mm to via (no pads below at 90°).
+      In1.Cu: horizontal trace connecting the two vias, then vertical trunk.
 
     Returns (via_count, trace_count).
     """
@@ -1269,65 +1261,58 @@ def preroute_col_sel_vias(pcb, netlist_data):
         pin1_pos = pcb.get_pad_position(ref, "1")
         pin5_pos = pcb.get_pad_position(ref, "5")
         pin1_net = pcb.get_pad_net(ref, "1")
-        pin5_net = pcb.get_pad_net(ref, "5")
         if not pin1_pos or not pin5_pos or not pin1_net:
             continue
 
-        pin_x = round(pin1_pos[0], 2)  # both pins share X
+        pin1_x = round(pin1_pos[0], 2)
         pin1_y = round(pin1_pos[1], 2)
+        pin5_x = round(pin5_pos[0], 2)
         pin5_y = round(pin5_pos[1], 2)
         net = pin1_net  # same net for both pins
 
-        # --- Pin 5: F.Cu stub RIGHT 0.55mm to via ---
-        # OE exits pin 3 with 0.10mm horizontal + 45° diagonal, so OE
-        # copper diverges from pin 5 Y quickly.  Via clears pin 3 pad
-        # (0.743mm, 0.203mm gap) and OE stub endpoint (0.672mm, 0.172mm).
-        via5_x = round(pin_x + 0.55, 2)
-        via5_y = pin5_y
+        # Both pins share Y at 90° rotation; vias go DOWN (positive Y)
+        via_offset = 0.55
+
+        # --- Pin 5: F.Cu stub DOWN to via ---
+        via5_x = pin5_x
+        via5_y = round(pin5_y + via_offset, 2)
 
         pcb.add_trace(pin5_pos, (via5_x, via5_y),
                       net, SIGNAL_TRACE_W, "F.Cu")
         traces += 1
-
         pcb.add_via((via5_x, via5_y), net,
                     VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
         vias += 1
 
-        # --- Pin 1: F.Cu stub DOWN 0.50mm to via ---
-        # Straight down from bottommost NAND pad, clears pin 2
-        # (0.707mm diagonal, 0.167mm edge gap)
-        via1_x = pin_x
-        via1_y = round(pin1_y + 0.50, 2)
+        # --- Pin 1: F.Cu stub DOWN to via ---
+        via1_x = pin1_x
+        via1_y = round(pin1_y + via_offset, 2)
 
         pcb.add_trace(pin1_pos, (via1_x, via1_y),
                       net, SIGNAL_TRACE_W, "F.Cu")
         traces += 1
-
         pcb.add_via((via1_x, via1_y), net,
                     VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
         vias += 1
 
-        # --- In1.Cu: connect pin 5 via to pin 1 via with L-trace ---
-        # Horizontal from pin 5 via LEFT to trunk X (= pin_x)
-        pcb.add_trace((via5_x, via5_y), (pin_x, via5_y),
+        # --- In1.Cu: connect pin 1 via to pin 5 via ---
+        # Both vias share Y, so just horizontal
+        pcb.add_trace((via5_x, via5_y), (via1_x, via1_y),
                       net, SIGNAL_TRACE_W, "In1.Cu")
         traces += 1
 
-        # Vertical from that point DOWN to pin 1 via
-        pcb.add_trace((pin_x, via5_y), (via1_x, via1_y),
-                      net, SIGNAL_TRACE_W, "In1.Cu")
-        traces += 1
+        # Collect trunk points for inter-byte vertical connection
+        # Trunk at pin5 via X — centered between LED vias on both sides
+        # (left LED vias at ~ic_cx-0.5, right LED vias at ~ic_cx+1.0).
+        trunk_x = via5_x
+        trunk_y = via5_y  # both COL_SEL pins share Y
 
-        # Collect trunk points at pin_x for inter-byte vertical connection
         if net not in net_trunk_pts:
             net_trunk_pts[net] = []
-        # Use pin 5 via Y (top) and pin 1 via Y (bottom) as trunk endpoints
-        net_trunk_pts[net].append((pin_x, via5_y))
-        net_trunk_pts[net].append((pin_x, via1_y))
+        net_trunk_pts[net].append((trunk_x, trunk_y))
 
     # Connect trunk points with vertical In1.Cu traces (deduplicated)
     for net, positions in net_trunk_pts.items():
-        # Remove duplicates and sort by Y
         positions = sorted(set(positions), key=lambda p: p[1])
         for i in range(len(positions) - 1):
             pcb.add_trace(positions[i], positions[i + 1],
@@ -2413,7 +2398,7 @@ def main():
 
             for pad in fp.pads:
                 px, py = pad.position.X, pad.position.Y
-                # KiCad uses clockwise rotation (positive angle = CW in Y-down)
+                # KiCad uses CCW rotation (Y-down coords) (positive angle = CW in Y-down)
                 abs_x = fp_x + px * cos_a + py * sin_a
                 abs_y = fp_y - px * sin_a + py * cos_a
                 radius = max(pad.size.X, pad.size.Y) / 2 if pad.size else 0
@@ -2431,8 +2416,8 @@ def main():
                     pt = getattr(gi, attr, None)
                     if pt is None:
                         continue
-                    abs_x = fp_x + pt.X * cos_a - pt.Y * sin_a
-                    abs_y = fp_y + pt.X * sin_a + pt.Y * cos_a
+                    abs_x = fp_x + pt.X * cos_a + pt.Y * sin_a
+                    abs_y = fp_y - pt.X * sin_a + pt.Y * cos_a
                     comp_min_x = min(comp_min_x, abs_x)
                     comp_max_x = max(comp_max_x, abs_x)
                     comp_min_y = min(comp_min_y, abs_y)
@@ -2569,6 +2554,8 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
             angle = 90   # DFF: VCC/GND on top, signal pins D/CLK/Q on bottom
         elif part == "74LVC1G125":
             angle = 270  # Buffer: VCC/GND on bottom, signal pins nOE/A/Y on top
+        elif part == "74LVC2G00":
+            angle = 90   # Dual NAND: COL_SEL pins (1,5) down (+Y), VCC/GND up (-Y)
         elif "74LVC" in part:
             angle = 180  # Other logic (INV, AND, NAND) unchanged
         elif part.startswith("Conn_01x"):

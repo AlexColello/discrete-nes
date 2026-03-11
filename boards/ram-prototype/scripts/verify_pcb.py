@@ -181,7 +181,7 @@ def _footprint_bbox(fp):
 
     def to_abs(lx, ly):
         """Convert footprint-local coords to absolute board coords."""
-        # KiCad uses clockwise rotation (positive angle = CW in Y-down)
+        # KiCad uses CCW rotation (Y-down coords)
         return (fp_x + lx * cos_a + ly * sin_a,
                 fp_y - lx * sin_a + ly * cos_a)
 
