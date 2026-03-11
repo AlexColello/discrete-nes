@@ -246,15 +246,23 @@ def check_netlist():
         if not id_exists(cl):
             issues.append(f"  {cl} not found in any net")
 
-    # 11. RS1-RS4 probe signals: decoder -> probe header (via labels)
-    for i in range(1, 5):
-        sig = f"RS{i}"
+    # 11. DEC3_4-7: addr decoder -> unused 3-to-8 header (via labels)
+    for i in range(4, 8):
+        sig = f"DEC3_{i}"
         ad = f"Address Decoder:{sig}"
         lbl = f"label:{sig}"
         if not on_same_net(ad, lbl):
             issues.append(f"  {ad} not connected to label:{sig}")
 
-    # 12. COL_SEL_2-15: col select -> unused column header (via labels)
+    # 12. DEC4_1-15: addr decoder -> unused 4-to-16 header (via labels)
+    for i in range(1, 16):
+        sig = f"DEC4_{i}"
+        ad = f"Address Decoder:{sig}"
+        lbl = f"label:{sig}"
+        if not on_same_net(ad, lbl):
+            issues.append(f"  {ad} not connected to label:{sig}")
+
+    # 13. COL_SEL_2-15: col select -> unused column header (via labels)
     for col_idx in range(2, 16):
         sig = f"COL_SEL_{col_idx}"
         cs = f"Column Select:{sig}"
@@ -287,8 +295,9 @@ def check_netlist():
         ("label:D0", "Address Decoder:A0"),
         ("label:D0", "Control Logic:nCE"),
         ("Control Logic:WRITE_ACTIVE", "Control Logic:READ_EN"),
-        # Probe signals isolated from each other
-        ("label:RS1", "label:RS2"),
+        # DEC3/DEC4 unused outputs isolated from each other
+        ("label:DEC3_4", "label:DEC3_5"),
+        ("label:DEC4_1", "label:DEC4_2"),
     ]
     for id_a, id_b in isolation_pairs:
         if on_same_net(id_a, id_b):

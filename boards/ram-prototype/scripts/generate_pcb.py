@@ -17,17 +17,16 @@ After placement, pre-routes repetitive local connections:
   - Connector signal→LED stubs
 
 Layout:
-  +------+-------------+---------+-----------+-----------+-----------+
-  |      | CTRL LOGIC  |ROW CTRL | BYTE 0    | BYTE 4    |           |
-  |      |             |  0..3   | BYTE 1    | BYTE 5    | TEST GRID |
-  | CONN +-------------+         | BYTE 2    | BYTE 6    |           |
-  |  J1  | ADDR DEC    |         | BYTE 3    | BYTE 7    |           |
-  | 24p  | (7 INV+10AND|         |           |           |           |
-  +------+---+---------+---------+-----------+-----------+-----------+
-              |J2 PROBE|              | COL SEL (4 INV+24 AND) |
-              +---------+             +---+--------------------+
-                                          |J3 UNUSED COL       |
-                                          +--------------------+
+  +------+----------------------------------+---------+-----------+-----------+-----------+
+  |      | ADDR DECODER (5 vertical cols)   |ROW CTRL | BYTE 0    | BYTE 4    |           |
+  |      | INV | L1 | DEC3 | DEC4 | FINAL  |  0..3   | BYTE 1    | BYTE 5    | TEST GRID |
+  | CONN |     |    |      |      | (Y-    |  (Y-    | BYTE 2    | BYTE 6    |           |
+  |  J1  |     |    |      |      | align) | align)  | BYTE 3    | BYTE 7    |           |
+  | 24p  +----------------------------------+---------+-----------+-----------+-----------+
+  |      | CTRL LOGIC  |                         | COL SEL (4 INV+24 AND) |
+  +------+---+---------+                         +---+--------------------+
+              |J2|J4    |                             |J3 UNUSED COL       |
+              +---------+                             +--------------------+
 
   Each byte has 1 NAND (74LVC2G00) + 8 DFFs + 8 buffers in 9 columns.
   Bytes sorted by address: top-left going down first, then right.
@@ -1826,9 +1825,10 @@ def main():
 
     # Layout:
     #   Column 0: Connector (root) on the left
-    #   Column 1: addr_decoder (top) + control_logic (bottom)
-    #   Columns 2+: RAM bytes in 4-col x 2-row grid
-    #   Below RAM: column_select
+    #   Column 1: addr_decoder (5 vertical decode-stage columns)
+    #   Column 2: row_ctrl (4 stacked, Y-aligned with addr_decoder final rank)
+    #   Columns 3+: RAM bytes in 4-col x 2-row grid
+    #   Below: column_select, control_logic
 
     # Pre-compute layouts for each group
     group_layouts = {}
@@ -1836,6 +1836,13 @@ def main():
     # Track which cell dimensions each group uses (for compute_group_size)
     group_cell_dims = {}
     extra_root_connectors = []  # J2, J3 — placed after main layout
+
+    # Pre-compute row_ctrl vertical stride for addr_decoder final AND alignment
+    # Each row_ctrl has 2 AND ICs in a single column = 2 * CTRL_CELL_H tall
+    _rc_h_each_est = 2 * CTRL_CELL_H
+    _rc_stride = _rc_h_each_est + GROUP_GAP_Y
+    _addr_dec_final_ys = None  # set during addr_decoder layout
+
     for name, comps in groups.items():
         # Determine max columns and cell dimensions based on group type
         is_ram = name.startswith("byte")
@@ -1885,46 +1892,70 @@ def main():
             # Spacer before BUFs so they align at col 1 (matching DFF columns)
             ic_cells = nand_cells + list(reversed(dff_cells)) + [(None, None, None)] + list(reversed(buf_cells))
 
-        # Custom addr_decoder layout: INVs in left column, ANDs in right
-        # column (matching schematic flow), centered vertically with each other
+        # Custom addr_decoder layout: vertical columns (left-to-right decode flow)
+        # Col 0: 7 INVs (address inverters)
+        # Col 1: 12 L1 ANDs (4 G + 8 HA/HB)
+        # Col 2: 8 DEC3 L2 ANDs (3-to-8 outputs)
+        # Col 3: 16 DEC4 L2 ANDs (4-to-16 outputs)
+        # Col 4: 4 Final ANDs (ROW_SEL, Y-aligned with row_ctrl blocks)
         if name == "addr_decoder":
             inv_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G04"]
             and_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] != "74LVC1G04"]
-            inv_count = len(inv_cells)
-            and_count = len(and_cells)
+            # Split ANDs by schematic order:
+            # 0-3: G (3-to-8 L1), 4-11: DEC3 (3-to-8 L2),
+            # 12-19: HA+HB (4-to-16 L1), 20-35: DEC4 (4-to-16 L2), 36-39: final
+            g_cells    = and_cells[0:4]
+            dec3_cells = and_cells[4:12]
+            hahb_cells = and_cells[12:20]
+            dec4_cells = and_cells[20:36]
+            final_cells = and_cells[36:40]
 
-            # Each column's total height
-            inv_col_h = inv_count * ch
-            and_col_h = and_count * ch
-            max_col_h = max(inv_col_h, and_col_h)
+            cell_h = CTRL_CELL_H   # 4.0mm vertical spacing within columns
+            col_sp = 7.5           # horizontal spacing between decode-stage columns
 
-            # Vertical centering offsets
-            inv_y0 = (max_col_h - inv_col_h) / 2
-            and_y0 = (max_col_h - and_col_h) / 2
+            # DEC4 column (tallest, 16 cells) determines total height
+            dec4_span = (len(dec4_cells) - 1) * cell_h  # 60mm
+            total_h = dec4_span
 
-            # IC cell width including LED+R
-            col_step_x = cw + LED_OFFSET_X + 1.0  # IC + LED/R + gap
+            # Final ANDs at rc_stride spacing, centered vertically in total height
+            final_span = 3 * _rc_stride
+            final_start = round((total_h - final_span) / 2, 2)
+            _addr_dec_final_ys = [round(final_start + i * _rc_stride, 2)
+                                  for i in range(4)]
+
+            def _place_col(cells, col_x, total_h, cell_h, placements, ys=None):
+                n = len(cells)
+                if ys is not None:
+                    for i, (ic, r, led) in enumerate(cells):
+                        x, y = col_x, ys[i]
+                        if ic is not None:
+                            placements.append((ic, x, y))
+                        if led:
+                            placements.append((led, x + LED_OFFSET_X, y))
+                        if r:
+                            placements.append((r, x + LED_OFFSET_X, y))
+                else:
+                    span = (n - 1) * cell_h
+                    start = round((total_h - span) / 2, 2)
+                    for i, (ic, r, led) in enumerate(cells):
+                        x = col_x
+                        y = round(start + i * cell_h, 2)
+                        if ic is not None:
+                            placements.append((ic, x, y))
+                        if led:
+                            placements.append((led, x + LED_OFFSET_X, y))
+                        if r:
+                            placements.append((r, x + LED_OFFSET_X, y))
 
             placements = []
-            for i, (ic, r, led) in enumerate(inv_cells):
-                x = 0
-                y = round(inv_y0 + i * ch, 2)
-                if ic is not None:
-                    placements.append((ic, x, y))
-                if led:
-                    placements.append((led, x + LED_OFFSET_X, y))
-                if r:
-                    placements.append((r, x + LED_OFFSET_X, y))
+            _place_col(inv_cells,            0 * col_sp, total_h, cell_h, placements)
+            _place_col(g_cells + hahb_cells, 1 * col_sp, total_h, cell_h, placements)
+            _place_col(dec3_cells,           2 * col_sp, total_h, cell_h, placements)
+            _place_col(dec4_cells,           3 * col_sp, total_h, cell_h, placements)
+            _place_col(final_cells,          4 * col_sp, total_h, cell_h, placements,
+                       ys=_addr_dec_final_ys)
 
-            for i, (ic, r, led) in enumerate(and_cells):
-                x = round(col_step_x, 2)
-                y = round(and_y0 + i * ch, 2)
-                if ic is not None:
-                    placements.append((ic, x, y))
-                if led:
-                    placements.append((led, x + LED_OFFSET_X, y))
-                if r:
-                    placements.append((r, x + LED_OFFSET_X, y))
+            group_cell_dims[name] = (col_sp, cell_h)
 
         # Custom column_select layout: horizontal rows, bottom-to-top decode
         # Row 0 (top, y=0):    16 Level-2 ANDs (COL_SEL_0-15 outputs)
@@ -2073,8 +2104,8 @@ def main():
         group_sizes[name] = compute_group_size(placements, cell_w=cw, cell_h=ch)
 
     # --- Compute absolute positions ---
-    # Layout: Connector | ctrl_logic+addr_dec | row_ctrl(x4) | RAM | layer_test
-    #         Below RAM: column_select (centered under full RAM block)
+    # Layout: Connector | addr_decoder(5 cols) | row_ctrl(x4) | RAM | layer_test
+    #         Below: column_select (under RAM), control_logic (below addr_dec)
     total_placed = 0
 
     root_w, root_h = group_sizes.get("root", (0, 0))
@@ -2107,23 +2138,26 @@ def main():
     # Total RAM width (both byte columns)
     ram_total_w = 2 * (byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75) - BYTE_COL_GAP
 
-    # Col 1: control_logic on top, addr_decoder below with gap
+    # Col 1: addr_decoder (vertical columns, full height)
     col1_x = PLACEMENT_ORIGIN + root_w + GROUP_GAP_X
     col1_y = PLACEMENT_ORIGIN
-    ctrl_abs_y = col1_y  # control_logic at top
-    dec_abs_y = ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3  # addr_decoder below with extra gap
-    col1_w = max(dec_w, ctrl_w)
+    dec_abs_y = col1_y  # addr_decoder at top of col 1
 
-    # Col 2: row_ctrl (single column, 4 groups stacked vertically)
-    col2_x = col1_x + col1_w + GROUP_GAP_X
-    col2_y = col1_y
+    # Col 2: row_ctrl, Y-aligned with addr_decoder final ANDs
+    col2_x = col1_x + dec_w + GROUP_GAP_X
+    col2_y = dec_abs_y  # same Y start
 
-    # Col 3: RAM bytes (2×4 grid, top-aligned)
+    # Col 3: RAM bytes (2×4 grid, vertically centered with addr_decoder)
     ram_x = col2_x + rc_w + GROUP_GAP_X
-    ram_y = col1_y
+    ram_y = round(dec_abs_y + (dec_h - ram_total_h) / 2, 2)
 
-    # Compute total board content height (column_select below RAM with 20mm fanout gap)
-    total_content_h = ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h
+    # Control logic below addr_decoder
+    ctrl_abs_x = col1_x
+    ctrl_abs_y = round(dec_abs_y + dec_h + GROUP_GAP_Y * 3, 2)
+
+    # Compute total board content height
+    total_content_h = max(dec_h + GROUP_GAP_Y * 3 + ctrl_h,
+                          ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h)
 
     # Col 0: connector centered with the full left edge of the board
     col0_x = PLACEMENT_ORIGIN
@@ -2145,12 +2179,14 @@ def main():
 
     # Add silkscreen pin name labels to the left of the connector
     conn_pin_names = {
-        1: "GND", 2: "A7", 3: "A8", 4: "A9", 5: "A10",
-        6: "D7", 7: "D6", 8: "D5", 9: "D4",
-        10: "D3", 11: "D2", 12: "D1", 13: "D0",
-        14: "A0", 15: "A1", 16: "A2", 17: "A3",
-        18: "A4", 19: "A5", 20: "A6",
-        21: "nCE", 22: "nWE", 23: "nOE", 24: "VCC",
+        1: "GND",
+        2: "A7", 3: "A8", 4: "A9", 5: "A10",
+        6: "nCE", 7: "nWE", 8: "nOE",
+        9: "D0", 10: "D1", 11: "D2", 12: "D3",
+        13: "D4", 14: "D5", 15: "D6", 16: "D7",
+        17: "A0", 18: "A1", 19: "A2", 20: "A3",
+        21: "A4", 22: "A5", 23: "A6",
+        24: "VCC",
     }
     label_x = round(col0_x - 3.0, 2)
     n_conn_pins = max(conn_pin_names.keys())
@@ -2158,26 +2194,26 @@ def main():
         label_y = round(col0_y + (n_conn_pins - 1 - pin_num) * CONN_PIN_PITCH, 2)
         pcb.add_silkscreen_text(pin_name, label_x, label_y, size=0.8)
 
-    # Place control_logic (top of column 1)
-    if "control_logic" in group_layouts:
-        for comp, rel_x, rel_y in group_layouts["control_logic"]:
-            _place_component(pcb, comp, col1_x + rel_x, ctrl_abs_y + rel_y, netlist_data)
-            total_placed += 1
-
-    # Place addr_decoder (below control_logic in column 1)
+    # Place addr_decoder (column 1, vertical decode-stage columns)
     if "addr_decoder" in group_layouts:
         for comp, rel_x, rel_y in group_layouts["addr_decoder"]:
             _place_component(pcb, comp, col1_x + rel_x, dec_abs_y + rel_y, netlist_data)
             total_placed += 1
 
-    # Place row_ctrl groups (column 2, stacked vertically)
+    # Place row_ctrl groups (column 2, Y-aligned with addr_decoder final ANDs)
     for rc_i in range(4):
         rc_name = f"row_ctrl_{rc_i}"
         if rc_name not in group_layouts:
             continue
-        rc_abs_y = col2_y + rc_i * (rc_h_each + GROUP_GAP_Y)
+        rc_abs_y = col2_y + _addr_dec_final_ys[rc_i]
         for comp, rel_x, rel_y in group_layouts[rc_name]:
             _place_component(pcb, comp, col2_x + rel_x, rc_abs_y + rel_y, netlist_data)
+            total_placed += 1
+
+    # Place control_logic (below addr_decoder area)
+    if "control_logic" in group_layouts:
+        for comp, rel_x, rel_y in group_layouts["control_logic"]:
+            _place_component(pcb, comp, ctrl_abs_x + rel_x, ctrl_abs_y + rel_y, netlist_data)
             total_placed += 1
 
     # Place RAM bytes: column-major (down first, then right)
@@ -2259,24 +2295,25 @@ def main():
                              netlist_data, angle_override=override)
             total_placed += 1
 
-    # Place extra connectors (J2 probe header, J3 unused column header)
+    # Place extra connectors (J2 DEC3 unused, J3 COL_SEL unused, J4 DEC4 unused)
     # At angle 0 on B.Cu, pin 1 is at origin and pins extend downward (+Y)
+    # Sort by ref to ensure deterministic placement
+    extra_root_connectors.sort(key=lambda c: c["ref"])
     for comp in extra_root_connectors:
         ref = comp["ref"]
         n_pins = int(comp["part"].replace("Conn_01x", ""))
         pin_span = (n_pins - 1) * CONN_PIN_PITCH
         if ref == "J2":
-            # Probe header below addr_decoder
+            # DEC3 unused header below control_logic
             j2_x = round(col1_x, 2)
-            j2_y = round(dec_abs_y + dec_h + GROUP_GAP_Y * 5, 2)
+            j2_y = round(ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3, 2)
             _place_component(pcb, comp, j2_x, j2_y, netlist_data,
                              angle_override=0)
             total_placed += 1
-            pcb.add_silkscreen_text("PROBE", round(j2_x - 4.0, 2),
+            pcb.add_silkscreen_text("DEC3", round(j2_x - 4.0, 2),
                                     round(j2_y + pin_span / 2, 2), size=0.8)
         elif ref == "J3":
             # Unused column header below test grid, horizontal (90°)
-            # At 90° on B.Cu, pin 1 is at origin and pins extend rightward (+X)
             test_grid_h_est = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
             j3_x = round(test_x, 2)
             j3_y = round(test_y + test_grid_h_est + GROUP_GAP_Y * 3 + 3.0, 2)
@@ -2285,6 +2322,15 @@ def main():
             total_placed += 1
             pcb.add_silkscreen_text("COL_SEL", round(j3_x + pin_span / 2, 2),
                                     round(j3_y - 3.0, 2), size=0.8)
+        elif ref == "J4":
+            # DEC4 unused header below J2, horizontal (90°)
+            j4_x = round(col1_x, 2)
+            j4_y = round(ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3 + 15.0, 2)
+            _place_component(pcb, comp, j4_x, j4_y, netlist_data,
+                             angle_override=90)
+            total_placed += 1
+            pcb.add_silkscreen_text("DEC4", round(j4_x + pin_span / 2, 2),
+                                    round(j4_y - 3.0, 2), size=0.8)
         else:
             _place_component(pcb, comp, round(colsel_x + 20, 2),
                              round(colsel_y + colsel_h + GROUP_GAP_Y * 5, 2),

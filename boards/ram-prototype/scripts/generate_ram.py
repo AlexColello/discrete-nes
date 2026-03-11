@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
 Generate hierarchical KiCad schematics for the 8-byte discrete RAM prototype
-with full 2K-depth decoder tree for latency testing.
+with full sub-decoder trees for latency testing.
 
 Circuit architecture (11-bit address, row/column):
-  - A0-A6 -> 7-bit row decoder (full AND tree depth) -> ROW_SEL_0..3
+  - A0-A2 -> 3-to-8 sub-decoder (4+8 ANDs) -> DEC3_0..7
+  - A3-A6 -> 4-to-16 sub-decoder (8+16 ANDs) -> DEC4_0..15
+  - ROW_SEL_i = AND(DEC3_i, DEC4_0) for i=0..3 (4 final ANDs)
+  - Unused sub-decoder outputs go to pin headers
   - A7-A10 -> 4-to-16 column decoder -> COL_SEL_0..15
   - Active-low control: /CE, /OE, /WE -> WRITE_ACTIVE, READ_EN
   - Row enables: WRITE_EN_ROW_i = AND(WRITE_ACTIVE, ROW_SEL_i)
@@ -17,7 +20,7 @@ Circuit architecture (11-bit address, row/column):
 
 Produces:
   ram.kicad_sch              -- root sheet with connector + bus LEDs + hierarchy refs
-  address_decoder.kicad_sch  -- 7 inverters + 10 ANDs (7-bit row decoder, full depth)
+  address_decoder.kicad_sch  -- 7 inverters + 40 ANDs (full sub-decoder trees)
   column_select.kicad_sch    -- 4 inverters + 24 ANDs (4-to-16 column decoder)
   control_logic.kicad_sch    -- /CE,/OE,/WE inversion + WRITE_ACTIVE, READ_EN logic
   row_control.kicad_sch      -- 2 ANDs: WRITE_EN_ROW + READ_EN_ROW (shared by 4 row instances)
@@ -59,89 +62,72 @@ LED_GAP_X = 3 * GRID         # gap from output pin to LED chain center
 
 def generate_address_decoder():
     """
-    Address decoder: 7-bit row decoder with full AND tree depth, 4 outputs.
+    Address decoder: 7-bit row decoder with full sub-decoder trees, 4 outputs.
+
+    Implements a real 7-to-128 decoder structure (but only 4 final outputs):
+
+    3-to-8 sub-decoder (A0, A1, A2) → 8 outputs:
+      L1 (4 ANDs): G0=AND(/A2,/A1), G1=AND(/A2,A1), G2=AND(A2,/A1), G3=AND(A2,A1)
+      L2 (8 ANDs): DEC3_n = AND(G[n>>1], A0_variant[n&1])
+        DEC3_0=AND(G0,/A0), DEC3_1=AND(G0,A0), ..., DEC3_7=AND(G3,A0)
+
+    4-to-16 sub-decoder (A3, A4, A5, A6) → 16 outputs:
+      L1 group A (4 ANDs): HA0=AND(/A4,/A3), ..., HA3=AND(A4,A3)
+      L1 group B (4 ANDs): HB0=AND(/A6,/A5), ..., HB3=AND(A6,A5)
+      L2 (16 ANDs): DEC4_n = AND(HB[n>>2], HA[n&3])
+
+    Final cross-product (4 ANDs):
+      ROW_SEL_0 = AND(DEC3_0, DEC4_0)
+      ROW_SEL_1 = AND(DEC3_1, DEC4_0)
+      ROW_SEL_2 = AND(DEC3_2, DEC4_0)
+      ROW_SEL_3 = AND(DEC3_3, DEC4_0)
+
+    Unused outputs → hier labels for pin headers:
+      DEC3_4..DEC3_7 (4 outputs)
+      DEC4_1..DEC4_15 (15 outputs)
 
     Inputs:  A0-A6 (7 address bits)
-    Outputs: ROW_SEL_0..ROW_SEL_3 (row select lines)
-             RS1..RS4 (intermediate AND tree probe outputs)
+    Outputs: ROW_SEL_0..3, DEC3_4..7, DEC4_1..15
 
-    Full 2K-depth AND tree (5 gate levels: INV→AND→AND→AND→AND):
-      Level 1 (shared): RS1=AND(/A2,/A3), RS2=AND(/A4,/A5)
-      Level 2a: RS3=AND(RS1,RS2)
-      Level 2b: RS4=AND(RS3,/A6)
-      Level 3 (per-output):
-        P0=AND(/A1,/A0), ROW_SEL_0=AND(RS4,P0)
-        P1=AND(/A1, A0), ROW_SEL_1=AND(RS4,P1)
-        P2=AND( A1,/A0), ROW_SEL_2=AND(RS4,P2)
-        P3=AND( A1, A0), ROW_SEL_3=AND(RS4,P3)
+    7 INV + 40 AND = 47 ICs, 47 LEDs, 47 Rs
 
-    7 INV + 10 AND = 17 ICs, 17 LEDs, 17 Rs
+    Layout: A1 page, 7 columns left-to-right:
+      1. INV column (7 inverters)
+      2. 3-to-8 L1 (4 ANDs: G0-G3)
+      3. 3-to-8 L2 (8 ANDs: DEC3_0-DEC3_7)
+      4. 4-to-16 L1 (8 ANDs: HA0-HA3, HB0-HB3)
+      5. 4-to-16 L2 (16 ANDs: DEC4_0-DEC4_15)
+      6. Final (4 ANDs: ROW_SEL_0-ROW_SEL_3)
+      7. Output hier labels
 
-    Layout strategy (all wires stay within their stage's gap, never crossing
-    into a different component column):
-      - Inverter column at inv_x.  Inverted trunks start AFTER the LED chain
-        R_Small right edge so they don't run through resistor bodies.
-      - L1 AND column (RS1, RS2).  Output trunks in the l1→l2a gap.
-      - L2a AND column (RS3 alone).  Output trunk in the l2a→l2b gap.
-      - L2b AND column (RS4 alone).  Output trunk in the l2b→pair gap.
-        Separating RS3 and RS4 into different X columns allows the RS3→RS4
-        connection to be routed left-to-right (never back through the body)
-        and eliminates pin-stub overlap errors.
-      - Pair AND column (P0-P3).  Output trunks in the pair→final gap.
-      - Final AND column (ROW_SEL 0-3).
-
-    Label→inverter routing is done with L-shaped wires (staggered approach
-    columns per bit).  A5's label is at the same Y as A2's inverter (Y=81.28),
-    so A5 is routed with a short detour: stop before A2's approach column X,
-    drop down to an intermediate Y between A2/A3 inverter bodies, then continue.
-
-    True A0/A1 signals are branched off the label-approach wires using local
-    labels ("A0_TRUE" / "A1_TRUE") so the routing stays clean without needing
-    long horizontal wires that cross inverter bodies.
-
-    Probe hier labels (RS1-RS4) are placed just to the right of each stage's
-    LED column (within the stage's gap) so the probe wire never crosses into
-    a downstream AND column.
-
-    Key pin offsets (angle=0):
-      74LVC1G04: pin2(in)=(-15.24,0), pin4(out)=(+12.70,0)
-      74LVC1G08: pin1=(-15.24,-2.54), pin2=(-15.24,+2.54), pin4(out)=(+12.70,0)
-      R_Small(90): pin1=(-2.54,0), pin2=(+2.54,0)  → centre at led_x+4*GRID
-      LED chain right edge ≈ led_x + 4*GRID + 2.54
-      → inverted trunks start at led_x + 6*GRID (clear of R right edge)
+    Inter-stage connections use local labels (same pattern as column_select)
+    to avoid routing trunks across LED chain R_Small bodies.
     """
-    b = SchematicBuilder(title="Address Decoder", page_size="A2",
+    b = SchematicBuilder(title="Address Decoder", page_size="A1",
                          project_name=PROJECT_NAME)
     base_x, base_y = 25.4, 30.48
 
     # ----------------------------------------------------------------
-    # Column X positions.  Each stage gets its own column so signals always
-    # flow left→right between columns without back-routing through bodies.
-    # Gaps between adjacent columns are ≥ 20*GRID.
+    # Column X positions.  All inter-column connections use local labels
+    # to avoid long wires crossing through AND gate bodies.
     # ----------------------------------------------------------------
-    inv_x       = snap(base_x + 20 * GRID)       # inverter centres
-    l1_and_x    = snap(inv_x   + 30 * GRID)      # L1 ANDs: RS1, RS2
-    l2a_and_x   = snap(l1_and_x + 22 * GRID)     # L2a AND: RS3
-    l2b_and_x   = snap(l2a_and_x + 22 * GRID)    # L2b AND: RS4
-    pair_and_x  = snap(l2b_and_x + 22 * GRID)    # L3 pair: P0-P3
-    final_and_x = snap(pair_and_x + 22 * GRID)   # L3 final: ROW_SEL 0-3
-    hl_out_x    = snap(final_and_x + 22 * GRID)  # output hier labels
+    inv_x       = snap(base_x + 20 * GRID)
+    dec3_l1_x   = snap(inv_x   + 30 * GRID)      # 3-to-8 L1: G0-G3
+    dec3_l2_x   = snap(dec3_l1_x + 22 * GRID)    # 3-to-8 L2: DEC3_0-DEC3_7
+    dec4_l1_x   = snap(dec3_l2_x + 22 * GRID)    # 4-to-16 L1: HA0-HA3, HB0-HB3
+    dec4_l2_x   = snap(dec4_l1_x + 22 * GRID)    # 4-to-16 L2: DEC4_0-DEC4_15
+    final_and_x = snap(dec4_l2_x + 22 * GRID)    # Final: ROW_SEL_0-ROW_SEL_3
+    hl_out_x    = snap(final_and_x + 22 * GRID)  # Output hier labels
 
-    # Pin input X positions (same column, left of centre):
-    #   inv input pin: inv_x - 15.24
-    #   AND input pin: and_x - 15.24
-    inv_pin_in_x  = snap(inv_x - 15.24)
+    inv_pin_in_x = snap(inv_x - 15.24)
 
     # ================================================================
     # Input hier labels + inverter stage
     # ================================================================
-
-    # Input hier labels at base_x, 4*GRID apart vertically
     for i in range(7):
         hl_y = snap(base_y + i * 4 * GRID)
         b.add_hier_label(f"A{i}", base_x, hl_y, shape="input", justify="right")
 
-    # Place 7 inverters, SYM_SPACING_Y (10*GRID) apart
     inv_in_pins  = []
     inv_out_pins = []
     for i in range(7):
@@ -151,300 +137,252 @@ def generate_address_decoder():
         inv_in_pins.append(pins["2"])
         inv_out_pins.append(pins["4"])
 
-    # Route hier label → inverter input using L-shaped wires with staggered
-    # approach columns.  Each bit i uses approach_x = inv_pin_in_x - (9-i)*GRID,
-    # giving unique X lanes.
-    #
-    # Special case A5: its label Y (81.28) coincides with A2's inverter Y (81.28).
-    # A2's approach-to-pin horizontal wire runs at Y=81.28 from X=43.18 to 60.96.
-    # A5's label wire would overlap that segment if drawn all the way to
-    # approach_x[5]=50.8.  Fix: stop A5's label wire at X=42 (< 43.18), drop
-    # down to detour_y=93.98 (midpoint between A2 inv body end=86.36 and
-    # A3 inv body start=100.33), then continue to approach_x[5]=50.8.
+    # Route hier label → inverter input (staggered approach columns)
     approach_xs = [snap(inv_pin_in_x - (9 - i) * GRID) for i in range(7)]
-
-    # A5-specific detour constants
-    A5_STOP_X    = snap(approach_xs[2] - GRID)  # stop before A2's approach col
-    A5_DETOUR_Y  = snap(base_y + 3.5 * SYM_SPACING_Y)  # Y=118.11 — safe gap
+    A5_STOP_X   = snap(approach_xs[2] - GRID)
+    A5_DETOUR_Y = snap(base_y + 3.5 * SYM_SPACING_Y)
 
     for i in range(7):
         hl_y   = snap(base_y + i * 4 * GRID)
         pin_in = inv_in_pins[i]
         ax     = approach_xs[i]
         if abs(hl_y - pin_in[1]) < 0.01:
-            # A0: direct horizontal
             b.add_wire(base_x, hl_y, pin_in[0], pin_in[1])
         elif i == 5:
-            # A5: detour to avoid A2's wire at Y=81.28
             b.add_wire(base_x, hl_y, A5_STOP_X, hl_y)
             b.add_wire(A5_STOP_X, hl_y, A5_STOP_X, A5_DETOUR_Y)
             b.add_wire(A5_STOP_X, A5_DETOUR_Y, ax, A5_DETOUR_Y)
             b.add_wire(ax, A5_DETOUR_Y, ax, pin_in[1])
             b.add_wire(ax, pin_in[1], pin_in[0], pin_in[1])
         else:
-            # Standard L-shaped routing
-            b.add_wire(base_x, hl_y,    ax,        hl_y)
-            b.add_wire(ax,     hl_y,    ax,        pin_in[1])
-            b.add_wire(ax,     pin_in[1], pin_in[0], pin_in[1])
+            b.add_wire(base_x, hl_y, ax, hl_y)
+            b.add_wire(ax, hl_y, ax, pin_in[1])
+            b.add_wire(ax, pin_in[1], pin_in[0], pin_in[1])
 
-    # Inverter output → LED → inverted trunk.
-    # R_Small centre = inv_led_x + 4*GRID; R right edge ≈ inv_led_x + 6.54.
-    # Trunk zone starts at inv_led_x + 6*GRID to clear R right edge.
-    inv_out_x        = inv_out_pins[0][0]          # same for all 7 inverters
-    inv_led_x        = snap(inv_out_x + 2 * GRID)
-    inv_trunk_base_x = snap(inv_led_x + 6 * GRID)
-    inv_trunk_x      = [snap(inv_trunk_base_x + i * GRID) for i in range(7)]
+    # Inverter output → LED → local label for inverted signal.
+    # Using local labels (nA0..nA6) instead of trunks avoids long wires
+    # crossing through AND gate bodies in downstream columns.
+    inv_out_x = inv_out_pins[0][0]
+    inv_led_x = snap(inv_out_x + 2 * GRID)
 
     for i in range(7):
         out = inv_out_pins[i]
         b.add_wire(out[0], out[1], inv_led_x, out[1])
         b.place_led_below(inv_led_x, out[1])
-        b.add_wire(inv_led_x, out[1], inv_trunk_x[i], out[1])
-
-    # True A0/A1 signals: local labels "A0" / "A1" at each pair AND input that
-    # needs the true (non-inverted) signal.  Using the SAME name as the existing
-    # hier_label avoids multiple_net_names ERC warnings and requires no extra
-    # junction or source label on the input wires.
+        label_x = snap(inv_led_x + GRID)
+        b.add_wire(inv_led_x, out[1], label_x, out[1])
+        b.add_label(f"nA{i}", label_x, out[1])
 
     # ================================================================
-    # Level 1: RS1 = AND(/A2, /A3), RS2 = AND(/A4, /A5)
+    # 3-to-8 sub-decoder L1: G0-G3 = AND(A2_variant, A1_variant)
+    # G0=AND(/A2,/A1), G1=AND(/A2,A1), G2=AND(A2,/A1), G3=AND(A2,A1)
     # ================================================================
-    # Place RS1 midway between /A2 and /A3 row Ys,
-    #       RS2 midway between /A4 and /A5 row Ys.
-    l1_y = [
-        snap(base_y + 2.5 * SYM_SPACING_Y),  # RS1: midpoint of A2/A3 inverter Ys
-        snap(base_y + 4.5 * SYM_SPACING_Y),  # RS2: midpoint of A4/A5 inverter Ys
-    ]
-    l1_pins = []
-    for g in range(2):
-        _, pins = b.place_symbol("74LVC1G08", l1_and_x, l1_y[g])
+    g_decode = [(1, 1), (1, 0), (0, 1), (0, 0)]  # (A2_inv, A1_inv)
+    g_pins = []
+    g_y_base = snap(base_y)
+    for g in range(4):
+        y = snap(g_y_base + g * SYM_SPACING_Y)
+        _, pins = b.place_symbol("74LVC1G08", dec3_l1_x, y)
         b.connect_power(pins)
-        l1_pins.append(pins)
+        g_pins.append(pins)
 
-    # RS1: pin1=/A2  pin2=/A3    RS2: pin1=/A4  pin2=/A5
-    l1_input_bits = [(2, 3), (4, 5)]
-    for g, (bit_a, bit_b) in enumerate(l1_input_bits):
-        pa, pb = l1_pins[g]["1"], l1_pins[g]["2"]
-        b.add_wire(inv_trunk_x[bit_a], pa[1], pa[0], pa[1])
-        b.add_wire(inv_trunk_x[bit_b], pb[1], pb[0], pb[1])
+    for g, (a2_inv, a1_inv) in enumerate(g_decode):
+        pa = g_pins[g]["1"]   # A2 variant → pin 1
+        pb = g_pins[g]["2"]   # A1 variant → pin 2
+        lx = snap(pa[0] - 4 * GRID)
+        b.add_wire(pa[0], pa[1], lx, pa[1])
+        b.add_label("nA2" if a2_inv else "A2", lx, pa[1])
+        lx = snap(pb[0] - 4 * GRID)
+        b.add_wire(pb[0], pb[1], lx, pb[1])
+        b.add_label("nA1" if a1_inv else "A1", lx, pb[1])
 
-    # Build inverted trunks /A2-/A5
-    for i in [2, 3, 4, 5]:
-        ys = [snap(inv_out_pins[i][1])]
-        for g, (bit_a, bit_b) in enumerate(l1_input_bits):
-            if bit_a == i:
-                ys.append(snap(l1_pins[g]["1"][1]))
-            if bit_b == i:
-                ys.append(snap(l1_pins[g]["2"][1]))
-        b.add_segmented_trunk(inv_trunk_x[i], sorted(set(ys)))
+    # G0-G3 output LEDs + local labels
+    g_out_x  = snap(dec3_l1_x + 12.70)
+    g_led_x  = snap(g_out_x + 2 * GRID)
 
-    # L1 output LEDs + RS1/RS2 trunks into the l1→l2a gap
-    l1_out_x    = l1_pins[0]["4"][0]
-    l1_led_x    = snap(l1_out_x + 2 * GRID)
-    rs1_trunk_x = snap(l1_led_x + 6 * GRID)
-    rs2_trunk_x = snap(l1_led_x + 7 * GRID)
-
-    for g, tx in enumerate([rs1_trunk_x, rs2_trunk_x]):
-        out = l1_pins[g]["4"]
-        b.add_wire(out[0], out[1], l1_led_x, out[1])
-        b.place_led_below(l1_led_x, out[1])
-        b.add_wire(l1_led_x, out[1], tx, out[1])
-
-    # RS1/RS2 probe labels — placed in the l1→l2a gap.
-    # l1_probe_x must stop BEFORE rs2_trunk_x (= l1_led_x+7*GRID = 187.96) to avoid
-    # overlapping the RS2→RS3 stub wire at Y=rs3_y+2.54=109.22.
-    # Using 4*GRID (=180.34) keeps the probe wire well clear of the RS2 trunk.
-    l1_probe_x = snap(l1_led_x + 4 * GRID)    # 180.34 < rs2_trunk_x=187.96 ✓
-    for g, name in enumerate(["RS1", "RS2"]):
-        out = l1_pins[g]["4"]
-        probe_y = snap(out[1] + 6 * GRID)
-        led_chain_bot = snap(out[1] + 3 * GRID)
-        b.add_wire(l1_led_x, led_chain_bot, l1_led_x, probe_y)
-        b.add_wire(l1_led_x, probe_y, l1_probe_x, probe_y)
-        b.add_hier_label(name, l1_probe_x, probe_y, shape="output", justify="left")
+    for g in range(4):
+        out = g_pins[g]["4"]
+        b.add_wire(out[0], out[1], g_led_x, out[1])
+        b.place_led_below(g_led_x, out[1])
+        label_x = snap(g_led_x + GRID)
+        b.add_wire(g_led_x, out[1], label_x, out[1])
+        b.add_label(f"G{g}", label_x, out[1])
 
     # ================================================================
-    # Level 2a: RS3 = AND(RS1, RS2)
+    # 3-to-8 sub-decoder L2: DEC3_n = AND(G[n>>1], A0_variant[n&1])
+    # DEC3_0=AND(G0,/A0), DEC3_1=AND(G0,A0), DEC3_2=AND(G1,/A0), ...
     # ================================================================
-    rs3_y   = snap(base_y + 3 * SYM_SPACING_Y)   # row 3, near A2/A3 midpoint
-    _, rs3_pins = b.place_symbol("74LVC1G08", l2a_and_x, rs3_y)
-    b.connect_power(rs3_pins)
-
-    rs3_pa, rs3_pb = rs3_pins["1"], rs3_pins["2"]
-
-    # RS1 trunk → RS3 pin1
-    b.add_wire(rs1_trunk_x, rs3_pa[1], rs3_pa[0], rs3_pa[1])
-    b.add_segmented_trunk(rs1_trunk_x,
-                          sorted({snap(l1_pins[0]["4"][1]), snap(rs3_pa[1])}))
-
-    # RS2 trunk → RS3 pin2
-    b.add_wire(rs2_trunk_x, rs3_pb[1], rs3_pb[0], rs3_pb[1])
-    b.add_segmented_trunk(rs2_trunk_x,
-                          sorted({snap(l1_pins[1]["4"][1]), snap(rs3_pb[1])}))
-
-    # RS3 output → LED → RS3_trunk in l2a→l2b gap
-    rs3_out     = rs3_pins["4"]
-    rs3_led_x   = snap(rs3_out[0] + 2 * GRID)
-    rs3_trunk_x = snap(rs3_led_x + 6 * GRID)
-    b.add_wire(rs3_out[0], rs3_out[1], rs3_led_x, rs3_out[1])
-    b.place_led_below(rs3_led_x, rs3_out[1])
-    b.add_wire(rs3_led_x, rs3_out[1], rs3_trunk_x, rs3_out[1])
-
-    # RS3 probe label — in the l2a→l2b gap
-    rs3_probe_x = snap(rs3_led_x + 10 * GRID)
-    rs3_probe_y = snap(rs3_out[1] + 6 * GRID)
-    b.add_wire(rs3_led_x, snap(rs3_out[1] + 3 * GRID), rs3_led_x, rs3_probe_y)
-    b.add_wire(rs3_led_x, rs3_probe_y, rs3_probe_x, rs3_probe_y)
-    b.add_hier_label("RS3", rs3_probe_x, rs3_probe_y, shape="output", justify="left")
-
-    # ================================================================
-    # Level 2b: RS4 = AND(RS3, /A6)
-    # RS4 is in its own column so RS3→RS4 goes left-to-right, avoiding
-    # the pin-stub-overlap that would occur if they shared a column.
-    # ================================================================
-    rs4_y   = snap(base_y + 3 * SYM_SPACING_Y)   # same row as RS3
-    _, rs4_pins = b.place_symbol("74LVC1G08", l2b_and_x, rs4_y)
-    b.connect_power(rs4_pins)
-
-    rs4_pa, rs4_pb = rs4_pins["1"], rs4_pins["2"]
-
-    # RS3 trunk → RS4 pin1
-    b.add_wire(rs3_trunk_x, rs4_pa[1], rs4_pa[0], rs4_pa[1])
-    b.add_segmented_trunk(rs3_trunk_x,
-                          sorted({snap(rs3_out[1]), snap(rs4_pa[1])}))
-
-    # /A6 trunk → RS4 pin2.
-    # The /A6 trunk is at inv_trunk_x[6], which is well to the left of l1_and_x.
-    # The horizontal stub from inv_trunk_x[6] to rs4_pa[0] at Y=rs4_pb[1]
-    # must not pass through l1_and, l2a_and bodies.
-    # rs4_pb[1] = rs4_y + 2.54.  Check against l1 body Ys:
-    #   RS1 body: l1_y[0] ± 5.08 = [88.9, 99.06]
-    #   RS2 body: l1_y[1] ± 5.08 = [139.7, 149.86]
-    # rs4_y = base_y + 3*SYM_SPACING_Y = 106.68 → rs4_pb[1] = 109.22.
-    # 109.22 is NOT in [88.9, 99.06] or [139.7, 149.86] → safe to route directly.
-    # l2a body: rs3_y ± 5.08 = [101.60, 111.76]. 109.22 IS within l2a body!
-    # Route /A6 at rs4_pa[1] instead (Y = rs4_y - 2.54 = 104.14):
-    #   l2a body Y range [101.60, 111.76] → 104.14 IS also within l2a body.
-    # Use a detour: extend /A6 trunk down to rs4_pb[1], then horizontal stub
-    # that starts at inv_trunk_x[6] (left of l1) and only spans to rs4_pb[0].
-    # At Y=rs4_pb[1]=109.22, check each column body Y range:
-    #   l1_and column bodies: RS1 at Y=93.98 → body [88.9,99.06]. 109.22 NOT in it.
-    #                         RS2 at Y=144.78 → body [139.7,149.86]. NOT in it.
-    #   l2a_and: RS3 at Y=106.68 → body [101.60,111.76]. 109.22 IS in it!
-    # So the stub from inv_trunk_x[6] to rs4_pb[0] at Y=109.22 passes through l2a.
-    # Fix: route /A6 below the l2a body.  Use Y = rs4_y + 7*GRID (below all and bodies).
-    # But then we need an L to reach rs4_pb.  Use a relay:
-    #   - Extend /A6 trunk to Y_relay = l2a_and_x right gap
-    #   - Horizontal from inv_trunk_x[6] to a relay_x (right of l2a body) at safe_y
-    #   - Then up/down to rs4_pb[1]
-    # Safe Y for crossing l2a column: below its body (rs3_y+5.08=111.76), use 114.3.
-    a6_relay_y  = snap(rs3_y + 4 * GRID)   # safely below l2a body (>111.76); 116.84 ≠ rs3_probe_y=121.92 ✓
-    a6_relay_x  = snap(rs3_trunk_x + GRID) # in l2a→l2b gap, right of rs3_trunk
-    inv6_out_y  = snap(inv_out_pins[6][1])
-    # Extend /A6 trunk from inv output Y down to a6_relay_y
-    b.add_segmented_trunk(inv_trunk_x[6],
-                          sorted({inv6_out_y, a6_relay_y}))
-    # Horizontal from /A6 trunk to relay X (in l2a→l2b gap) at safe Y
-    b.add_wire(inv_trunk_x[6], a6_relay_y, a6_relay_x, a6_relay_y)
-    # Relay vertical: from a6_relay_y up to rs4_pb[1]
-    b.add_segmented_trunk(a6_relay_x,
-                          sorted({a6_relay_y, snap(rs4_pb[1])}))
-    # Horizontal stub from relay to pin
-    b.add_wire(a6_relay_x, rs4_pb[1], rs4_pb[0], rs4_pb[1])
-
-    # RS4 output → LED (no trunk needed; RS4 signal delivered via local labels)
-    rs4_out   = rs4_pins["4"]
-    rs4_led_x = snap(rs4_out[0] + 2 * GRID)
-    b.add_wire(rs4_out[0], rs4_out[1], rs4_led_x, rs4_out[1])
-    b.place_led_below(rs4_led_x, rs4_out[1])
-
-    # RS4 probe label — in the l2b→pair gap
-    rs4_probe_x = snap(rs4_led_x + 10 * GRID)
-    rs4_probe_y = snap(rs4_out[1] + 6 * GRID)
-    b.add_wire(rs4_led_x, snap(rs4_out[1] + 3 * GRID), rs4_led_x, rs4_probe_y)
-    b.add_wire(rs4_led_x, rs4_probe_y, rs4_probe_x, rs4_probe_y)
-    b.add_hier_label("RS4", rs4_probe_x, rs4_probe_y, shape="output", justify="left")
-
-    # ================================================================
-    # Level 3 pair: P0-P3 = AND(A1_variant, A0_variant)
-    # ================================================================
-    pair_decode = [
-        (1, 1),  # P0 = AND(/A1, /A0)
-        (1, 0),  # P1 = AND(/A1,  A0)
-        (0, 1),  # P2 = AND( A1, /A0)
-        (0, 0),  # P3 = AND( A1,  A0)
-    ]
-    pair_y_base = snap(base_y)
-    pair_pins = []
-    for p_idx in range(4):
-        y = snap(pair_y_base + p_idx * SYM_SPACING_Y)
-        _, pins = b.place_symbol("74LVC1G08", pair_and_x, y)
+    dec3_pins = []
+    dec3_y_base = snap(base_y)
+    for n in range(8):
+        y = snap(dec3_y_base + n * SYM_SPACING_Y)
+        _, pins = b.place_symbol("74LVC1G08", dec3_l2_x, y)
         b.connect_power(pins)
-        pair_pins.append(pins)
+        dec3_pins.append(pins)
 
-    # /A0, /A1 trunks: start at their inverter output Y, extend down to pair inputs
-    inv0_ys = [snap(inv_out_pins[0][1])]
-    inv1_ys = [snap(inv_out_pins[1][1])]
+    for n in range(8):
+        g_idx  = n >> 1
+        a0_inv = 1 - (n & 1)  # even n → /A0, odd n → A0
+        pa = dec3_pins[n]["1"]   # G input
+        pb = dec3_pins[n]["2"]   # A0 variant
+        lx = snap(pa[0] - 4 * GRID)
+        b.add_wire(pa[0], pa[1], lx, pa[1])
+        b.add_label(f"G{g_idx}", lx, pa[1])
+        lx = snap(pb[0] - 4 * GRID)
+        b.add_wire(pb[0], pb[1], lx, pb[1])
+        b.add_label("nA0" if a0_inv else "A0", lx, pb[1])
 
-    for p_idx, (a1_inv, a0_inv) in enumerate(pair_decode):
-        pa, pb = pair_pins[p_idx]["1"], pair_pins[p_idx]["2"]
-        if a1_inv:
-            b.add_wire(inv_trunk_x[1], pa[1], pa[0], pa[1])
-            inv1_ys.append(snap(pa[1]))
+    # DEC3 output LEDs + local labels for DEC3_0..3 (used) + hier labels for DEC3_4..7 (unused)
+    dec3_out_x = snap(dec3_l2_x + 12.70)
+    dec3_led_x = snap(dec3_out_x + 2 * GRID)
+    dec3_hl_x  = snap(dec3_led_x + 8 * GRID)  # hier labels near LED, not at far-right
+
+    for n in range(8):
+        out = dec3_pins[n]["4"]
+        b.add_wire(out[0], out[1], dec3_led_x, out[1])
+        b.place_led_below(dec3_led_x, out[1])
+        if n < 4:
+            # Used internally → local label for final cross-product
+            label_x = snap(dec3_led_x + GRID)
+            b.add_wire(dec3_led_x, out[1], label_x, out[1])
+            b.add_label(f"DEC3_{n}", label_x, out[1])
         else:
-            # A1 true: local label "A1" (same name as hier_label) at pair AND pin
-            b.add_wire(pa[0], pa[1], snap(pa[0] - 4 * GRID), pa[1])
-            b.add_label("A1", snap(pa[0] - 4 * GRID), pa[1])
-        if a0_inv:
-            b.add_wire(inv_trunk_x[0], pb[1], pb[0], pb[1])
-            inv0_ys.append(snap(pb[1]))
-        else:
-            # A0 true: local label "A0" (same name as hier_label) at pair AND pin
-            b.add_wire(pb[0], pb[1], snap(pb[0] - 4 * GRID), pb[1])
-            b.add_label("A0", snap(pb[0] - 4 * GRID), pb[1])
-
-    b.add_segmented_trunk(inv_trunk_x[0], sorted(set(inv0_ys)))
-    b.add_segmented_trunk(inv_trunk_x[1], sorted(set(inv1_ys)))
-
-    # Pair AND output LEDs + individual P0-P3 trunks → final AND column
-    pair_out_x   = pair_pins[0]["4"][0]
-    pair_led_x   = snap(pair_out_x + 2 * GRID)
-    pair_trunk_x = [snap(pair_led_x + 6 * GRID + p * GRID) for p in range(4)]
-
-    for p_idx in range(4):
-        out = pair_pins[p_idx]["4"]
-        b.add_wire(out[0], out[1], pair_led_x, out[1])
-        b.place_led_below(pair_led_x, out[1])
-        b.add_wire(pair_led_x, out[1], pair_trunk_x[p_idx], out[1])
+            # Unused → hier label near the LED output
+            b.add_wire(dec3_led_x, out[1], dec3_hl_x, out[1])
+            b.add_hier_label(f"DEC3_{n}", dec3_hl_x, out[1],
+                             shape="output", justify="left")
 
     # ================================================================
-    # Level 3 final: ROW_SEL_i = AND(RS4, P_i)
+    # 4-to-16 sub-decoder L1 group A: HA0-HA3 = AND(A4_var, A3_var)
+    # HA0=AND(/A4,/A3), HA1=AND(/A4,A3), HA2=AND(A4,/A3), HA3=AND(A4,A3)
+    # All inputs via local labels (nA3/A3, nA4/A4).
+    # ================================================================
+    ha_decode = [(1, 1), (1, 0), (0, 1), (0, 0)]  # (A4_inv, A3_inv)
+    ha_pins = []
+    ha_y_base = snap(base_y)
+    for g in range(4):
+        y = snap(ha_y_base + g * SYM_SPACING_Y)
+        _, pins = b.place_symbol("74LVC1G08", dec4_l1_x, y)
+        b.connect_power(pins)
+        ha_pins.append(pins)
+
+    for g, (a4_inv, a3_inv) in enumerate(ha_decode):
+        pa = ha_pins[g]["1"]   # A4 variant
+        pb = ha_pins[g]["2"]   # A3 variant
+        lx = snap(pa[0] - 4 * GRID)
+        b.add_wire(pa[0], pa[1], lx, pa[1])
+        b.add_label("nA4" if a4_inv else "A4", lx, pa[1])
+        lx = snap(pb[0] - 4 * GRID)
+        b.add_wire(pb[0], pb[1], lx, pb[1])
+        b.add_label("nA3" if a3_inv else "A3", lx, pb[1])
+
+    # ================================================================
+    # 4-to-16 sub-decoder L1 group B: HB0-HB3 = AND(A6_var, A5_var)
+    # HB0=AND(/A6,/A5), HB1=AND(/A6,A5), HB2=AND(A6,/A5), HB3=AND(A6,A5)
+    # All inputs via local labels (nA5/A5, nA6/A6).
+    # ================================================================
+    hb_decode = [(1, 1), (1, 0), (0, 1), (0, 0)]  # (A6_inv, A5_inv)
+    hb_pins = []
+    hb_y_base = snap(ha_y_base + 5 * SYM_SPACING_Y)  # below group A
+    for g in range(4):
+        y = snap(hb_y_base + g * SYM_SPACING_Y)
+        _, pins = b.place_symbol("74LVC1G08", dec4_l1_x, y)
+        b.connect_power(pins)
+        hb_pins.append(pins)
+
+    for g, (a6_inv, a5_inv) in enumerate(hb_decode):
+        pa = hb_pins[g]["1"]   # A6 variant
+        pb = hb_pins[g]["2"]   # A5 variant
+        lx = snap(pa[0] - 4 * GRID)
+        b.add_wire(pa[0], pa[1], lx, pa[1])
+        b.add_label("nA6" if a6_inv else "A6", lx, pa[1])
+        lx = snap(pb[0] - 4 * GRID)
+        b.add_wire(pb[0], pb[1], lx, pb[1])
+        b.add_label("nA5" if a5_inv else "A5", lx, pb[1])
+
+    # HA/HB LED outputs + local labels
+    dec4_l1_out_x = snap(dec4_l1_x + 12.70)
+    dec4_l1_led_x = snap(dec4_l1_out_x + 2 * GRID)
+
+    for g in range(4):
+        out = ha_pins[g]["4"]
+        b.add_wire(out[0], out[1], dec4_l1_led_x, out[1])
+        b.place_led_below(dec4_l1_led_x, out[1])
+        label_x = snap(dec4_l1_led_x + GRID)
+        b.add_wire(dec4_l1_led_x, out[1], label_x, out[1])
+        b.add_label(f"HA{g}", label_x, out[1])
+
+    for g in range(4):
+        out = hb_pins[g]["4"]
+        b.add_wire(out[0], out[1], dec4_l1_led_x, out[1])
+        b.place_led_below(dec4_l1_led_x, out[1])
+        label_x = snap(dec4_l1_led_x + GRID)
+        b.add_wire(dec4_l1_led_x, out[1], label_x, out[1])
+        b.add_label(f"HB{g}", label_x, out[1])
+
+    # ================================================================
+    # 4-to-16 sub-decoder L2: DEC4_n = AND(HB[n>>2], HA[n&3])
+    # ================================================================
+    dec4_pins = []
+    dec4_y_base = snap(base_y)
+    for n in range(16):
+        y = snap(dec4_y_base + n * SYM_SPACING_Y)
+        _, pins = b.place_symbol("74LVC1G08", dec4_l2_x, y)
+        b.connect_power(pins)
+        dec4_pins.append(pins)
+
+    for n in range(16):
+        hb_idx = n >> 2
+        ha_idx = n & 3
+        pa = dec4_pins[n]["1"]   # HB input
+        pb = dec4_pins[n]["2"]   # HA input
+        lx_hb = snap(pa[0] - 4 * GRID)
+        lx_ha = snap(pb[0] - 4 * GRID)
+        b.add_wire(pa[0], pa[1], lx_hb, pa[1])
+        b.add_label(f"HB{hb_idx}", lx_hb, pa[1])
+        b.add_wire(pb[0], pb[1], lx_ha, pb[1])
+        b.add_label(f"HA{ha_idx}", lx_ha, pb[1])
+
+    # DEC4 output LEDs + local label for DEC4_0 (used) + hier labels for DEC4_1..15 (unused)
+    dec4_out_x = snap(dec4_l2_x + 12.70)
+    dec4_led_x = snap(dec4_out_x + 2 * GRID)
+    dec4_hl_x  = snap(dec4_led_x + 8 * GRID)  # hier labels near LED, not at far-right
+
+    for n in range(16):
+        out = dec4_pins[n]["4"]
+        b.add_wire(out[0], out[1], dec4_led_x, out[1])
+        b.place_led_below(dec4_led_x, out[1])
+        if n == 0:
+            # Used internally → local label for final cross-product
+            label_x = snap(dec4_led_x + GRID)
+            b.add_wire(dec4_led_x, out[1], label_x, out[1])
+            b.add_label("DEC4_0", label_x, out[1])
+        else:
+            # Unused → hier label near the LED output
+            b.add_wire(dec4_led_x, out[1], dec4_hl_x, out[1])
+            b.add_hier_label(f"DEC4_{n}", dec4_hl_x, out[1],
+                             shape="output", justify="left")
+
+    # ================================================================
+    # Final cross-product: ROW_SEL_i = AND(DEC3_i, DEC4_0)
     # ================================================================
     final_pins = []
+    final_y_base = snap(base_y)
     for sel_idx in range(4):
-        y = snap(pair_y_base + sel_idx * SYM_SPACING_Y)
+        y = snap(final_y_base + sel_idx * SYM_SPACING_Y)
         _, pins = b.place_symbol("74LVC1G08", final_and_x, y)
         b.connect_power(pins)
         final_pins.append(pins)
 
-    # RS4 → final AND pin1: local label "RS4" (same name as hier_label) avoids
-    # routing a relay wire across pair AND column and prevents multiple_net_names.
     for sel_idx in range(4):
-        pa = final_pins[sel_idx]["1"]
-        label_x = snap(pa[0] - 4 * GRID)
-        b.add_wire(pa[0], pa[1], label_x, pa[1])
-        b.add_label("RS4", label_x, pa[1])
-
-    # P_i trunks → final AND pin2 (approach from the LEFT so no stub overlap)
-    for p_idx in range(4):
-        pair_out_y = snap(pair_pins[p_idx]["4"][1])
-        final_pb   = final_pins[p_idx]["2"]
-        # final AND pin2 is at final_and_x - 15.24 (left of AND body).
-        # pair_trunk_x[p_idx] is in the pair→final gap (left of final_and pin X).
-        # Stub goes from trunk X to pin X → left-to-right → correct direction.
-        b.add_wire(pair_trunk_x[p_idx], final_pb[1], final_pb[0], final_pb[1])
-        b.add_segmented_trunk(pair_trunk_x[p_idx],
-                              sorted({pair_out_y, snap(final_pb[1])}))
+        pa = final_pins[sel_idx]["1"]   # DEC3_i input
+        pb = final_pins[sel_idx]["2"]   # DEC4_0 input
+        lx = snap(pa[0] - 4 * GRID)
+        b.add_wire(pa[0], pa[1], lx, pa[1])
+        b.add_label(f"DEC3_{sel_idx}", lx, pa[1])
+        lx = snap(pb[0] - 4 * GRID)
+        b.add_wire(pb[0], pb[1], lx, pb[1])
+        b.add_label("DEC4_0", lx, pb[1])
 
     # ================================================================
     # ROW_SEL outputs: final AND output → LED → hier label
@@ -1101,15 +1039,16 @@ def generate_root_sheet():
     """
     Root sheet: 24-pin connector, bus indicator LEDs, pin headers, hierarchy refs.
 
-    11-bit address architecture for latency testing:
-      - Address Decoder: A0-A6 → ROW_SEL_0..3 + RS1-RS4 probes
-      - Column Select: A7-A10 → COL_SEL_0..15
-      - Control Logic: nCE, nOE, nWE → WRITE_ACTIVE, READ_EN
-      - Row Control (×4): WRITE_ACTIVE, READ_EN, ROW_SEL → WRITE_EN_ROW, READ_EN_ROW
-      - Bytes (×8): WRITE_EN_ROW, READ_EN_ROW, COL_SEL, D0-D7
+    Connector pin order: GND, A0-A6, nCE/nWE/nOE, D0-D7, A7-A10, VCC
+
+    Layout:
+      - Col1: Address Decoder, Column Select (stacked)
+      - Col2: Row Control (×4), then Control Logic (below)
+      - Byte columns (×8): right of col2
 
     Pin headers:
-      - Probe header (Conn_01x04): RS1-RS4
+      - Unused 3-to-8 header (Conn_01x04): DEC3_4..7
+      - Unused 4-to-16 header (Conn_01x16): DEC4_1..15 + GND
       - Unused column header (Conn_01x14): COL_SEL_2 through COL_SEL_15
     """
     b = SchematicBuilder(title="8-Byte Discrete RAM (2K-depth Decoders)",
@@ -1204,13 +1143,15 @@ def generate_root_sheet():
     # Place sheet blocks — Column 1: Address Decoder, Column Select, Control Logic
     # ================================================================
 
-    # Address Decoder: A0-A6 → ROW_SEL_0..3 + RS1-RS4 probes
+    # Address Decoder: A0-A6 → ROW_SEL_0..3 + DEC3_4..7 + DEC4_1..15
     addr_left_defs = [(f"A{i}", "input") for i in range(7)]
     addr_right_defs = ([(f"ROW_SEL_{i}", "output") for i in range(4)]
-                       + [(f"RS{i}", "output") for i in range(1, 5)])
+                       + [(f"DEC3_{i}", "output") for i in range(4, 8)]
+                       + [(f"DEC4_{i}", "output") for i in range(1, 16)])
     addr_pin_defs = addr_left_defs + addr_right_defs
     addr_right_names = ({f"ROW_SEL_{i}" for i in range(4)}
-                        | {f"RS{i}" for i in range(1, 5)})
+                        | {f"DEC3_{i}" for i in range(4, 8)}
+                        | {f"DEC4_{i}" for i in range(1, 16)})
     addr_h = _sheet_height(max(len(addr_left_defs), len(addr_right_defs)))
     addr_sy = base_y
     addr_pp = _add_sheet_block("Address Decoder", "address_decoder.kicad_sch",
@@ -1230,17 +1171,13 @@ def generate_root_sheet():
                                  col1_w, colsel_h, blue_fill,
                                  right_pins=colsel_right_names)
 
-    # Control Logic: nCE, nOE, nWE → WRITE_ACTIVE, READ_EN (unchanged)
+    # Control Logic: nCE, nOE, nWE → WRITE_ACTIVE, READ_EN
+    # Placed below Row Control blocks in col2 (logically grouped with row selection)
     ctrl_left_defs = [("nCE", "input"), ("nOE", "input"), ("nWE", "input")]
     ctrl_right_defs = [("WRITE_ACTIVE", "output"), ("READ_EN", "output")]
     ctrl_pin_defs = ctrl_left_defs + ctrl_right_defs
     ctrl_right_names = {"WRITE_ACTIVE", "READ_EN"}
     ctrl_h = _sheet_height(max(len(ctrl_left_defs), len(ctrl_right_defs)))
-    ctrl_sy = snap(colsel_sy + colsel_h + sheet_gap)
-    ctrl_pp = _add_sheet_block("Control Logic", "control_logic.kicad_sch",
-                               ctrl_pin_defs, col1_x, ctrl_sy,
-                               col1_w, ctrl_h, yellow_fill,
-                               right_pins=ctrl_right_names)
 
     # ================================================================
     # Place sheet blocks — Column 2: Row Control (4 instances)
@@ -1260,6 +1197,14 @@ def generate_root_sheet():
                               col2_w, rc_h, yellow_fill,
                               right_pins=rc_right_names)
         rc_pp.append(pp)
+
+    # Control Logic below Row Control blocks (in col2)
+    rc_bottom_y = snap(base_y + 3 * (rc_h + sheet_gap) + rc_h)
+    ctrl_sy = snap(rc_bottom_y + sheet_gap)
+    ctrl_pp = _add_sheet_block("Control Logic", "control_logic.kicad_sch",
+                               ctrl_pin_defs, col2_x, ctrl_sy,
+                               col2_w, ctrl_h, orange_fill,
+                               right_pins=ctrl_right_names)
 
     # ================================================================
     # Byte sheet blocks (4 rows x 2 columns)
@@ -1293,13 +1238,15 @@ def generate_root_sheet():
 
     # ================================================================
     # Connector pin mapping (24-pin)
-    # Pin 1=GND, 2-5=A7-A10, 6-13=D7..D0, 14-20=A0-A6, 21-23=nCE/nWE/nOE, 24=VCC
+    # Pin 1=GND, 2-5=A7-A10, 6-8=nCE/nWE/nOE, 9-16=D0-D7, 17-23=A0-A6, 24=VCC
+    # At 180° orientation: pin 24 (VCC) at top, pin 1 (GND) at bottom
+    # Visual top-to-bottom: VCC, A0-A6, D0-D7, ctrl, A7-A10, GND
     # ================================================================
     signal_names = [
-        "A7", "A8", "A9", "A10",                        # pins 2-5
-        "D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0",  # pins 6-13
-        "A0", "A1", "A2", "A3", "A4", "A5", "A6",      # pins 14-20
-        "nCE", "nWE", "nOE",                             # pins 21-23
+        "A7", "A8", "A9", "A10",                           # pins 2-5
+        "nCE", "nWE", "nOE",                               # pins 6-8
+        "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",  # pins 9-16
+        "A0", "A1", "A2", "A3", "A4", "A5", "A6",         # pins 17-23
     ]
     conn_signal_pos = {}
     for pin_num_int, sig in enumerate(signal_names, start=2):
@@ -1351,19 +1298,16 @@ def generate_root_sheet():
     label_x = snap(led_jct_x + 6 * GRID)
 
     # Direct wire destinations:
-    # A0-A6 → Address Decoder, A7-A10 → Column Select, nCE/nOE/nWE → Control Logic
+    # A0-A6 → Address Decoder, A7-A10 → Column Select
+    # nCE/nOE/nWE use labels (Control Logic is below row control, too far for direct wires)
     direct_wire_dest = {}
     for i in range(7):
         direct_wire_dest[f"A{i}"] = addr_pp[f"A{i}"]
     for i in range(7, 11):
         direct_wire_dest[f"A{i}"] = colsel_pp[f"A{i}"]
-    direct_wire_dest["nCE"] = ctrl_pp["nCE"]
-    direct_wire_dest["nOE"] = ctrl_pp["nOE"]
-    direct_wire_dest["nWE"] = ctrl_pp["nWE"]
 
     direct_signals_order = ([f"A{i}" for i in range(7)]
-                            + [f"A{i}" for i in range(7, 11)]
-                            + ["nCE", "nOE", "nWE"])
+                            + [f"A{i}" for i in range(7, 11)])
     direct_turn = {}
     n_direct = len(direct_signals_order)
     for i, sig in enumerate(direct_signals_order):
@@ -1386,7 +1330,7 @@ def generate_root_sheet():
             b.add_wire(dtx, ty, dtx, dest_py)
             b.add_wire(dtx, dest_py, dest_px, dest_py)
         else:
-            # D0-D7 use labels
+            # D0-D7 and nCE/nOE/nWE use labels
             b.add_wire(led_jct_x, ty, label_x, ty)
             b.add_label(sig, label_x, ty)
 
@@ -1420,7 +1364,15 @@ def generate_root_sheet():
         b.add_wire(tx, dst_y, dst_x, dst_y)
 
     # ================================================================
-    # Route: Col1 RIGHT → Col2 LEFT (WRITE_ACTIVE, READ_EN via labels)
+    # Route: Connector → Control Logic (nCE/nOE/nWE via labels)
+    # ================================================================
+    for sig in ["nCE", "nOE", "nWE"]:
+        px, py = ctrl_pp[sig]
+        b.add_wire(px, py, px - wire_stub, py)
+        b.add_label(sig, px - wire_stub, py, justify="right")
+
+    # ================================================================
+    # Route: Control Logic RIGHT → Row Control LEFT (WRITE_ACTIVE, READ_EN via labels)
     # ================================================================
     wa_src = ctrl_pp["WRITE_ACTIVE"]
     b.add_wire(wa_src[0], wa_src[1], wa_src[0] + wire_stub, wa_src[1])
@@ -1478,23 +1430,51 @@ def generate_root_sheet():
             b.add_label(col_sig, dst_x - wire_stub, dst_y, justify="right")
 
     # ================================================================
-    # Probe pin header (Conn_01x04): RS1-RS4
+    # Unused 3-to-8 header (Conn_01x04): DEC3_4..DEC3_7
     # ================================================================
-    probe_header_x = snap(col1_x + col1_w + 3 * GRID)
-    probe_header_y = snap(colsel_sy + colsel_h + sheet_gap + ctrl_h + 2 * sheet_gap)
-    _, probe_pins = b.place_symbol("Conn_01x04", probe_header_x, probe_header_y,
-                                   ref_prefix="J", value="Probe", angle=180)
+    dec3_header_x = snap(col1_x + col1_w + 3 * GRID)
+    dec3_header_y = snap(colsel_sy + colsel_h + sheet_gap + ctrl_h + 2 * sheet_gap)
+    _, dec3_hdr_pins = b.place_symbol("Conn_01x04", dec3_header_x, dec3_header_y,
+                                      ref_prefix="J", value="DEC3_Unused", angle=180)
 
-    probe_signals = [f"RS{i}" for i in range(1, 5)]
-    for pin_idx, sig in enumerate(probe_signals):
+    for pin_idx in range(4):
+        sig = f"DEC3_{pin_idx + 4}"
         pin_num = str(pin_idx + 1)
-        px, py = probe_pins[pin_num]
+        px, py = dec3_hdr_pins[pin_num]
         b.add_wire(px, py, px + wire_stub, py)
         b.add_label(sig, px + wire_stub, py)
 
-    # Source labels for probe signals from address decoder sheet
-    for i in range(1, 5):
-        sig = f"RS{i}"
+    # Source labels for unused DEC3 from address decoder sheet
+    for i in range(4, 8):
+        sig = f"DEC3_{i}"
+        src_x, src_y = addr_pp[sig]
+        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
+        b.add_label(sig, src_x + wire_stub, src_y)
+
+    # ================================================================
+    # Unused 4-to-16 header (Conn_01x16): DEC4_1..DEC4_15 + GND
+    # ================================================================
+    dec4_header_x = dec3_header_x
+    dec4_header_y = snap(dec3_header_y + 16 * GRID)
+    _, dec4_hdr_pins = b.place_symbol("Conn_01x16", dec4_header_x, dec4_header_y,
+                                      ref_prefix="J", value="DEC4_Unused", angle=180)
+
+    for pin_idx in range(15):
+        sig = f"DEC4_{pin_idx + 1}"
+        pin_num = str(pin_idx + 1)
+        px, py = dec4_hdr_pins[pin_num]
+        b.add_wire(px, py, px + wire_stub, py)
+        b.add_label(sig, px + wire_stub, py)
+
+    # Pin 16 = GND
+    gnd_pin_x, gnd_pin_y = dec4_hdr_pins["16"]
+    gnd_wire_x = snap(gnd_pin_x + 3 * GRID)
+    b.add_wire(gnd_pin_x, gnd_pin_y, gnd_wire_x, gnd_pin_y)
+    b.place_power("GND", gnd_wire_x, gnd_pin_y)
+
+    # Source labels for unused DEC4 from address decoder sheet
+    for i in range(1, 16):
+        sig = f"DEC4_{i}"
         src_x, src_y = addr_pp[sig]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
         b.add_label(sig, src_x + wire_stub, src_y)
@@ -1502,8 +1482,8 @@ def generate_root_sheet():
     # ================================================================
     # Unused column header (Conn_01x14): COL_SEL_2 through COL_SEL_15
     # ================================================================
-    unused_header_x = probe_header_x
-    unused_header_y = snap(probe_header_y + 16 * GRID)
+    unused_header_x = dec4_header_x
+    unused_header_y = snap(dec4_header_y + 48 * GRID)
     _, unused_pins = b.place_symbol("Conn_01x14", unused_header_x, unused_header_y,
                                     ref_prefix="J", value="Unused_COL_SEL", angle=180)
 
@@ -1635,7 +1615,7 @@ def fix_instance_paths(builders):
 
 def main():
     print("=" * 60)
-    print("Discrete NES - 8-Byte RAM Prototype (2K-depth Decoders)")
+    print("Discrete NES - 8-Byte RAM Prototype (Full Sub-Decoder Trees)")
     print("=" * 60)
 
     # Ensure pin offsets are discovered using BOARD_DIR for temp files
