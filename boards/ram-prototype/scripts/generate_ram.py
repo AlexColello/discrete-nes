@@ -467,8 +467,6 @@ def generate_column_select():
 
     Inputs:  A7, A8, A9, A10 (4 address bits)
     Outputs: COL_SEL_0..COL_SEL_15 (16 column select lines)
-             GA0..GA3 (group A intermediates, probe outputs)
-             GB0..GB3 (group B intermediates, probe outputs)
 
     Level 1 — group A (A7, A8): GA0=AND(/A8,/A7), GA1=AND(/A8,A7),
               GA2=AND(A8,/A7), GA3=AND(A8,A7)
@@ -657,21 +655,6 @@ def generate_column_select():
         label_x = snap(l1_led_x + GRID)
         b.add_wire(l1_led_x, out[1], label_x, out[1])
         b.add_label(f"GB{g}", label_x, out[1])
-
-    # Probe hier labels (GA/GB intermediates) — short probe wires below LED chain
-    for g in range(4):
-        out  = ga_pins[g]["4"]
-        p_y  = snap(out[1] + 6 * GRID)
-        b.add_wire(l1_led_x, snap(out[1] + 3 * GRID), l1_led_x, p_y)
-        b.add_wire(l1_led_x, p_y, hl_out_x, p_y)
-        b.add_hier_label(f"GA{g}", hl_out_x, p_y, shape="output", justify="left")
-
-    for g in range(4):
-        out  = gb_pins[g]["4"]
-        p_y  = snap(out[1] + 6 * GRID)
-        b.add_wire(l1_led_x, snap(out[1] + 3 * GRID), l1_led_x, p_y)
-        b.add_wire(l1_led_x, p_y, hl_out_x, p_y)
-        b.add_hier_label(f"GB{g}", hl_out_x, p_y, shape="output", justify="left")
 
     # ================================================================
     # Level 2: 16 output ANDs — COL_SEL_n = AND(GB[n>>2], GA[n&3])
@@ -1120,13 +1103,13 @@ def generate_root_sheet():
 
     11-bit address architecture for latency testing:
       - Address Decoder: A0-A6 → ROW_SEL_0..3 + RS1-RS4 probes
-      - Column Select: A7-A10 → COL_SEL_0..15 + GA0-GA3, GB0-GB3 probes
+      - Column Select: A7-A10 → COL_SEL_0..15
       - Control Logic: nCE, nOE, nWE → WRITE_ACTIVE, READ_EN
       - Row Control (×4): WRITE_ACTIVE, READ_EN, ROW_SEL → WRITE_EN_ROW, READ_EN_ROW
       - Bytes (×8): WRITE_EN_ROW, READ_EN_ROW, COL_SEL, D0-D7
 
     Pin headers:
-      - Probe header (Conn_01x12): RS1-RS4, GA0-GA3, GB0-GB3
+      - Probe header (Conn_01x04): RS1-RS4
       - Unused column header (Conn_01x14): COL_SEL_2 through COL_SEL_15
     """
     b = SchematicBuilder(title="8-Byte Discrete RAM (2K-depth Decoders)",
@@ -1235,15 +1218,11 @@ def generate_root_sheet():
                                col1_w, addr_h, yellow_fill,
                                right_pins=addr_right_names)
 
-    # Column Select: A7-A10 → COL_SEL_0..15 + GA0-GA3, GB0-GB3 probes
+    # Column Select: A7-A10 → COL_SEL_0..15
     colsel_left_defs = [(f"A{7+i}", "input") for i in range(4)]
-    colsel_right_defs = ([(f"COL_SEL_{i}", "output") for i in range(16)]
-                         + [(f"GA{i}", "output") for i in range(4)]
-                         + [(f"GB{i}", "output") for i in range(4)])
+    colsel_right_defs = [(f"COL_SEL_{i}", "output") for i in range(16)]
     colsel_pin_defs = colsel_left_defs + colsel_right_defs
-    colsel_right_names = ({f"COL_SEL_{i}" for i in range(16)}
-                          | {f"GA{i}" for i in range(4)}
-                          | {f"GB{i}" for i in range(4)})
+    colsel_right_names = {f"COL_SEL_{i}" for i in range(16)}
     colsel_h = _sheet_height(max(len(colsel_left_defs), len(colsel_right_defs)))
     colsel_sy = snap(addr_sy + addr_h + sheet_gap)
     colsel_pp = _add_sheet_block("Column Select", "column_select.kicad_sch",
@@ -1499,40 +1478,24 @@ def generate_root_sheet():
             b.add_label(col_sig, dst_x - wire_stub, dst_y, justify="right")
 
     # ================================================================
-    # Probe pin header (Conn_01x12): RS1-RS4, GA0-GA3, GB0-GB3
+    # Probe pin header (Conn_01x04): RS1-RS4
     # ================================================================
     probe_header_x = snap(col1_x + col1_w + 3 * GRID)
     probe_header_y = snap(colsel_sy + colsel_h + sheet_gap + ctrl_h + 2 * sheet_gap)
-    _, probe_pins = b.place_symbol("Conn_01x12", probe_header_x, probe_header_y,
+    _, probe_pins = b.place_symbol("Conn_01x04", probe_header_x, probe_header_y,
                                    ref_prefix="J", value="Probe", angle=180)
 
-    probe_signals = (
-        [f"RS{i}" for i in range(1, 5)]
-        + [f"GA{i}" for i in range(4)]
-        + [f"GB{i}" for i in range(4)]
-    )
+    probe_signals = [f"RS{i}" for i in range(1, 5)]
     for pin_idx, sig in enumerate(probe_signals):
         pin_num = str(pin_idx + 1)
         px, py = probe_pins[pin_num]
         b.add_wire(px, py, px + wire_stub, py)
         b.add_label(sig, px + wire_stub, py)
 
-    # Source labels for probe signals from decoder sheets
+    # Source labels for probe signals from address decoder sheet
     for i in range(1, 5):
         sig = f"RS{i}"
         src_x, src_y = addr_pp[sig]
-        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
-        b.add_label(sig, src_x + wire_stub, src_y)
-
-    for g in range(4):
-        sig = f"GA{g}"
-        src_x, src_y = colsel_pp[sig]
-        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
-        b.add_label(sig, src_x + wire_stub, src_y)
-
-    for g in range(4):
-        sig = f"GB{g}"
-        src_x, src_y = colsel_pp[sig]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
         b.add_label(sig, src_x + wire_stub, src_y)
 

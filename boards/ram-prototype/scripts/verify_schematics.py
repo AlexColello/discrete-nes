@@ -254,16 +254,7 @@ def check_netlist():
         if not on_same_net(ad, lbl):
             issues.append(f"  {ad} not connected to label:{sig}")
 
-    # 12. GA0-GA3, GB0-GB3 probe signals: col select -> probe header (via labels)
-    for prefix in ["GA", "GB"]:
-        for g in range(4):
-            sig = f"{prefix}{g}"
-            cs = f"Column Select:{sig}"
-            lbl = f"label:{sig}"
-            if not on_same_net(cs, lbl):
-                issues.append(f"  {cs} not connected to label:{sig}")
-
-    # 13. COL_SEL_2-15: col select -> unused column header (via labels)
+    # 12. COL_SEL_2-15: col select -> unused column header (via labels)
     for col_idx in range(2, 16):
         sig = f"COL_SEL_{col_idx}"
         cs = f"Column Select:{sig}"
@@ -298,8 +289,6 @@ def check_netlist():
         ("Control Logic:WRITE_ACTIVE", "Control Logic:READ_EN"),
         # Probe signals isolated from each other
         ("label:RS1", "label:RS2"),
-        ("label:GA0", "label:GA1"),
-        ("label:GB0", "label:GB1"),
     ]
     for id_a, id_b in isolation_pairs:
         if on_same_net(id_a, id_b):
