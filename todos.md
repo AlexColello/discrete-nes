@@ -15,6 +15,7 @@
 - [ ] **DFF->Buffer routing** — currently skipped (autorouter via In1.Cu). Data bus via at ic_cx-0.50 leaves 0mm clearance to BUF A pin on F.Cu, so this must go through In1.Cu (generate_pcb.py:2339-2341)
 - [ ] **D* data bus fanout prerouting** — preroute the fanout of D0-D7 data bus traces to byte groups
 - [ ] **Column select fanout prerouting** — preroute the COL_SEL signal distribution traces
+- [ ] **Row select trace prerouting** — locally preroute all ROW_SEL traces from row control to byte groups. Must happen after bytes are fully locally routed (depends on NAND, DFF->Buffer, and data bus prerouting being done first)
 
 ### Footprint rework
 - [ ] **Create custom DSBGA footprints** — copy current footprints to custom versions with two changes:
