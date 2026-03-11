@@ -67,7 +67,7 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 # Cell layout dimensions (mm)
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
 IC_CELL_W = 5.0      # horizontal spacing between IC centers (courtyard 3.4mm wide at 90/270°)
-IC_CELL_H = 3.0      # vertical spacing between IC rows (courtyard 2.9mm tall at 90/270°)
+IC_CELL_H = 2.0      # vertical spacing between IC rows (DSBGA-5 courtyard 1.5mm at 90/270°)
 CTRL_CELL_W = 5.5    # horizontal spacing for control logic (wider for routing)
 CTRL_CELL_H = 4.0    # vertical spacing for control logic (wider for routing)
 LED_OFFSET_X = 2.45  # LED center offset from IC center (courtyard edge 1.7mm + 0.75mm gap)
@@ -75,7 +75,7 @@ LED_OFFSET_X = 2.45  # LED center offset from IC center (courtyard edge 1.7mm + 
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
-GROUP_GAP_Y = 0.5    # vertical gap between byte rows
+GROUP_GAP_Y = 1.5    # vertical gap between byte rows (keeps 1mm between OE/CLK buses)
 CTRL_GROUP_GAP_X = 4.0  # horizontal gap between control logic groups
 BYTE_COL_GAP = 2.0   # horizontal gap between the two byte columns (physical gap)
 CTRL_ROW_GAP = 7.5   # vertical gap between RAM area and control logic row
