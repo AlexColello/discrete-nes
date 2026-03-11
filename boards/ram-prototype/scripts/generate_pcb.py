@@ -1838,10 +1838,11 @@ def main():
     group_cell_dims = {}
     extra_root_connectors = []  # J2, J3 — placed after main layout
 
-    # Pre-compute row_ctrl vertical stride for addr_decoder final AND alignment
-    # Each row_ctrl has 2 AND ICs in a single column = 2 * CTRL_CELL_H tall
-    _rc_h_each_est = 2 * CTRL_CELL_H
-    _rc_stride = _rc_h_each_est + GROUP_GAP_Y
+    # Pre-compute row_ctrl stride to match byte row stride
+    # Byte layout: DFF row(y=0) + BUF row(y=IC_CELL_H) + NAND LEDs(y=IC_CELL_H+0.5)
+    # byte_row_h = (IC_CELL_H + 0.5) + IC_CELL_H = 6.5mm (from compute_group_size)
+    _byte_row_h_est = IC_CELL_H + 0.5 + IC_CELL_H
+    _rc_stride = _byte_row_h_est + GROUP_GAP_Y  # 7.0mm — matches byte row stride
     _addr_dec_final_ys = None  # set during addr_decoder layout
 
     for name, comps in groups.items():
@@ -1856,7 +1857,7 @@ def main():
         elif name == "addr_decoder":
             max_cols = 2  # INVs in top row, ANDs below (custom layout below)
         elif name.startswith("row_ctrl_"):
-            max_cols = 1  # Single column for vertical alignment
+            max_cols = 2  # Horizontal: write + read gates side by side
         else:
             max_cols = 3
 
