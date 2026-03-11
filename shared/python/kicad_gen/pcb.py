@@ -73,6 +73,8 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str, str]:
     dsbga5_path = os.path.join(output_dir, "DSBGA-5_NumericPads.kicad_mod")
     fp5.to_file(dsbga5_path)
     _fix_footprint_file(dsbga5_path, stock5_path)
+    # Chip 0.8875x1.3875mm -> half 0.44375x0.69375 -> +0.3 -> ±0.75 x ±1.0
+    _customize_dsbga_footprint(dsbga5_path, crtyd_x=0.75, crtyd_y=1.0)
 
     # --- DSBGA-6 ---
     stock6_path = os.path.join(KICAD_FP_DIR, STOCK_DSBGA6_FP)
@@ -92,6 +94,8 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str, str]:
     dsbga6_path = os.path.join(output_dir, "DSBGA-6_NumericPads.kicad_mod")
     fp6.to_file(dsbga6_path)
     _fix_footprint_file(dsbga6_path, stock6_path)
+    # Chip 0.94x1.4mm -> half 0.47x0.7 -> +0.3 -> ±0.8 x ±1.0
+    _customize_dsbga_footprint(dsbga6_path, crtyd_x=0.8, crtyd_y=1.0)
 
     # --- DSBGA-8 ---
     stock8_path = os.path.join(KICAD_FP_DIR, STOCK_DSBGA8_FP)
@@ -111,6 +115,8 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str, str]:
     dsbga8_path = os.path.join(output_dir, "DSBGA-8_NumericPads.kicad_mod")
     fp8.to_file(dsbga8_path)
     _fix_footprint_file(dsbga8_path, stock8_path)
+    # Chip 0.94x1.94mm -> half 0.47x0.97 -> +0.3 -> ±0.8 x ±1.3
+    _customize_dsbga_footprint(dsbga8_path, crtyd_x=0.8, crtyd_y=1.3)
 
     return dsbga5_path, dsbga6_path, dsbga8_path
 
@@ -1420,6 +1426,69 @@ def _reindent_sexp(sexp: str, base_indent: str) -> str:
         result.append(base_indent + " " * extra + line.lstrip())
 
     return "\n".join(result)
+
+
+def _customize_dsbga_footprint(fp_path: str, crtyd_x: float, crtyd_y: float):
+    """Remove silkscreen pin-1 triangle and shrink courtyard on a DSBGA footprint.
+
+    Args:
+        fp_path: Path to the .kicad_mod file.
+        crtyd_x: Half-width of new courtyard rectangle (±X from center).
+        crtyd_y: Half-height of new courtyard rectangle (±Y from center).
+    """
+    lines = open(fp_path, "r", encoding="utf-8").read().split('\n')
+
+    cx = f"{crtyd_x:.2g}"
+    cy = f"{crtyd_y:.2g}"
+    ncx = f"-{cx}"
+    ncy = f"-{cy}"
+
+    result = []
+    skip_poly = False
+    crtyd_line_count = 0
+    rect_coords = [
+        (ncx, ncy, cx, ncy),   # top
+        (cx, ncy, cx, cy),     # right
+        (cx, cy, ncx, cy),     # bottom
+        (ncx, cy, ncx, ncy),   # left
+    ]
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Skip fp_poly block on F.SilkS (pin-1 triangle) — spans multiple lines
+        if 'fp_poly' in stripped and 'F.SilkS' in stripped:
+            # Single-line fp_poly — skip entirely
+            continue
+        if 'fp_poly' in stripped and skip_poly is False:
+            skip_poly = True
+            continue
+        if skip_poly:
+            if 'F.SilkS' in stripped:
+                skip_poly = False
+            continue
+
+        # Replace fp_rect courtyard (DSBGA-5)
+        if 'fp_rect' in stripped and '"F.CrtYd"' in stripped:
+            indent = line[:len(line) - len(line.lstrip())]
+            result.append(
+                f'{indent}(fp_rect (start {ncx} {ncy}) (end {cx} {cy})'
+                f' (stroke (width 0.05) (type solid)) (fill no) (layer "F.CrtYd"))')
+            continue
+
+        # Replace fp_line courtyard (DSBGA-6/8)
+        if 'fp_line' in stripped and '"F.CrtYd"' in stripped and crtyd_line_count < 4:
+            indent = line[:len(line) - len(line.lstrip())]
+            sx, sy, ex, ey = rect_coords[crtyd_line_count]
+            result.append(
+                f'{indent}(fp_line (start {sx} {sy}) (end {ex} {ey})'
+                f' (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))')
+            crtyd_line_count += 1
+            continue
+
+        result.append(line)
+
+    open(fp_path, "w", encoding="utf-8").write('\n'.join(result))
 
 
 def _fix_footprint_file(fp_path: str, stock_path: str):

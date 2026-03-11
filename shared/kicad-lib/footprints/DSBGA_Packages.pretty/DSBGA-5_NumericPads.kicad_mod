@@ -1,6 +1,6 @@
 (footprint "DSBGA-5_NumericPads" (version 20241229) (generator "kicad-footprint-generator")
   (layer "F.Cu")
-  (tedit 69b13a34) (tstamp 19012f23-f709-4900-b94d-77a59388e81f)
+  (tedit 69b13c94) (tstamp 671dc9db-c92e-408d-92c7-6ba656c69638)
   (descr "TI DSBGA-5 (YZP) with numeric pad names matching 74xGxx symbols. Based on Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.")
   (tags "BGA 5 0.5 YZP DSBGA numeric")
   (property "Reference" "REF\*\*"
@@ -29,12 +29,7 @@
   (fp_line (start -0.3675 -0.875) (end 0.625 -0.875) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
   (fp_line (start 0.625 -0.875) (end 0.625 0.875) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
   (fp_line (start 0.625 0.875) (end -0.625 0.875) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
-  (fp_poly (pts
-      (xy -0.625 -0.875)
-      (xy -1.125 -0.875)
-      (xy -0.625 -1.375)
-    ) (stroke (width 0.12) (type solid)) (fill yes) (layer "F.SilkS"))
-  (fp_rect (start -1.45 -1.7) (end 1.45 1.7) (stroke (width 0.05) (type solid)) (fill no) (layer "F.CrtYd"))
+  (fp_rect (start -0.75 -1) (end 0.75 1) (stroke (width 0.05) (type solid)) (fill no) (layer "F.CrtYd"))
   (fp_line (start -0.44375 -0.471875) (end -0.221875 -0.69375) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
   (fp_line (start -0.44375 0.69375) (end -0.44375 -0.471875) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
   (fp_line (start -0.221875 -0.69375) (end 0.44375 -0.69375) (stroke (width 0.1) (type solid)) (layer "F.Fab"))

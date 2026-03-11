@@ -18,9 +18,7 @@
 - [ ] **Row select trace prerouting** — locally preroute all ROW_SEL traces from row control to byte groups. Must happen after bytes are fully locally routed (depends on NAND, DFF->Buffer, and data bus prerouting being done first)
 
 ### Footprint rework
-- [ ] **Create custom DSBGA footprints** — copy current footprints to custom versions with two changes:
-  - Remove the silkscreen triangle (pin 1 indicator)
-  - Reduce courtyard to 0.3mm offset from the actual chip outline (currently too large)
+- [x] **Create custom DSBGA footprints** — done: removed silkscreen pin-1 triangle, reduced courtyard to 0.3mm offset from chip outline (DSBGA-5: ±0.75×±1.0, DSBGA-6: ±0.8×±1.0, DSBGA-8: ±0.8×±1.3)
 
 - [ ] **Investigate moving resistors to front of board** — currently on B.Cu for space reasons, but this makes assembly and rework harder. Explore using a smaller resistor footprint (e.g., 0201) to fit R on F.Cu alongside the LED
 
