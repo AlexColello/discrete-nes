@@ -254,9 +254,10 @@ python scripts/verify_pcb.py --post-routing  # Stricter DRC on ram_routed.kicad_
 
 **DRC filtering for pre-routing boards:**
 
-- Before routing, many DRC violations are expected: `unconnected_items`, `lib_footprint_mismatch`, `lib_footprint_issues`, `silk_over_copper`, `silk_overlap`, `text_thickness`, `text_height`
+- Before routing, many DRC violations are expected: `unconnected_items`, `lib_footprint_mismatch`, `lib_footprint_issues`, `silk_overlap`, `text_thickness`, `text_height`
 - Use `skip_types` parameter in `run_drc()` to filter these
 - Target: 0 errors, 0 warnings AFTER filtering
+- **NEVER add `silk_over_copper` to skip_types without explicitly asking the user first** — silk_over_copper warnings indicate real layout problems (silkscreen crossing over pads) that need to be fixed, not suppressed
 
 ### kiutils + KiCad 9 ERC Lessons
 

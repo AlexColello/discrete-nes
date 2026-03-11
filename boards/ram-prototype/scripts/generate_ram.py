@@ -125,8 +125,9 @@ def generate_address_decoder():
     # Input hier labels + inverter stage
     # ================================================================
     for i in range(7):
+        addr_bit = 6 - i  # Reversed: A6 at top, A0 at bottom (matches connector visual order)
         hl_y = snap(base_y + i * 4 * GRID)
-        b.add_hier_label(f"A{i}", base_x, hl_y, shape="input", justify="right")
+        b.add_hier_label(f"A{addr_bit}", base_x, hl_y, shape="input", justify="right")
 
     inv_in_pins  = []
     inv_out_pins = []
@@ -166,12 +167,13 @@ def generate_address_decoder():
     inv_led_x = snap(inv_out_x + 2 * GRID)
 
     for i in range(7):
+        addr_bit = 6 - i  # Reversed: nA6 at top, nA0 at bottom
         out = inv_out_pins[i]
         b.add_wire(out[0], out[1], inv_led_x, out[1])
         b.place_led_below(inv_led_x, out[1])
         label_x = snap(inv_led_x + GRID)
         b.add_wire(inv_led_x, out[1], label_x, out[1])
-        b.add_label(f"nA{i}", label_x, out[1])
+        b.add_label(f"nA{addr_bit}", label_x, out[1])
 
     # ================================================================
     # 3-to-8 sub-decoder L1: G0-G3 = AND(A2_variant, A1_variant)
@@ -1143,8 +1145,8 @@ def generate_root_sheet():
     # Place sheet blocks — Column 1: Address Decoder, Column Select, Control Logic
     # ================================================================
 
-    # Address Decoder: A0-A6 → ROW_SEL_0..3 + DEC3_4..7 + DEC4_1..15
-    addr_left_defs = [(f"A{i}", "input") for i in range(7)]
+    # Address Decoder: A6-A0 (top to bottom, matches connector visual order)
+    addr_left_defs = [(f"A{6-i}", "input") for i in range(7)]
     addr_right_defs = ([(f"ROW_SEL_{i}", "output") for i in range(4)]
                        + [(f"DEC3_{i}", "output") for i in range(4, 8)]
                        + [(f"DEC4_{i}", "output") for i in range(1, 16)])
@@ -1452,10 +1454,34 @@ def generate_root_sheet():
         b.add_label(sig, src_x + wire_stub, src_y)
 
     # ================================================================
+    # Unused column header (Conn_01x14): COL_SEL_2 through COL_SEL_15
+    # (Created before DEC4 so J3=COL_SEL, J4=DEC4 — matches PCB placement)
+    # ================================================================
+    colsel_header_x = dec3_header_x
+    colsel_header_y = snap(dec3_header_y + 16 * GRID)
+    _, colsel_hdr_pins = b.place_symbol("Conn_01x14", colsel_header_x, colsel_header_y,
+                                        ref_prefix="J", value="Unused_COL_SEL", angle=180)
+
+    for pin_idx in range(14):
+        col_idx = pin_idx + 2  # COL_SEL_2 through COL_SEL_15
+        sig = f"COL_SEL_{col_idx}"
+        pin_num = str(pin_idx + 1)
+        px, py = colsel_hdr_pins[pin_num]
+        b.add_wire(px, py, px + wire_stub, py)
+        b.add_label(sig, px + wire_stub, py)
+
+    # Source labels for unused COL_SEL from column select sheet
+    for col_idx in range(2, 16):
+        sig = f"COL_SEL_{col_idx}"
+        src_x, src_y = colsel_pp[sig]
+        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
+        b.add_label(sig, src_x + wire_stub, src_y)
+
+    # ================================================================
     # Unused 4-to-16 header (Conn_01x16): DEC4_1..DEC4_15 + GND
     # ================================================================
     dec4_header_x = dec3_header_x
-    dec4_header_y = snap(dec3_header_y + 16 * GRID)
+    dec4_header_y = snap(colsel_header_y + 48 * GRID)
     _, dec4_hdr_pins = b.place_symbol("Conn_01x16", dec4_header_x, dec4_header_y,
                                       ref_prefix="J", value="DEC4_Unused", angle=180)
 
@@ -1476,29 +1502,6 @@ def generate_root_sheet():
     for i in range(1, 16):
         sig = f"DEC4_{i}"
         src_x, src_y = addr_pp[sig]
-        b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
-        b.add_label(sig, src_x + wire_stub, src_y)
-
-    # ================================================================
-    # Unused column header (Conn_01x14): COL_SEL_2 through COL_SEL_15
-    # ================================================================
-    unused_header_x = dec4_header_x
-    unused_header_y = snap(dec4_header_y + 48 * GRID)
-    _, unused_pins = b.place_symbol("Conn_01x14", unused_header_x, unused_header_y,
-                                    ref_prefix="J", value="Unused_COL_SEL", angle=180)
-
-    for pin_idx in range(14):
-        col_idx = pin_idx + 2  # COL_SEL_2 through COL_SEL_15
-        sig = f"COL_SEL_{col_idx}"
-        pin_num = str(pin_idx + 1)
-        px, py = unused_pins[pin_num]
-        b.add_wire(px, py, px + wire_stub, py)
-        b.add_label(sig, px + wire_stub, py)
-
-    # Source labels for unused COL_SEL from column select sheet
-    for col_idx in range(2, 16):
-        sig = f"COL_SEL_{col_idx}"
-        src_x, src_y = colsel_pp[sig]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
         b.add_label(sig, src_x + wire_stub, src_y)
 

@@ -1707,9 +1707,10 @@ def add_layer_test_grid(pcb, origin_x, origin_y):
         if fill_layer != "B.Cu":
             pcb.add_keepout_zone("B.Cu", row_outline)
 
-        # Add F.Cu copper pour zone for F.Cu fill row
-        # (B.Cu fill comes from the full-board B.Cu GND zone)
-        if fill_layer == "F.Cu":
+        # Add copper pour zones for layers without full-board zones
+        # (B.Cu fill comes from the full-board B.Cu GND zone,
+        #  In2.Cu fill comes from the full-board VCC zone)
+        if fill_layer in ("F.Cu", "In1.Cu"):
             pcb.add_zone("GND", fill_layer, row_outline, clearance=0.3)
 
     # --- Cell text (columns 0-3: per-layer text) ---
@@ -2139,7 +2140,7 @@ def main():
     ram_total_w = 2 * (byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75) - BYTE_COL_GAP
 
     # Col 1: addr_decoder (vertical columns, full height)
-    col1_x = PLACEMENT_ORIGIN + root_w + GROUP_GAP_X
+    col1_x = PLACEMENT_ORIGIN + root_w + GROUP_GAP_X * 3  # extra spacing between connector and logic
     col1_y = PLACEMENT_ORIGIN
     dec_abs_y = col1_y  # addr_decoder at top of col 1
 
@@ -2238,45 +2239,41 @@ def main():
                 byte_bounds[name] = (min(xs), min(ys), max(xs), max(ys))
 
     # Add unified silkscreen grid around all 8 bytes
-    SILK_MARGIN = 3.0
-    if byte_bounds:
-        all_min_x = min(b[0] for b in byte_bounds.values())
-        all_min_y = min(b[1] for b in byte_bounds.values())
-        all_max_x = max(b[2] for b in byte_bounds.values())
-        all_max_y = max(b[3] for b in byte_bounds.values())
+    # Exact placement-grid cells: each cell = (col_stride × row_stride)
+    row_stride = byte_row_h + GROUP_GAP_Y
+    col_stride = byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75
+    bx0 = ram_x  # column 0 origin
+    gap_x = col_stride - byte_center_span_x
 
-        grid_x1 = round(all_min_x - SILK_MARGIN, 2)
-        grid_y1 = round(all_min_y - SILK_MARGIN, 2)
-        grid_x2 = round(all_max_x + SILK_MARGIN, 2)
-        grid_y2 = round(all_max_y + SILK_MARGIN, 2)
+    grid_x1 = round(bx0 - gap_x / 2, 2)
+    grid_y1 = round(ram_y - GROUP_GAP_Y / 2 - IC_CELL_H / 2, 2)
+    grid_x2 = round(grid_x1 + 2 * col_stride, 2)
+    grid_y2 = round(grid_y1 + 4 * row_stride, 2)
+    grid_w = round(grid_x2 - grid_x1, 2)
+    grid_h = round(grid_y2 - grid_y1, 2)
 
-        pcb.add_silkscreen_rect(grid_x1, grid_y1,
-                                round(grid_x2 - grid_x1, 2),
-                                round(grid_y2 - grid_y1, 2))
+    pcb.add_silkscreen_rect(grid_x1, grid_y1, grid_w, grid_h)
 
-        col0_max_x = max(byte_bounds[b][2] for b in byte_col0 if b in byte_bounds)
-        col1_min_x = min(byte_bounds[b][0] for b in byte_col1 if b in byte_bounds)
-        div_x = round((col0_max_x + col1_min_x) / 2 - 0.25, 2)
-        pcb.add_silkscreen_line(div_x, grid_y1, div_x, grid_y2)
+    # Vertical divider
+    div_x = round(grid_x1 + col_stride, 2)
+    pcb.add_silkscreen_line(div_x, grid_y1, div_x, grid_y2)
 
-        for row in range(3):
-            top_name = f"byte_{row}"
-            bot_name = f"byte_{row + 1}"
-            if top_name in byte_bounds and bot_name in byte_bounds:
-                top_max_y = byte_bounds[top_name][3]
-                bot_min_y = byte_bounds[bot_name][1]
-                div_y = round((top_max_y + bot_min_y) / 2, 2)
-                pcb.add_silkscreen_line(grid_x1, div_y, grid_x2, div_y)
+    # Horizontal dividers
+    for k in range(1, 4):
+        div_y = round(grid_y1 + k * row_stride, 2)
+        pcb.add_silkscreen_line(grid_x1, div_y, grid_x2, div_y)
 
-        for name, (bmin_x, bmin_y, bmax_x, bmax_y) in byte_bounds.items():
-            byte_idx = int(name.split("_")[1])
-            label = f"0x{byte_idx}"
-            label_y = round((bmin_y + bmax_y) / 2, 2)
-            if byte_idx < 4:
-                label_x = round(grid_x1 - 1.5, 2)
-            else:
-                label_x = round(grid_x2 + 1.5, 2)
-            pcb.add_silkscreen_text(label, label_x, label_y, size=1.0)
+    # Address labels beside each cell
+    for byte_idx in range(8):
+        col_idx = byte_idx // 4
+        row_idx = byte_idx % 4
+        label = f"0x{byte_idx}"
+        label_y = round(grid_y1 + row_idx * row_stride + row_stride / 2, 2)
+        if col_idx == 0:
+            label_x = round(grid_x1 - 1.5, 2)
+        else:
+            label_x = round(grid_x2 + 1.5, 2)
+        pcb.add_silkscreen_text(label, label_x, label_y, size=1.0)
 
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
@@ -2304,14 +2301,16 @@ def main():
         n_pins = int(comp["part"].replace("Conn_01x", ""))
         pin_span = (n_pins - 1) * CONN_PIN_PITCH
         if ref == "J2":
-            # DEC3 unused header below control_logic
-            j2_x = round(col1_x, 2)
-            j2_y = round(ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3, 2)
+            # DEC3 unused header above RAM, horizontal (90°), right of DEC4
+            # DEC4 (J4) is 16-pin at ram_x; DEC3 starts after DEC4's span + gap
+            dec4_span = 15 * CONN_PIN_PITCH  # 16-pin connector span
+            j2_x = round(ram_x + dec4_span + 5.0, 2)
+            j2_y = round(ram_y - GROUP_GAP_Y * 3 - 9.0, 2)  # same Y as DEC4
             _place_component(pcb, comp, j2_x, j2_y, netlist_data,
-                             angle_override=0)
+                             angle_override=90)
             total_placed += 1
-            pcb.add_silkscreen_text("DEC3", round(j2_x - 4.0, 2),
-                                    round(j2_y + pin_span / 2, 2), size=0.8)
+            pcb.add_silkscreen_text("DEC3", round(j2_x + pin_span / 2, 2),
+                                    round(j2_y - 3.0, 2), size=0.8)
         elif ref == "J3":
             # Unused column header below test grid, horizontal (90°)
             test_grid_h_est = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
@@ -2323,9 +2322,9 @@ def main():
             pcb.add_silkscreen_text("COL_SEL", round(j3_x + pin_span / 2, 2),
                                     round(j3_y - 3.0, 2), size=0.8)
         elif ref == "J4":
-            # DEC4 unused header below J2, horizontal (90°)
-            j4_x = round(col1_x, 2)
-            j4_y = round(ctrl_abs_y + ctrl_h + GROUP_GAP_Y * 3 + 15.0, 2)
+            # DEC4 unused header above RAM, horizontal (90°), right of J2
+            j4_x = round(ram_x, 2)
+            j4_y = round(ram_y - GROUP_GAP_Y * 3 - 9.0, 2)
             _place_component(pcb, comp, j4_x, j4_y, netlist_data,
                              angle_override=90)
             total_placed += 1
