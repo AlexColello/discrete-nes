@@ -1959,9 +1959,10 @@ def main():
             group_cell_dims[name] = (col_sp, cell_h)
 
         # Custom column_select layout: horizontal rows, bottom-to-top decode
-        # Row 0 (top, y=0):    16 Level-2 ANDs (COL_SEL_0-15 outputs)
-        # Row 1 (middle):       8 Level-1 ANDs (GA0-3, GB0-3 intermediates)
-        # Row 2 (bottom):       4 INVs (address inverters, inputs from below)
+        # Row 0 LEDs (top):    16 LEDs above level-2 ANDs (output indicators)
+        # Row 0 (y=led_row_h): 16 Level-2 ANDs (COL_SEL_0-15 outputs)
+        # Row 1:                8 Level-1 ANDs (GA0-3, GB0-3 intermediates), inline LEDs
+        # Row 2:                4 INVs (address inverters), inline LEDs
         elif name == "column_select":
             inv_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G04"]
             and_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] != "74LVC1G04"]
@@ -1969,27 +1970,29 @@ def main():
             level2_ands = and_cells[8:]   # COL_SEL_0-15
 
             col_w = IC_CELL_W     # 5.0mm horizontal spacing
-            row_h = CTRL_CELL_H   # 4.0mm vertical spacing between rows
+            row_h = CTRL_CELL_H   # 4.0mm vertical spacing between IC rows
+            led_row_h = 3.5       # space for LED row above level-2 ANDs (LED@90° ±0.93 + IC ±1.45 + margin)
             top_count = len(level2_ands)  # 16
 
             placements = []
 
-            # Row 0 (top, y=0): 16 level-2 ANDs
+            # LED row (top, y=0): 16 output indicator LEDs above level-2 ANDs
+            # Row 0 (y=led_row_h): 16 level-2 ANDs
             for i, (ic, r, led) in enumerate(level2_ands):
                 x = round(i * col_w, 2)
-                y = 0
+                ic_y = led_row_h
                 if ic is not None:
-                    placements.append((ic, x, y))
+                    placements.append((ic, x, ic_y))
                 if led:
-                    placements.append((led, x + LED_OFFSET_X, y))
+                    placements.append((led, x, 0))
                 if r:
-                    placements.append((r, x + LED_OFFSET_X, y))
+                    placements.append((r, x, 0))
 
-            # Row 1 (middle, y=row_h): 8 level-1 ANDs, centered
+            # Row 1 (y=led_row_h + row_h): 8 level-1 ANDs, centered, inline LEDs
             l1_offset = round((top_count - len(level1_ands)) * col_w / 2, 2)
             for i, (ic, r, led) in enumerate(level1_ands):
                 x = round(l1_offset + i * col_w, 2)
-                y = row_h
+                y = round(led_row_h + row_h, 2)
                 if ic is not None:
                     placements.append((ic, x, y))
                 if led:
@@ -1997,11 +2000,11 @@ def main():
                 if r:
                     placements.append((r, x + LED_OFFSET_X, y))
 
-            # Row 2 (bottom, y=2*row_h): 4 INVs, centered
+            # Row 2 (y=led_row_h + 2*row_h): 4 INVs, centered, inline LEDs
             inv_offset = round((top_count - len(inv_cells)) * col_w / 2, 2)
             for i, (ic, r, led) in enumerate(inv_cells):
                 x = round(inv_offset + i * col_w, 2)
-                y = 2 * row_h
+                y = round(led_row_h + 2 * row_h, 2)
                 if ic is not None:
                     placements.append((ic, x, y))
                 if led:

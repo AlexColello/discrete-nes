@@ -5,7 +5,7 @@
 ### Layout issues
 - [x] **Layer test table In1 row broken** — fixed: added In1.Cu copper pour zone for the In1 Fill row (was missing because In1.Cu has no full-board zone unlike B.Cu/In2.Cu)
 - [x] **COL_SEL and DEC4 headers misplaced** — fixed: J3 (COL_SEL) moved from test grid area to below column_select group; J2/J4 (DEC3/DEC4) remain near addr_decoder/control_logic area
-- [ ] **Column select LEDs need nicer presentation** — current layout is messy, needs visual cleanup
+- [x] **Column select LEDs need nicer presentation** — fixed: 16 output LEDs (COL_SEL_0-15) in a dedicated row above the level-2 ANDs (3.5mm gap), remaining rows keep inline LEDs
 - [ ] **Row control read/write gates layout** — read and write gate pairs should be side by side (horizontal), not stacked on top of each other (vertical)
 - [x] **Extra spacing on byte silkscreen outlines** — fixed: reduced SILK_MARGIN from 3.0mm to 1.5mm
 - [ ] **Layer test table: add hashed fill row** — add a row demonstrating hashed/crosshatch copper fill pattern
