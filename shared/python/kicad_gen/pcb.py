@@ -8,6 +8,7 @@ Provides:
 
 import copy
 import json
+import math
 import os
 import re
 import subprocess
@@ -819,6 +820,86 @@ class PCBBuilder:
         )
         self.board.traceItems.append(v)
         return v
+
+    def pin_to_via(
+        self,
+        pad_pos: Tuple[float, float],
+        net: int,
+        angle: float = 270,
+        distance: float = 0.6,
+        nudge: float = 0.0,
+        via_size: float = 0.8,
+        via_drill: float = 0.4,
+        trace_width: float = 0.2,
+        layer: str = "F.Cu",
+        via_layers: Optional[List[str]] = None,
+    ) -> Tuple[Via, Tuple[float, float]]:
+        """Route a trace from a pad to a via.
+
+        Two modes controlled by the ``nudge`` parameter:
+
+        - **Straight escape** (nudge=0): single trace from pad at the given
+          angle for ``distance`` mm, via at the end.
+        - **Nudged escape** (nudge!=0): chamfered L-trace — perpendicular jog
+          then straight escape.  Staggers the via sideways so adjacent pins
+          can escape in a straight line without crossing.
+
+        The ``angle`` uses screen coordinates (Y-down):
+            0 = right,  90 = down,  180 = left,  270 = up.
+
+        Nudge direction is 90° CCW from the escape direction on screen:
+            Escaping down  (90)  → positive nudge = rightward
+            Escaping right (0)   → positive nudge = upward
+            Escaping up    (270) → positive nudge = leftward
+            Escaping left  (180) → positive nudge = downward
+
+        Best results with cardinal angles (0/90/180/270).  Diagonal angles
+        work for straight escapes but nudged L-traces may look odd.
+
+        Args:
+            pad_pos: (x, y) pad centre in mm.
+            net: Net number.
+            angle: Escape direction in screen degrees.
+            distance: Distance from pad to via along escape direction (mm).
+            nudge: Perpendicular offset (mm).  0 = straight escape.
+            via_size: Via outer diameter (mm).
+            via_drill: Via drill diameter (mm).
+            trace_width: Copper trace width (mm).
+            layer: Copper layer for the escape trace.
+            via_layers: Via layer pair (default ``["F.Cu", "B.Cu"]``).
+
+        Returns:
+            ``(Via, (via_x, via_y))`` — the created via and its position.
+        """
+        if via_layers is None:
+            via_layers = ["F.Cu", "B.Cu"]
+
+        theta = math.radians(angle)
+        esc_dx, esc_dy = math.cos(theta), math.sin(theta)
+        # Perpendicular: 90° CCW from escape direction on screen
+        perp_dx, perp_dy = esc_dy, -esc_dx
+
+        px, py = round(pad_pos[0], 2), round(pad_pos[1], 2)
+        via_x = round(px + perp_dx * nudge + esc_dx * distance, 2)
+        via_y = round(py + perp_dy * nudge + esc_dy * distance, 2)
+
+        if abs(nudge) < 0.01:
+            # Straight escape — single trace segment
+            self.add_trace((px, py), (via_x, via_y), net, trace_width, layer)
+        else:
+            # Nudged escape — chamfered L-trace
+            # First leg = perpendicular jog, second leg = escape direction.
+            # horizontal_first when escape is vertical (perp jog is horizontal).
+            horizontal_first = abs(esc_dy) > abs(esc_dx)
+            self.add_l_trace(
+                (px, py), (via_x, via_y), net, trace_width, layer,
+                horizontal_first=horizontal_first,
+            )
+
+        via = self.add_via(
+            (via_x, via_y), net, via_size, via_drill, via_layers,
+        )
+        return via, (via_x, via_y)
 
     def add_l_trace(
         self,

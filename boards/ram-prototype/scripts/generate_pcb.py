@@ -319,7 +319,7 @@ VIA_SIZE = 0.8       # mm outer diameter (Elecrow minimum)
 VIA_DRILL = 0.4      # mm drill
 POWER_TRACE_W = 0.3  # mm trace width for power stubs
 SIGNAL_TRACE_W = 0.2 # mm trace width for signals
-VIA_OFFSET = 0.6     # mm offset from pad center to via center
+VIA_OFFSET = 0.7     # mm offset from pad center to via center
 DEFAULT_CLEARANCE = 0.15  # mm netclass clearance (matches Elecrow minimum)
 
 
@@ -391,13 +391,11 @@ def preroute_power_vias(pcb):
     - R GND pads      -> via to B.Cu (GND plane)
 
     Via offset direction:
-    - DSBGA ICs: away from IC center (outward from body)
-    - LEDs/Rs: rightward (+X direction)
+    - DSBGA ICs: escape radially away from IC center
+    - LEDs/Rs: escape rightward (+X)
 
     Returns (via_count, trace_count).
     """
-    import math
-
     gnd_net = pcb.get_net_number("GND")
     vcc_net = pcb.get_net_number("VCC")
     if gnd_net is None or vcc_net is None:
@@ -405,7 +403,6 @@ def preroute_power_vias(pcb):
         return 0, 0
 
     vias = 0
-    traces = 0
 
     for fp in pcb.board.footprints:
         ref = fp.properties.get("Reference", "")
@@ -439,42 +436,38 @@ def preroute_power_vias(pcb):
             net_num = pad.net.number
 
             px, py = pad.position.X, pad.position.Y
-            # KiCad uses CCW rotation (Y-down coords) (positive angle = CW in Y-down)
+            # KiCad uses CCW rotation (Y-down coords)
             abs_x = round(fp_x + px * cos_a + py * sin_a, 2)
             abs_y = round(fp_y - px * sin_a + py * cos_a, 2)
 
-            if net_name == "GND":
-                target_layers = ["F.Cu", "B.Cu"]
-            else:  # VCC
-                target_layers = ["F.Cu", "In2.Cu"]
+            via_layers = (["F.Cu", "B.Cu"] if net_name == "GND"
+                          else ["F.Cu", "In2.Cu"])
 
             if is_dsbga:
-                # DSBGA: offset away from IC center (into row gap)
+                # DSBGA: escape away from IC center, snapped to 45° grid
                 dx = abs_x - fp_x
                 dy = abs_y - fp_y
                 dist = math.sqrt(dx * dx + dy * dy)
                 if dist > 0.01:
-                    via_x = round(abs_x + (dx / dist) * VIA_OFFSET, 2)
-                    via_y = round(abs_y + (dy / dist) * VIA_OFFSET, 2)
+                    raw = math.degrees(math.atan2(dy, dx))
+                    escape_angle = round(raw / 45) * 45
                 else:
-                    via_x = abs_x
-                    via_y = round(abs_y + VIA_OFFSET, 2)
+                    escape_angle = 90  # default: downward
             else:
-                # LEDs and Rs: offset rightward (+X)
-                via_x = round(abs_x + VIA_OFFSET, 2)
-                via_y = abs_y
+                # LEDs and Rs: escape rightward
+                escape_angle = 0
 
-            # Short stub trace from pad to via
-            pcb.add_trace((abs_x, abs_y), (via_x, via_y),
-                          net_num, POWER_TRACE_W, "F.Cu")
-            traces += 1
-
-            # Via to inner plane
-            pcb.add_via((via_x, via_y), net_num,
-                        VIA_SIZE, VIA_DRILL, target_layers)
+            pcb.pin_to_via(
+                (abs_x, abs_y), net_num,
+                angle=escape_angle,
+                distance=VIA_OFFSET,
+                trace_width=POWER_TRACE_W,
+                via_size=VIA_SIZE, via_drill=VIA_DRILL,
+                via_layers=via_layers,
+            )
             vias += 1
 
-    return vias, traces
+    return vias, vias
 
 
 def preroute_bcu_resistors(pcb, netlist_data):
@@ -1115,29 +1108,39 @@ def preroute_nand_connections(pcb, netlist_data):
         # === NAND Power Vias ===
         pwr_via_x = round(byte_x + 0.15, 2)
 
-        # Pin 8 (VCC) -> 45° UP-LEFT diagonal to via on In2.Cu
+        # Pin 8 (VCC) -> 45° diagonal to via on In2.Cu
         pin8_pos = pcb.get_pad_position(ref, "8")
         pin8_net = pcb.get_pad_net(ref, "8")
         if pin8_pos and pin8_net:
-            dx = round(pin8_pos[0] - pwr_via_x, 2)
-            via8_y = round(pin8_pos[1] - dx, 2)
-            pcb.add_trace(pin8_pos, (pwr_via_x, via8_y),
-                          pin8_net, POWER_TRACE_W, "F.Cu")
-            traces += 1
-            pcb.add_via((pwr_via_x, via8_y), pin8_net,
-                        VIA_SIZE, VIA_DRILL, ["F.Cu", "In2.Cu"])
+            delta_x = pwr_via_x - pin8_pos[0]
+            # Original constraint: delta_y == delta_x (45° line to target X)
+            escape_angle = math.degrees(math.atan2(delta_x, delta_x))
+            escape_dist = abs(delta_x) * math.sqrt(2)
+            pcb.pin_to_via(
+                pin8_pos, pin8_net,
+                angle=escape_angle, distance=escape_dist,
+                trace_width=POWER_TRACE_W,
+                via_size=VIA_SIZE, via_drill=VIA_DRILL,
+                via_layers=["F.Cu", "In2.Cu"],
+            )
             vias += 1
+            traces += 1
 
-        # Pin 4 (GND) -> via to B.Cu
+        # Pin 4 (GND) -> horizontal to via on B.Cu
         pin4_pos = pcb.get_pad_position(ref, "4")
         pin4_net = pcb.get_pad_net(ref, "4")
         if pin4_pos and pin4_net:
-            pcb.add_trace(pin4_pos, (pwr_via_x, pin4_pos[1]),
-                          pin4_net, POWER_TRACE_W, "F.Cu")
-            traces += 1
-            pcb.add_via((pwr_via_x, pin4_pos[1]), pin4_net,
-                        VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"])
+            delta_x = pwr_via_x - pin4_pos[0]
+            escape_angle = 0 if delta_x >= 0 else 180
+            pcb.pin_to_via(
+                pin4_pos, pin4_net,
+                angle=escape_angle, distance=abs(delta_x),
+                trace_width=POWER_TRACE_W,
+                via_size=VIA_SIZE, via_drill=VIA_DRILL,
+                via_layers=["F.Cu", "B.Cu"],
+            )
             vias += 1
+            traces += 1
 
     return vias, traces
 
