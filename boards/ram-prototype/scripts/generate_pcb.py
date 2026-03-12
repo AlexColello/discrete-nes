@@ -609,20 +609,24 @@ def preroute_led_to_resistor(pcb, netlist_data):
 
 
 def preroute_ic_to_led(pcb, netlist_data):
-    """Route IC output pin to LED anode using near-horizontal traces.
+    """Route IC output pin (4) to LED anode on F.Cu.
 
-    NOTE: Pin 4 (output) position changed after footprint mapping fix.
-    At 180°: pin 4 is now at (-0.25, -0.50) upper-LEFT (was upper-right).
-    The horizontal-right routing crosses through GND pad (now upper-right).
-    Skipping all ICs until routing strategy is updated for new geometry.
+    Angle-specific routing strategies:
 
-    DSBGA-6 (SN74LVC1G11) and 74LVC2G00 are skipped as before.
+    ICs@90° (DFF, col_select rows 1/2):
+      Pin 4 at rel (+0.50, -0.25) — right side.
+      LED anode to the RIGHT.
+      Route: L-trace horizontal RIGHT then vertical to LED anode.
 
-    Route strategy (2 segments):
-      1. Near-45° diagonal RIGHT from output pin toward LED anode Y
-      2. Horizontal RIGHT to LED anode X
+    AND/INV@180° (decoder, control logic):
+      Pin 4 (output) at rel (-0.25, -0.50) — upper-left.
+      Pin 3 (GND) at rel (+0.25, -0.50) — upper-right, SAME Y as output.
+      LED anode ~2.7mm to the RIGHT.
+      Route: UP 0.4mm from pin 4 (clears GND pad and R pad of cell above),
+      then RIGHT to LED X, then DOWN to LED anode Y.
 
-    LED anode at 90° rotation: pad 2 at (led_x, led_y-0.55).
+    Only routes ICs where LED anode is to the RIGHT of output pin.
+    Skips: col_select row 0 (LED above), BUF@270°, DSBGA-8, DSBGA-6.
 
     Returns number of trace segments added.
     """
@@ -630,61 +634,91 @@ def preroute_ic_to_led(pcb, netlist_data):
     ref_to_part = _build_ref_to_part(netlist_data)
     traces = 0
 
+    # Parts to skip entirely
+    SKIP_PARTS = {"74LVC1G11", "74LVC2G00", "74LVC1G125"}
+
     for fp in pcb.board.footprints:
         ref = fp.properties.get("Reference", "")
         if not ref.startswith("U"):
             continue
 
         part = ref_to_part.get(ref, "")
+        if part in SKIP_PARTS:
+            continue
 
-        # Skip all ICs — output pin (4) position changed after footprint fix.
-        # At 180°: output now upper-left, GND now upper-right.  Old horizontal-
-        # right routing crosses GND pad.  Left to autorouter.
-        continue
+        fp_angle = round(fp.position.angle or 0)
 
-        out_pins = ["4"]  # standard DSBGA-5
+        # Only handle 90° and 180° ICs
+        if fp_angle not in (90, 180):
+            continue
 
+        out_pin = "4"
         ic_x, ic_y = fp.position.X, fp.position.Y
 
-        for out_pin in out_pins:
-            ic_out_net = pcb.get_pad_net(ref, out_pin)
-            if ic_out_net is None or ic_out_net == 0:
-                continue
+        ic_out_net = pcb.get_pad_net(ref, out_pin)
+        if ic_out_net is None or ic_out_net == 0:
+            continue
 
-            # Find nearest LED pad on the same net (within IC_CELL_W distance)
-            pads_on_net = net_to_pads.get(ic_out_net, [])
-            led_ref = None
-            led_pad_num = None
-            best_dist = float("inf")
-            for pad_ref, pad_num, px, py, pnet in pads_on_net:
-                if pad_ref.startswith("D"):
-                    dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
-                    if dist < IC_CELL_W * 1.5 and dist < best_dist:
-                        best_dist = dist
-                        led_ref = pad_ref
-                        led_pad_num = pad_num
+        # Find nearest LED anode pad on the same net
+        pads_on_net = net_to_pads.get(ic_out_net, [])
+        led_ref = None
+        led_pad_num = None
+        best_dist = float("inf")
+        for pad_ref, pad_num, px, py, pnet in pads_on_net:
+            if pad_ref.startswith("D"):
+                dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
+                if dist < IC_CELL_W * 1.5 and dist < best_dist:
+                    best_dist = dist
+                    led_ref = pad_ref
+                    led_pad_num = pad_num
 
-            if led_ref is None:
-                continue
+        if led_ref is None:
+            continue
 
-            out_pos = pcb.get_pad_position(ref, out_pin)
-            led_anode_pos = pcb.get_pad_position(led_ref, led_pad_num)
+        out_pos = pcb.get_pad_position(ref, out_pin)
+        led_anode_pos = pcb.get_pad_position(led_ref, led_pad_num)
 
-            # L-trace: horizontal RIGHT from output pin to LED anode X,
-            # then vertical to LED anode Y. Avoids power vias above IC.
+        # Only route if LED anode is to the RIGHT of output pin.
+        # Skips col_select row 0 (LED directly above IC, vertical path
+        # would cross R pads and LED cathode).
+        if led_anode_pos[0] <= out_pos[0]:
+            continue
+
+        if fp_angle == 90:
+            # L-trace: horizontal RIGHT then vertical to LED anode
             mid_x = round(led_anode_pos[0], 2)
             mid_y = round(out_pos[1], 2)
 
-            # Segment 1: horizontal RIGHT
             if abs(out_pos[0] - mid_x) > 0.01:
                 pcb.add_trace(out_pos, (mid_x, mid_y), ic_out_net,
                                SIGNAL_TRACE_W, "F.Cu")
                 traces += 1
-
-            # Segment 2: vertical to LED anode (if needed)
             if abs(mid_y - led_anode_pos[1]) > 0.01:
                 pcb.add_trace((mid_x, mid_y), led_anode_pos, ic_out_net,
                                SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+
+        elif fp_angle == 180:
+            # 3-segment: UP 0.4mm from pin 4 (clears GND pad at same Y
+            # and R pad 2 of cell above), RIGHT to LED X, DOWN to LED anode
+            up_y = round(out_pos[1] - 0.4, 2)
+            led_x = round(led_anode_pos[0], 2)
+            led_y = round(led_anode_pos[1], 2)
+
+            # Seg 1: vertical UP from pin 4
+            if abs(out_pos[1] - up_y) > 0.01:
+                pcb.add_trace(out_pos, (round(out_pos[0], 2), up_y),
+                               ic_out_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+            # Seg 2: horizontal RIGHT to LED X
+            if abs(out_pos[0] - led_x) > 0.01:
+                pcb.add_trace((round(out_pos[0], 2), up_y), (led_x, up_y),
+                               ic_out_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+            # Seg 3: vertical DOWN to LED anode
+            if abs(up_y - led_y) > 0.01:
+                pcb.add_trace((led_x, up_y), led_anode_pos,
+                               ic_out_net, SIGNAL_TRACE_W, "F.Cu")
                 traces += 1
 
     return traces
