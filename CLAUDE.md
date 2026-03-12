@@ -284,12 +284,21 @@ python scripts/parse_pdf.py datasheet.pdf --info         # metadata
 - Extract `<sheetpath names="...">` from each component for hierarchy identification
 - Group components by sheetpath to organize placement by functional block
 
-**DRC filtering for pre-routing boards:**
+**DRC skip_types — approved list (do NOT add new types without user confirmation):**
 
-- Before routing, many DRC violations are expected: `unconnected_items`, `lib_footprint_mismatch`, `lib_footprint_issues`, `silk_overlap`, `text_thickness`, `text_height`
-- Use `skip_types` parameter in `run_drc()` to filter these
-- Target: 0 errors, 0 warnings AFTER filtering
-- **NEVER add `silk_over_copper` to skip_types without explicitly asking the user first** — silk_over_copper warnings indicate real layout problems (silkscreen crossing over pads) that need to be fixed, not suppressed
+The following skip_types in `verify_pcb.py` are the **complete approved set**. Never add a new violation type to `PRE_ROUTING_SKIP_TYPES` or `POST_ROUTING_SKIP_TYPES` without explicitly asking the user first.
+
+Pre-routing only:
+- `unconnected_items` — no traces yet
+- `via_dangling` — vias to inner planes appear dangling before zone fill
+- `track_dangling` — fanout stubs intentionally end mid-air
+
+Both pre- and post-routing:
+- `silk_overlap` — stock 0402 footprint silk 0.1mm from pads (PCBWay/Elecrow require 0.15mm)
+- `nonmirrored_text_on_back_layer` — layer test grid places text on B.Cu intentionally
+- `lib_footprint_mismatch` — J1 connector on B.Cu with F.SilkS (intentional)
+
+Target: 0 errors, 0 warnings AFTER filtering. If a new DRC violation type appears, fix the root cause rather than adding it to the skip list.
 
 ### PCB Generation Architecture (generate_pcb.py)
 

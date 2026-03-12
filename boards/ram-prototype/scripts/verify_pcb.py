@@ -51,22 +51,16 @@ PRE_ROUTING_SKIP_TYPES = {
     "unconnected_items",       # No traces yet -- expected
     "via_dangling",            # Vias to inner planes appear dangling before fill
     "track_dangling",          # Fanout stubs intentionally end mid-air
-    "silk_overlap",            # Stock 0402 footprint silk 0.1mm from pads (DRU requires 0.15mm)
+    "silk_overlap",            # Stock 0402 silk 0.1mm from pads (PCBWay/Elecrow require 0.15mm)
     "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
-    "solder_mask_bridge",      # Test grid mask openings expose copper near zone fills
-    "isolated_copper",         # Test grid F.Cu zone is isolated (visual test only)
-    "starved_thermal",         # B.Cu GND zone: 0402 R pads may have <2 spokes
     "lib_footprint_mismatch",  # J1 connector: B.Cu with F.SilkS (intentional)
 }
 
 # DRC violation types to skip after routing
 # Fewer skips -- unconnected_items should now be resolved
 POST_ROUTING_SKIP_TYPES = {
-    "silk_overlap",            # Stock 0402 footprint silk 0.1mm from pads (DRU requires 0.15mm)
+    "silk_overlap",            # Stock 0402 silk 0.1mm from pads (PCBWay/Elecrow require 0.15mm)
     "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
-    "solder_mask_bridge",      # Test grid mask openings expose copper near zone fills
-    "isolated_copper",         # Test grid F.Cu/B.Cu zones are isolated (visual test only)
-    "starved_thermal",         # B.Cu GND zone: 0402 R pads may have <2 spokes
     "lib_footprint_mismatch",  # J1 connector: B.Cu with F.SilkS (intentional)
 }
 
