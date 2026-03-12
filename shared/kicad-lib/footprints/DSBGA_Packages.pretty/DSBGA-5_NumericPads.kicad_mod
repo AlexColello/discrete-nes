@@ -1,6 +1,6 @@
 (footprint "DSBGA-5_NumericPads" (version 20241229) (generator "kicad-footprint-generator")
   (layer "F.Cu")
-  (tedit 69b1572d) (tstamp 1e1440bf-8f45-427b-812b-643f3a353575)
+  (tedit 69b2156e) (tstamp a8138323-ff12-451d-9b38-d7517e03188e)
   (descr "TI DSBGA-5 (YZP) with numeric pad names matching 74xGxx symbols. Based on Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.")
   (tags "BGA 5 0.5 YZP DSBGA numeric")
   (property "Reference" "REF\*\*"
@@ -39,10 +39,10 @@
     (effects (font (size 0.32 0.32) (thickness 0.048)))
   )
   (pad "1" smd circle (at -0.25 -0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
-  (pad "3" smd circle (at 0.25 -0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
+  (pad "5" smd circle (at 0.25 -0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
   (pad "2" smd circle (at -0.25 0) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
-  (pad "4" smd circle (at -0.25 0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
-  (pad "5" smd circle (at 0.25 0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
+  (pad "3" smd circle (at -0.25 0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
+  (pad "4" smd circle (at 0.25 0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
   (embedded_fonts no)
   (model "${KICAD9_3DMODEL_DIR}/Package_BGA.3dshapes/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.step"
     (offset (xyz 0 0 0))

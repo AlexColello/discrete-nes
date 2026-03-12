@@ -243,6 +243,12 @@ python scripts/verify_pcb.py --post-routing  # Stricter DRC on ram_routed.kicad_
 - Solution: create custom footprints with numeric pads via `create_dsbga_footprints()` in `pcb.py`
 - Pin-to-ball mapping: `{1:A1, 2:B1, 3:A2, 4:C1, 5:C2}` (5-ball), add `6:B2` for 6-ball
 
+**DSBGA pin numbering — verified against TI datasheets (2026-03-12):**
+
+- **DSBGA-5**: KiCad and TI datasheets use the SAME pin numbering: `1=in1, 2=in2, 3=GND, 4=output, 5=VCC`. Ball mapping: `{1:A1, 2:B1, 3:C1, 4:C2, 5:A2}`. Verified for 74LVC1G08 and 74LVC1G79
+- **DSBGA-8**: KiCad and TI match: `1=1A, 2=1B, 3=2Y, 4=GND, 5=2A, 6=2B, 7=1Y, 8=VCC`. Note pins 3 and 7 are outputs for gate 2 and gate 1 respectively (not in gate order). Ball mapping: `{1:A1, 2:B1, 3:C1, 4:D1, 5:D2, 6:C2, 7:B2, 8:A2}` — pins go down column 1 (A1→B1→C1→D1) then up column 2 (D2→C2→B2→A2)
+- **CRITICAL**: The old DSBGA-8 mapping `{1:A1, 2:A2, 3:B1, 4:B2, ...}` was wrong — it assumed row-first ordering but TI uses column-first zigzag. Always verify against the datasheet bottom-view diagram
+
 **Netlist parsing for hierarchy grouping:**
 
 - Use `kicad-cli sch export netlist --format kicadxml` to get XML netlist

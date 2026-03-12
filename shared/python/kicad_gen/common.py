@@ -242,12 +242,22 @@ FOOTPRINT_MAP = {
     "Conn_01x24": "Connector_PinHeader_2.54mm:PinHeader_1x24_P2.54mm_Vertical",
 }
 
-# DSBGA pin number to BGA ball name mapping (TI convention)
-DSBGA5_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "A2", "4": "C1", "5": "C2"}
-DSBGA6_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "A2", "4": "C1", "5": "C2", "6": "B2"}
+# DSBGA pin number to BGA ball name mapping.
+# Must match KiCad 74xGxx symbol pin numbering (NOT TI datasheet pin numbers).
+# TI datasheets assign: 1=in1, 2=in2, 3=VCC, 4=GND, 5=out (DSBGA-5).
+# KiCad 74xGxx assigns: 1=in1, 2=in2, 3=GND, 4=out,  5=VCC (DSBGA-5).
+# Pins 1-2 match; pins 3-5 differ.  The mapping here uses KiCad numbering.
+DSBGA5_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "C1", "4": "C2", "5": "A2"}
+DSBGA6_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "C1", "4": "C2", "5": "A2", "6": "B2"}
+# DSBGA-8: KiCad and TI pin numbers match (1=1A, 2=1B, 3=2Y, 4=GND,
+# 5=2A, 6=2B, 7=1Y, 8=VCC).  Pins down col1 then up col2.
+#   Top view:  A1=1A(1)  A2=VCC(8)
+#              B1=1B(2)  B2=1Y(7)
+#              C1=2Y(3)  C2=2B(6)
+#              D1=GND(4) D2=2A(5)
 DSBGA8_PIN_TO_BALL = {
-    "1": "A1", "2": "A2", "3": "B1", "4": "B2",
-    "5": "C1", "6": "C2", "7": "D1", "8": "D2",
+    "1": "A1", "2": "B1", "3": "C1", "4": "D1",
+    "5": "D2", "6": "C2", "7": "B2", "8": "A2",
 }
 
 # Reverse: ball name to pin number

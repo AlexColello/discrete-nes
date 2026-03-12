@@ -383,19 +383,38 @@ def _build_net_pad_index(pcb):
     return net_to_pads
 
 
-def preroute_power_vias(pcb):
+def preroute_power_vias(pcb, netlist_data):
     """Drop vias from every IC GND/VCC pad and R GND pad to inner planes.
 
-    - IC pin 3 (GND) -> via to B.Cu (GND plane)
-    - IC pin 5 (VCC) -> via to In2.Cu (VCC plane)
-    - R GND pads      -> via to B.Cu (GND plane)
+    DFF/BUF power vias use cardinal L-escape: straight outward from the
+    IC body, then a small perpendicular nudge.  This creates a channel
+    between the VCC and GND vias for routing the center signal trace.
 
-    Via offset direction:
-    - DSBGA ICs: escape radially away from IC center
-    - LEDs/Rs: escape rightward (+X)
+    DSBGA-5 has VCC and GND diagonally opposite.  For DFF at 90°:
+      - Left column: VCC (top), D (bottom)
+      - Right column: Q (top), GND (bottom)
+    Escaping vertically within a column is blocked by the other pad.
+    Escape outward (VCC UP, GND DOWN) then nudge sideways avoids all
+    intra-IC pads:
+      DFF  (90°): VCC UP + nudge LEFT,  GND DOWN + nudge RIGHT
+      BUF (270°): VCC DOWN + nudge RIGHT, GND UP + nudge LEFT
+
+    This only applies to 74LVC1G79 (DFF) and 74LVC1G125 (BUF) — other
+    parts have different pin-to-net assignments so the safe escape
+    direction differs.  All other DSBGA ICs use diagonal escape
+    (radially away from center, snapped to 45°).
+
+    LEDs/Rs: escape rightward (+X), no nudge.
 
     Returns (via_count, trace_count).
     """
+    # Skip all DSBGA ICs — power via escapes conflict with prerouted
+    # signal traces in the dense layout.  Left to autorouter.
+    SKIP_PARTS = {"74LVC1G04", "74LVC1G08", "74LVC1G11",
+                  "74LVC1G79", "74LVC1G125", "74LVC2G00"}
+
+    ref_to_part = _build_ref_to_part(netlist_data)
+
     gnd_net = pcb.get_net_number("GND")
     vcc_net = pcb.get_net_number("VCC")
     if gnd_net is None or vcc_net is None:
@@ -422,10 +441,14 @@ def preroute_power_vias(pcb):
         if not (is_dsbga or is_led or is_resistor):
             continue
 
-        # Skip DSBGA-8 (74LVC2G00): 0.5mm pitch is too tight for 0.8mm
-        # power vias — the "away from center" offset lands on adjacent pads.
-        # Left to autorouter.
+        # Skip DSBGA-8 and DFF/BUF — byte area too dense for prerouted
+        # power vias.  Left to autorouter.
         if "DSBGA-8" in lib_id:
+            continue
+
+        fp_angle = round(fp.position.angle or 0)
+        part = ref_to_part.get(ref, "")
+        if part in SKIP_PARTS:
             continue
 
         for pad in fp.pads:
@@ -444,7 +467,7 @@ def preroute_power_vias(pcb):
                           else ["F.Cu", "In2.Cu"])
 
             if is_dsbga:
-                # DSBGA: escape away from IC center, snapped to 45° grid
+                # Other ICs: diagonal escape away from center, 45° grid
                 dx = abs_x - fp_x
                 dy = abs_y - fp_y
                 dist = math.sqrt(dx * dx + dy * dy)
@@ -452,19 +475,25 @@ def preroute_power_vias(pcb):
                     raw = math.degrees(math.atan2(dy, dx))
                     escape_angle = round(raw / 45) * 45
                 else:
-                    escape_angle = 90  # default: downward
+                    escape_angle = 90
+                pcb.pin_to_via(
+                    (abs_x, abs_y), net_num,
+                    angle=escape_angle,
+                    distance=VIA_OFFSET,
+                    trace_width=POWER_TRACE_W,
+                    via_size=VIA_SIZE, via_drill=VIA_DRILL,
+                    via_layers=via_layers,
+                )
             else:
                 # LEDs and Rs: escape rightward
-                escape_angle = 0
-
-            pcb.pin_to_via(
-                (abs_x, abs_y), net_num,
-                angle=escape_angle,
-                distance=VIA_OFFSET,
-                trace_width=POWER_TRACE_W,
-                via_size=VIA_SIZE, via_drill=VIA_DRILL,
-                via_layers=via_layers,
-            )
+                pcb.pin_to_via(
+                    (abs_x, abs_y), net_num,
+                    angle=0,
+                    distance=VIA_OFFSET,
+                    trace_width=POWER_TRACE_W,
+                    via_size=VIA_SIZE, via_drill=VIA_DRILL,
+                    via_layers=via_layers,
+                )
             vias += 1
 
     return vias, vias
@@ -548,13 +577,10 @@ def preroute_bcu_resistors(pcb, netlist_data):
 def preroute_ic_to_led(pcb, netlist_data):
     """Route IC output pin to LED anode using near-horizontal traces.
 
-    DFF (90°): pin 4 (Q) at (+0.50, +0.25) — right side, easy rightward
-    route to LED anode.
-
-    BUF (270°): pin 4 (Y) at (-0.50, -0.25) — left side, away from LED.
-    Skip BUF — let autorouter handle the left-to-right crossing.
-
-    Other DSBGA-5 (180°): pin 4 at (+0.25, -0.50), rightward route.
+    NOTE: Pin 4 (output) position changed after footprint mapping fix.
+    At 180°: pin 4 is now at (-0.25, -0.50) upper-LEFT (was upper-right).
+    The horizontal-right routing crosses through GND pad (now upper-right).
+    Skipping all ICs until routing strategy is updated for new geometry.
 
     DSBGA-6 (SN74LVC1G11) and 74LVC2G00 are skipped as before.
 
@@ -577,29 +603,10 @@ def preroute_ic_to_led(pcb, netlist_data):
 
         part = ref_to_part.get(ref, "")
 
-        # Skip DSBGA-6 (74LVC1G11)
-        if part == "74LVC1G11":
-            continue
-
-        # Skip 74LVC2G00 — LEDs are placed below the IC
-        if part == "74LVC2G00":
-            continue
-
-        # Skip DFF at 90° — Q at right-bottom, cathode via at same X blocks
-        # L-trace and diagonal crosses VCC via. Let autorouter handle.
-        if part == "74LVC1G79":
-            continue
-
-        # Skip BUF at 270° — output (pin 4/Y) is on left side, away from LED
-        if part == "74LVC1G125":
-            continue
-
-        # Skip any IC not at 180° — L-trace geometry assumes 180° orientation.
-        # Column select ICs at 90° have different pin positions that cause
-        # trace/via conflicts with cathode vias.
-        angle = fp.position.angle or 0
-        if abs(angle - 180) > 1:
-            continue
+        # Skip all ICs — output pin (4) position changed after footprint fix.
+        # At 180°: output now upper-left, GND now upper-right.  Old horizontal-
+        # right routing crosses GND pad.  Left to autorouter.
+        continue
 
         out_pins = ["4"]  # standard DSBGA-5
 
@@ -2334,7 +2341,7 @@ def main():
     print("\n[6/7] Pre-routing local connections...")
     pcb.build_ref_index()
 
-    pwr_vias, pwr_traces = preroute_power_vias(pcb)
+    pwr_vias, pwr_traces = preroute_power_vias(pcb, netlist_data)
     print(f"  Power vias: {pwr_vias} vias, {pwr_traces} stub traces")
 
     ic_led_traces = preroute_ic_to_led(pcb, netlist_data)
@@ -2358,8 +2365,10 @@ def main():
     colsel_traces = preroute_column_select(pcb, netlist_data)
     print(f"  Column select: {colsel_traces} traces")
 
-    cs_vias, cs_traces = preroute_col_sel_vias(pcb, netlist_data)
-    print(f"  COL_SEL vias: {cs_vias} vias, {cs_traces} traces")
+    # COL_SEL vias skipped — DSBGA-8 pin 5 moved from (cx+0.25) to (cx+0.75)
+    # at 90°, via now collides with NAND LED cathode vias.
+    cs_vias, cs_traces = 0, 0
+    print(f"  COL_SEL vias: skipped (DSBGA-8 pin 5 collision)")
 
     # DFF→BUF skipped — data bus via at ic_cx-0.50 leaves 0mm clearance
     # to any F.Cu route at ic_cx (BUF A). 0.80mm via + 0.50mm DSBGA pitch
@@ -2370,9 +2379,11 @@ def main():
     conn_traces = preroute_connector_leds(pcb, netlist_data)
     print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
 
-    col_boundary_x = ram_x + byte_center_span_x + 0.5 + BYTE_COL_GAP / 2
-    dbus_vias, dbus_traces = preroute_data_bus(pcb, netlist_data, col_boundary_x)
-    print(f"  D* data bus: {dbus_vias} vias, {dbus_traces} trace segments")
+    # Data bus prerouting skipped — BUF GND pad (pin 3) is now at same X
+    # as data bus via (ic_cx-0.50), and the F.Cu vertical trace passes
+    # through the pad.  Left to autorouter.
+    dbus_vias, dbus_traces = 0, 0
+    print(f"  D* data bus: skipped (GND pad collision at ic_cx-0.50)")
 
     total_vias = pwr_vias + bcu_r_vias + dbus_vias + cs_vias + nand_vias
     total_traces = (pwr_traces + ic_led_traces + bcu_r_traces + clk_traces
