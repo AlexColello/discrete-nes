@@ -2,18 +2,16 @@
 """
 Generate KiCad PCB layout for the 8-byte discrete RAM prototype.
 
-Places all components (ICs, LEDs, resistors, connectors)
+Places all components (ICs, LEDs, resistors, connectors) on F.Cu
 in a grouped layout matching the schematic hierarchy.  DFFs at 90° and
 buffers at 270° (power pins outward, signal pins facing each other).
-Other DSBGA ICs at 180°.  LEDs and resistors at 90° (vertical, anode above).
+Other DSBGA ICs at 180°.  LEDs at 90°, resistors at 270° (below LED,
+pad 1 facing LED cathode).
 After placement, pre-routes repetitive local connections:
   - Power vias (GND/VCC pads to inner planes)
   - IC→LED traces (output to indicator LED anode)
-  - LED→R cathode vias (LED cathode to B.Cu resistor)
-  - DFF Q→Buffer A (F.Cu bypass around nOE pin)
   - CLK fanout (horizontal F.Cu trace per byte)
   - OE fanout (horizontal F.Cu bus + vertical stubs per byte)
-  - D* data bus (1 via per bit per byte, In1.Cu vertical trunk)
   - Connector signal→LED stubs
 
 Layout:
@@ -67,11 +65,11 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 # Cell layout dimensions (mm)
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
 IC_CELL_W = 5.0      # horizontal spacing between IC centers (courtyard 3.4mm wide at 90/270°)
-IC_CELL_H = 2.0      # vertical spacing between IC rows (DSBGA-5 courtyard 1.5mm at 90/270°)
+IC_CELL_H = 4.0      # vertical spacing between IC rows (R below LED needs 1.86mm + courtyard)
 CTRL_CELL_W = 5.5    # horizontal spacing for control logic (wider for routing)
 CTRL_CELL_H = 4.0    # vertical spacing for control logic (wider for routing)
 LED_OFFSET_X = 2.45  # LED center offset from IC center (courtyard edge 1.7mm + 0.75mm gap)
-# R is placed directly behind LED on B.Cu (same x,y as LED)
+R_OFFSET = 2.0       # LED-to-R center offset (mm) — clears courtyard (0402 ±0.93mm at 90°)
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
@@ -266,7 +264,7 @@ def compute_group_layout(ic_cells, standalone, max_cols=4,
         if led:
             placements.append((led, x + LED_OFFSET_X, y))
         if r:
-            placements.append((r, x + LED_OFFSET_X, y))  # B.Cu, behind LED
+            placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
 
         col += 1
         if col >= max_cols:
@@ -281,9 +279,10 @@ def compute_group_layout(ic_cells, standalone, max_cols=4,
             x = col * cw
             y = row * ch
 
-            placements.append((r, x, y))
             if led:
-                placements.append((led, x + 1.5, y))
+                placements.append((led, x, y))
+            if r:
+                placements.append((r, x + R_OFFSET, y))
 
             col += 1
             if col >= max_cols:
@@ -341,13 +340,13 @@ def layout_byte_group(comps):
     # Place both NAND LEDs side by side below the NAND IC
     # Reverse so pin 3 (OE) LED goes LEFT (x=0.5), pin 7 (CLK) LED RIGHT (x=2.0)
     nand_led_pairs = list(reversed(nand_led_pairs))
-    nand_led_y = round(IC_CELL_H + 0.5, 2)  # below buffer row, clears DSBGA-8 courtyard
+    nand_led_y = 2.5  # below NAND IC courtyard (DSBGA-8 bottom at ~2.22mm)
     for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
         lx = round(0.5 + i * 1.5, 2)  # below NAND IC
         if led_comp:
             placements.append((led_comp, lx, nand_led_y))
         if r_comp:
-            placements.append((r_comp, lx, nand_led_y))
+            placements.append((r_comp, lx, nand_led_y + R_OFFSET))
 
     return placements
 
@@ -494,10 +493,10 @@ def preroute_power_vias(pcb, netlist_data):
         is_led = "LED" in lib_id
         is_resistor = "Resistor" in lib_id
 
-        # Skip B.Cu Rs — handled by preroute_bcu_resistors
-        if is_resistor and fp.layer == "B.Cu":
+        # Skip Rs — GND vias too tight in dense byte layout, autorouter handles
+        if is_resistor:
             continue
-        if not (is_dsbga or is_led or is_resistor):
+        if not (is_dsbga or is_led):
             continue
 
         # Skip DSBGA-8 and DFF/BUF — byte area too dense for prerouted
@@ -558,79 +557,55 @@ def preroute_power_vias(pcb, netlist_data):
     return vias, vias
 
 
-def preroute_bcu_resistors(pcb, netlist_data):
-    """Place cathode vias connecting LED cathode (F.Cu) to R pad 1 (B.Cu).
 
-    Each R is on B.Cu directly behind its LED on F.Cu (same x,y position).
-    The cathode via at the LED cathode / R pad 1 position bridges the two
-    layers.  R pad 2 (GND) is left unconnected — the autorouter will
-    connect it to the GND plane on B.Cu via a via it places itself.
+def preroute_led_to_resistor(pcb, netlist_data):
+    """Route LED cathode to R pad 1 on F.Cu (short straight trace).
 
-    Returns (via_count, trace_count).
+    LED at 90° has cathode (pad 1) at y+0.485.  R at 270° below has
+    pad 1 at y+R_OFFSET-0.51.  Gap ~1mm — draw a vertical F.Cu trace.
+    Root connector LEDs at 180°/R at 0° get a horizontal trace instead.
+
+    Returns trace count.
     """
     net_to_pads = _build_net_pad_index(pcb)
-
-    via_count = 0
-
     ref_to_part = _build_ref_to_part(netlist_data)
-    processed_leds = set()
+    traces = 0
+    processed = set()
 
     for fp in pcb.board.footprints:
         ref = fp.properties.get("Reference", "")
-        if not ref.startswith("U"):
+        if not ref.startswith("D") or ref in processed:
             continue
 
-        part = ref_to_part.get(ref, "")
+        # Get LED cathode pad and net
+        # LED pad 2 = anode (signal), pad 1 = cathode (to R)
+        cathode_net = pcb.get_pad_net(ref, "1")
+        cathode_pos = pcb.get_pad_position(ref, "1")
+        if cathode_net is None or cathode_net == 0 or cathode_pos is None:
+            continue
 
-        # Determine output pins by part type
-        if part == "74LVC2G00":
-            out_pins = ["7", "3"]
-        elif part == "74LVC1G11":
-            out_pins = ["5"]
-        else:
-            out_pins = ["4"]
+        # Find matching R pad on cathode net (closest)
+        pads_on_net = net_to_pads.get(cathode_net, [])
+        r_pos = None
+        best_dist = float("inf")
+        for pad_ref, pad_num, px, py, pnet in pads_on_net:
+            if pad_ref.startswith("R"):
+                dist = math.sqrt((px - cathode_pos[0])**2 +
+                                 (py - cathode_pos[1])**2)
+                if dist < 5.0 and dist < best_dist:
+                    best_dist = dist
+                    r_pos = (px, py)
 
-        ic_x, ic_y = fp.position.X, fp.position.Y
+        if r_pos is None:
+            continue
+        processed.add(ref)
 
-        for out_pin in out_pins:
-            ic_out_net = pcb.get_pad_net(ref, out_pin)
-            if ic_out_net is None or ic_out_net == 0:
-                continue
+        # Straight trace from LED cathode to R pad
+        pcb.add_trace(cathode_pos, r_pos, cathode_net,
+                      SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
 
-            # Find nearest LED on the IC output net
-            pads_on_net = net_to_pads.get(ic_out_net, [])
-            led_ref = None
-            led_anode_pad = None
-            best_dist = float("inf")
-            for pad_ref, pad_num, px, py, pnet in pads_on_net:
-                if pad_ref.startswith("D") and pad_ref not in processed_leds:
-                    dist = math.sqrt((px - ic_x)**2 + (py - ic_y)**2)
-                    if dist < IC_CELL_W * 1.5 and dist < best_dist:
-                        best_dist = dist
-                        led_ref = pad_ref
-                        led_anode_pad = pad_num
-
-            if led_ref is None:
-                continue
-            processed_leds.add(led_ref)
-
-            # Get LED cathode pad and net
-            led_cathode_pad = "1" if led_anode_pad == "2" else "2"
-            led_cathode_net = pcb.get_pad_net(led_ref, led_cathode_pad)
-            if led_cathode_net is None or led_cathode_net == 0:
-                continue
-
-            # Get LED cathode position (F.Cu)
-            led_cathode_pos = pcb.get_pad_position(led_ref, led_cathode_pad)
-
-            # Cathode via: connects F.Cu LED cathode to B.Cu R pad 1
-            via_x = round(led_cathode_pos[0], 2)
-            via_y = round(led_cathode_pos[1], 2)
-            pcb.add_via((via_x, via_y), led_cathode_net,
-                        VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"])
-            via_count += 1
-
-    return via_count, 0
+    return traces
 
 
 def preroute_ic_to_led(pcb, netlist_data):
@@ -1973,7 +1948,7 @@ def main():
                         if led:
                             placements.append((led, x + LED_OFFSET_X, y))
                         if r:
-                            placements.append((r, x + LED_OFFSET_X, y))
+                            placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
                 else:
                     span = (n - 1) * cell_h
                     start = round((total_h - span) / 2, 2)
@@ -1985,7 +1960,7 @@ def main():
                         if led:
                             placements.append((led, x + LED_OFFSET_X, y))
                         if r:
-                            placements.append((r, x + LED_OFFSET_X, y))
+                            placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
 
             placements = []
             _place_col(inv_cells,            0 * col_sp, total_h, cell_h, placements)
@@ -2010,7 +1985,7 @@ def main():
 
             col_w = IC_CELL_W     # 5.0mm horizontal spacing
             row_h = CTRL_CELL_H   # 4.0mm vertical spacing between IC rows
-            led_row_h = 3.5       # space for LED row above level-2 ANDs (LED@90° ±0.93 + IC ±1.45 + margin)
+            led_row_h = 4.5       # space for LED+R above level-2 ANDs (R courtyard bottom at 2.93, IC top at 3.57)
             top_count = len(level2_ands)  # 16
 
             placements = []
@@ -2025,7 +2000,7 @@ def main():
                 if led:
                     placements.append((led, x, 0))
                 if r:
-                    placements.append((r, x, 0))
+                    placements.append((r, x, R_OFFSET))
 
             # Row 1 (y=led_row_h + row_h): 8 level-1 ANDs, centered, inline LEDs
             l1_offset = round((top_count - len(level1_ands)) * col_w / 2, 2)
@@ -2037,7 +2012,7 @@ def main():
                 if led:
                     placements.append((led, x + LED_OFFSET_X, y))
                 if r:
-                    placements.append((r, x + LED_OFFSET_X, y))
+                    placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
 
             # Row 2 (y=led_row_h + 2*row_h): 4 INVs, centered, inline LEDs
             inv_offset = round((top_count - len(inv_cells)) * col_w / 2, 2)
@@ -2049,7 +2024,7 @@ def main():
                 if led:
                     placements.append((led, x + LED_OFFSET_X, y))
                 if r:
-                    placements.append((r, x + LED_OFFSET_X, y))
+                    placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
 
             # Override cell dims for group size computation
             group_cell_dims[name] = (col_w, row_h)
@@ -2065,7 +2040,7 @@ def main():
                 # their matching connector pin Y positions.
                 conn_x = 0.0
                 led_x = 7.0   # LED offset right of connector (closer)
-                r_x = 10.0   # R offset right of connector (further, more gap)
+                r_x = led_x + R_OFFSET  # R to the right of LED on F.Cu
 
                 # Find J1 (main connector) and store extras (J2, J3)
                 j1 = None
@@ -2369,8 +2344,8 @@ def main():
     ic_led_traces = preroute_ic_to_led(pcb, netlist_data)
     print(f"  IC->LED: {ic_led_traces} trace segments")
 
-    bcu_r_vias, bcu_r_traces = preroute_bcu_resistors(pcb, netlist_data)
-    print(f"  B.Cu resistors: {bcu_r_vias} vias, {bcu_r_traces} B.Cu traces")
+    led_r_traces = preroute_led_to_resistor(pcb, netlist_data)
+    print(f"  LED->R: {led_r_traces} traces")
 
     clk_traces = preroute_clk_fanout(pcb, netlist_data)
     print(f"  CLK fanout: {clk_traces} trace segments")
@@ -2407,8 +2382,8 @@ def main():
     dbus_vias, dbus_traces = 0, 0
     print(f"  D* data bus: skipped (GND pad collision at ic_cx-0.50)")
 
-    total_vias = pwr_vias + bcu_r_vias + dbus_vias + cs_vias + nand_vias
-    total_traces = (pwr_traces + ic_led_traces + bcu_r_traces + clk_traces
+    total_vias = pwr_vias + dbus_vias + cs_vias + nand_vias
+    total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
                     + oe_traces + nand_traces + dff_buf_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
@@ -2490,7 +2465,7 @@ def main():
     pcb.add_zone("VCC", "In2.Cu", outline, clearance=0.3)
     pcb.add_zone("GND", "B.Cu", outline, clearance=0.3, pad_connection="yes")
     print("  Added VCC zone on In2.Cu")
-    print("  Added GND zone on B.Cu (solid fill for R GND pads + GND plane)")
+    print("  Added GND zone on B.Cu (GND plane)")
 
     # Board info text block — left-justified, bottom-right corner
     info_margin = 3.0  # mm inset from board edge
@@ -2572,9 +2547,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
 
     # Determine layer (independent of angle)
     layer = "F.Cu"
-    if part == "R_Small":
-        layer = "B.Cu"  # Directly behind LED on back side
-    elif part.startswith("Conn_01x"):
+    if part.startswith("Conn_01x"):
         layer = "B.Cu"  # Soldered on back side
 
     # Determine rotation
@@ -2585,7 +2558,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
         if part == "LED_Small":
             angle = 90   # Vertical, anode (pad 2) above at y-0.55, cathode below
         elif part == "R_Small":
-            angle = 90   # Vertical, pad 1 below at y+0.55, pad 2/GND above at y-0.55
+            angle = 270  # Vertical, pad 1 above (toward LED cathode), pad 2/GND below
         elif part == "74LVC1G79":
             angle = 90   # DFF: VCC/GND on top, signal pins D/CLK/Q on bottom
         elif part == "74LVC1G125":

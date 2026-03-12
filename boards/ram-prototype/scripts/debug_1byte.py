@@ -23,7 +23,7 @@ from kicad_gen.snapshot import snapshot_region
 
 from generate_pcb import (
     group_components, layout_byte_group, _place_component,
-    preroute_power_vias, preroute_bcu_resistors, preroute_ic_to_led,
+    preroute_power_vias, preroute_led_to_resistor, preroute_ic_to_led,
     BOARD_DIR, SHARED_FP_DIR, IC_CELL_W, IC_CELL_H,
     BOARD_MARGIN,
 )
@@ -84,11 +84,11 @@ def main():
     pwr_vias, pwr_traces = preroute_power_vias(pcb, netlist_data)
     print(f"  Power vias: {pwr_vias}")
 
+    led_r_traces = preroute_led_to_resistor(pcb, netlist_data)
+    print(f"  LED->R: {led_r_traces} traces")
+
     ic_led_traces = preroute_ic_to_led(pcb, netlist_data)
     print(f"  IC->LED: {ic_led_traces} traces")
-
-    bcu_r_vias, bcu_r_traces = preroute_bcu_resistors(pcb, netlist_data)
-    print(f"  B.Cu resistors: {bcu_r_vias} vias, {bcu_r_traces} traces")
 
     # Board outline from component extents
     comp_min_x = comp_min_y = float('inf')

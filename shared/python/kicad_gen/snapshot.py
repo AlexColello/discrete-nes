@@ -18,7 +18,7 @@ import tempfile
 from .common import KICAD_CLI
 
 DEFAULT_LAYERS = "F.Cu,B.Cu,In1.Cu,In2.Cu,Edge.Cuts,F.SilkS,F.Fab"
-DPI = 600
+DPI = 2400
 MARGIN_MM = 1.0
 
 
