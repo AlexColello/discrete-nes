@@ -293,6 +293,65 @@ def compute_group_layout(ic_cells, standalone, max_cols=4,
     return placements
 
 
+def layout_byte_group(comps):
+    """Compute relative placements for a byte group.
+
+    Handles NAND + 8 DFF + 8 BUF + LEDs + Rs with the standard byte layout:
+    row 0 = NAND + 8 DFFs (MSB left), row 1 = spacer + 8 BUFs, NAND LEDs below.
+
+    Args:
+        comps: list of component dicts from group_components()
+
+    Returns list of (component_dict, rel_x, rel_y).
+    """
+    ic_cells, standalone, others = sort_components_for_placement(comps)
+
+    nand_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC2G00"]
+    nand_extra = [c for c in ic_cells if c[0] is None]  # 2nd NAND LED
+    dff_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G79"]
+    buf_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G125"]
+
+    # Collect both NAND LED+R pairs for manual placement
+    nand_led_pairs = []
+    if nand_cells:
+        _, r1, led1 = nand_cells[0]
+        if led1:
+            nand_led_pairs.append((r1, led1))
+        nand_cells[0] = (nand_cells[0][0], None, None)  # strip from cell
+    for cell in nand_extra:
+        _, r_n, led_n = cell
+        if led_n:
+            nand_led_pairs.append((r_n, led_n))
+
+    # Spacer before BUFs so they align at col 1 (matching DFF columns)
+    ic_cells_ordered = (nand_cells + list(reversed(dff_cells))
+                        + [(None, None, None)] + list(reversed(buf_cells)))
+
+    placements = compute_group_layout(ic_cells_ordered, standalone, max_cols=9,
+                                      cell_w=IC_CELL_W, cell_h=IC_CELL_H)
+
+    # Nudge NAND IC: +1mm right, +0.25mm down relative to bits
+    placements = [
+        (comp, round(rx + 1.0, 2), round(ry + 0.25, 2))
+        if comp is not None and comp.get("part") == "74LVC2G00"
+        else (comp, rx, ry)
+        for comp, rx, ry in placements
+    ]
+
+    # Place both NAND LEDs side by side below the NAND IC
+    # Reverse so pin 3 (OE) LED goes LEFT (x=0.5), pin 7 (CLK) LED RIGHT (x=2.0)
+    nand_led_pairs = list(reversed(nand_led_pairs))
+    nand_led_y = round(IC_CELL_H + 0.5, 2)  # below buffer row, clears DSBGA-8 courtyard
+    for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
+        lx = round(0.5 + i * 1.5, 2)  # below NAND IC
+        if led_comp:
+            placements.append((led_comp, lx, nand_led_y))
+        if r_comp:
+            placements.append((r_comp, lx, nand_led_y))
+
+    return placements
+
+
 def compute_group_size(placements, cell_w=None, cell_h=None):
     """Compute bounding box of a group's placements.
 
@@ -1865,29 +1924,13 @@ def main():
 
         ic_cells, standalone, others = sort_components_for_placement(comps)
 
-        # Reverse bit order within byte groups: MSB (D7) on the left
-        # NAND (74LVC2G00) goes in col 0 of DFF row; DFFs shift right
-        # Both NAND LEDs placed together below the NAND IC
-        nand_led_pairs = []
+        # Byte groups use dedicated layout function
         if is_ram:
-            nand_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC2G00"]
-            nand_extra = [c for c in ic_cells if c[0] is None]  # 2nd NAND LED
-            dff_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G79"]
-            buf_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G125"]
-
-            # Collect both NAND LED+R pairs for manual placement
-            if nand_cells:
-                _, r1, led1 = nand_cells[0]
-                if led1:
-                    nand_led_pairs.append((r1, led1))
-                nand_cells[0] = (nand_cells[0][0], None, None)  # strip from cell
-            for cell in nand_extra:
-                _, r_n, led_n = cell
-                if led_n:
-                    nand_led_pairs.append((r_n, led_n))
-
-            # Spacer before BUFs so they align at col 1 (matching DFF columns)
-            ic_cells = nand_cells + list(reversed(dff_cells)) + [(None, None, None)] + list(reversed(buf_cells))
+            placements = layout_byte_group(comps)
+            group_layouts[name] = placements
+            cw, ch = group_cell_dims.get(name, (IC_CELL_W, IC_CELL_H))
+            group_sizes[name] = compute_group_size(placements, cell_w=cw, cell_h=ch)
+            continue
 
         # Custom addr_decoder layout: vertical columns (left-to-right decode flow)
         # Col 0: 7 INVs (address inverters)
@@ -2014,27 +2057,6 @@ def main():
         else:
             placements = compute_group_layout(ic_cells, standalone, max_cols,
                                               cell_w=cw, cell_h=ch)
-
-        if is_ram:
-            # Nudge NAND IC: +1mm right, +0.25mm down relative to bits
-            placements = [
-                (comp, round(rx + 1.0, 2), round(ry + 0.25, 2))
-                if comp is not None and comp.get("part") == "74LVC2G00"
-                else (comp, rx, ry)
-                for comp, rx, ry in placements
-            ]
-
-            # Place both NAND LEDs side by side below the NAND IC
-            # (shifted +1.0mm X to match NAND nudge)
-            # Reverse so pin 3 (OE) LED goes LEFT (x=0.5), pin 7 (CLK) LED RIGHT (x=2.0)
-            nand_led_pairs = list(reversed(nand_led_pairs))
-            nand_led_y = round(ch + 0.5, 2)  # below buffer row, clears DSBGA-8 courtyard
-            for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
-                lx = round(0.5 + i * 1.5, 2)  # below NAND IC
-                if led_comp:
-                    placements.append((led_comp, lx, nand_led_y))
-                if r_comp:
-                    placements.append((r_comp, lx, nand_led_y))
 
         # Add connector and other non-IC components
         if others:
