@@ -50,8 +50,9 @@ discrete-nes/
 │       │   ├── common.py   # Constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP), snap(), uid()
 │       │   ├── symbols.py  # Library loading, raw text extraction, pin offset discovery
 │       │   ├── schematic.py # SchematicBuilder class (place, wire, LED, labels, save)
-│       │   ├── verify.py   # parse_schematic, 11 general checks, run_erc, UnionFind
-│       │   └── pcb.py      # PCBBuilder, DSBGA footprints, netlist export/parse
+│       │   ├── verify.py   # parse_schematic, 11 general checks, run_erc, run_drc, UnionFind
+│       │   ├── pcb.py      # PCBBuilder, DSBGA footprints, netlist export/parse
+│       │   └── snapshot.py # PCB snapshot: SVG export, crop, X markers, PNG render
 │       └── hdl_parser/     # Verilog to discrete gates conversion
 │           └── verilog_to_gates.py
 ├── boards/
@@ -135,6 +136,57 @@ python scripts/route_pcb.py --skip-verify    # Skip post-routing verification
 ```bash
 python scripts/verify_pcb.py --post-routing  # Stricter DRC on ram_routed.kicad_pcb
 ```
+
+### PCB Snapshot & Visual Inspection
+
+`snapshot_pcb.py` exports cropped PNG images of PCB regions for visual inspection. Uses `kicad_gen.snapshot` (shared library).
+
+```bash
+cd boards/ram-prototype
+
+# Show board outline coordinates (useful for choosing bbox)
+python scripts/snapshot_pcb.py ram.kicad_pcb --outline
+
+# Snapshot a region (PCB mm coordinates)
+python scripts/snapshot_pcb.py ram.kicad_pcb --bbox 13,50,80,80 -o region.png
+
+# Full board
+python scripts/snapshot_pcb.py ram.kicad_pcb -o full_board.png
+
+# Specific layers only
+python scripts/snapshot_pcb.py ram.kicad_pcb --bbox 100,30,180,70 --layers F.Cu,Edge.Cuts
+```
+
+All output renders at 600 DPI via PyMuPDF. The shared library (`kicad_gen.snapshot`) also supports programmatic use with `snapshot_region()`, SVG coordinate offset caching (`svg_cache` parameter), and X-marker injection for DRC visualization.
+
+### PDF Parsing (TI Datasheets)
+
+`parse_pdf.py` extracts text and pin-to-ball tables from TI datasheet PDFs. Uses PyMuPDF.
+
+```bash
+python scripts/parse_pdf.py datasheet.pdf              # dump all text
+python scripts/parse_pdf.py datasheet.pdf --pages 1-3   # specific pages
+python scripts/parse_pdf.py datasheet.pdf --search pin   # regex search
+python scripts/parse_pdf.py datasheet.pdf --pins         # extract pin-to-ball table
+python scripts/parse_pdf.py datasheet.pdf --info         # metadata
+```
+
+### DRC Violation Grouping & Snapshots
+
+`run_drc()` in `kicad_gen.verify` groups DRC violations by structural signature — violations that differ only by instance index (byte number, bit number, signal index) are collapsed into one group. This prevents hundreds of identical errors from flooding the output.
+
+**Console output:** One line per group with count, e.g. `ERROR [unconnected_items: ... | Pad 1 [/D*] of U* ...]: 112x`
+
+**Detail files:** Saved to `verify_output/drc_<label>/` with:
+- `.txt` — signature, representative examples (with coordinates), full instance list
+- `.png` — cropped PCB snapshot of the first violation with red X markers at item positions (when `snapshot=True`)
+
+**Signature generalization rules:**
+- Ref designators: `U_DFF3` → `U_DFF*`, `U44` → `U*`, `D22` → `D*`
+- Net names: `/Byte 0/Q0` → `/Byte */Q*`, `/DEC4_15` → `/DEC4_*`, `Net-(D22-K)` → `Net-(D*-K)`
+- Connector pad numbers generalized (pin index isn't structural)
+- Track lengths rounded to 0.1mm
+- Power nets (`GND`, `VCC`) kept as-is
 
 ## Technology Stack & Research Findings
 

@@ -24,6 +24,7 @@ Also provides:
 import json
 import math
 import os
+import re
 import subprocess
 from collections import defaultdict
 
@@ -1056,7 +1057,7 @@ def run_erc(sch_path, output_dir, label=None, standalone=False):
 # ==============================================================
 
 def run_drc(pcb_path, output_dir, label=None, custom_rules_path=None,
-            skip_types=None):
+            skip_types=None, snapshot=False):
     """Run kicad-cli PCB DRC.
 
     Optionally installs a custom .kicad_dru rules file temporarily.
@@ -1068,6 +1069,7 @@ def run_drc(pcb_path, output_dir, label=None, custom_rules_path=None,
         custom_rules_path: Optional path to a .kicad_dru file to use
         skip_types: Set of violation type strings to filter out (e.g.,
                     {"unconnected_items", "lib_footprint_mismatch"})
+        snapshot: If True, generate PNG snapshots for each violation group.
 
     Returns (issues_list, error_count, warning_count).
     """
@@ -1120,8 +1122,9 @@ def run_drc(pcb_path, output_dir, label=None, custom_rules_path=None,
         with open(drc_json) as f:
             data = json.load(f)
 
-        # DRC violations can be in multiple sections
+        # Collect all non-skipped violations
         filtered_count = 0
+        violations = []  # (severity, vtype, desc, items_list)
         for section_key in ("violations", "unconnected_items", "schematic_parity"):
             for v in data.get(section_key, []):
                 severity = v.get("severity", "error")
@@ -1132,21 +1135,32 @@ def run_drc(pcb_path, output_dir, label=None, custom_rules_path=None,
                     filtered_count += 1
                     continue
 
-                items_desc = "; ".join(
-                    it.get("description", "")
-                    for it in v.get("items", [])
-                )
-
                 if severity == "error":
                     real_errors += 1
-                    issues.append(
-                        f"  ERROR [{vtype}]: {desc} ({items_desc})"
-                    )
                 elif severity == "warning":
                     warnings += 1
-                    issues.append(
-                        f"  WARN [{vtype}]: {desc} ({items_desc})"
-                    )
+
+                violations.append((severity, vtype, desc, v.get("items", [])))
+
+        # Group by structural signature and write detail files
+        if violations:
+            groups = _group_drc_violations(violations)
+            drc_dir = os.path.join(output_dir, f"drc_{label}")
+            os.makedirs(drc_dir, exist_ok=True)
+
+            for sig, group in sorted(groups.items(),
+                                     key=lambda kv: -len(kv[1])):
+                errs = sum(1 for s, *_ in group if s == "error")
+                warns = sum(1 for s, *_ in group if s == "warning")
+                sev_tag = "ERROR" if errs else "WARN"
+                issues.append(
+                    f"  {sev_tag} [{sig}]: {len(group)}x"
+                    f" ({errs} error, {warns} warning)"
+                )
+
+            _save_drc_groups(groups, drc_dir,
+                            pcb_path=pcb_path if snapshot else None)
+            issues.append(f"  Details saved to: {drc_dir}/")
 
         if filtered_count > 0:
             issues.append(
@@ -1156,6 +1170,260 @@ def run_drc(pcb_path, output_dir, label=None, custom_rules_path=None,
         issues.append("  DRC JSON output not generated")
 
     return issues, real_errors, warnings
+
+
+# ------------------------------------------------------------------
+# DRC violation grouping helpers
+# ------------------------------------------------------------------
+
+# Regex patterns for extracting structural info from item descriptions
+_RE_PAD = re.compile(
+    r'(?:PTH )?[Pp]ad\s+(\S+)\s+'       # pad number
+    r'\[([^\]]*)\]\s+'                    # net name
+    r'of\s+(\S+)'                         # ref designator
+    r'(?:\s+on\s+(\S+))?'                # layer (optional)
+)
+_RE_TRACK = re.compile(
+    r'Track\s+\[([^\]]*)\]\s+'           # net name
+    r'on\s+(\S+),\s+'                    # layer
+    r'length\s+([\d.]+)\s+mm'            # length
+)
+_RE_VIA = re.compile(
+    r'Via\s+\[([^\]]*)\]\s+'             # net name
+    r'on\s+(.+)'                         # layers
+)
+_RE_ZONE = re.compile(
+    r'Zone\s+\[([^\]]*)\]\s+'            # net name
+    r'on\s+(\S+)'                        # layer
+)
+_RE_FP = re.compile(r'Footprint\s+(\S+)')
+_RE_TEXT = re.compile(r"PCB text\s+'[^']*'\s+on\s+(\S+)")
+
+
+def _generalize_ref(ref: str) -> str:
+    """Replace specific ref designator with its component class.
+
+    U_DFF3 → U_DFF*, U44 → U*, D22 → D*, R15 → R*, J1 → J*
+    """
+    # Named refs like U_DFF3, U_BUF0, U_AND_WR3
+    m = re.match(r'([A-Z]_[A-Z_]+?)(\d+)$', ref)
+    if m:
+        return m.group(1) + '*'
+    # Simple refs like U44, D22, R15
+    m = re.match(r'([A-Za-z]+)(\d+)$', ref)
+    if m:
+        return m.group(1) + '*'
+    return ref
+
+
+def _generalize_net(net: str) -> str:
+    """Replace instance-specific parts of net names with wildcards.
+
+    /Byte 0/Q0          → /Byte */Q*
+    /Address Decoder/G0  → /Address Decoder/G*
+    Net-(D22-K)          → Net-(D*-K)
+    /D5                  → /D*
+    /DEC3_4              → /DEC3_*
+    /COL_SEL_12          → /COL_SEL_*
+    /DEC4_15             → /DEC4_*
+    /READ_EN_ROW_3       → /READ_EN_ROW_*
+    GND, VCC             → kept as-is
+    """
+    if net in ('GND', 'VCC', ''):
+        return net
+    # Net-(D22-K) style
+    net = re.sub(r'Net-\(([A-Za-z_]+)\d+(-\w+)\)', r'Net-(\1*\2)', net)
+    # Hierarchy path: replace trailing digits after known patterns
+    # /Byte 0/Q0 → /Byte */Q*
+    net = re.sub(r'(/\w+)\s+\d+', r'\1 *', net)
+    # Trailing number after underscore: /DEC3_4 → /DEC3_*, /COL_SEL_12 → /COL_SEL_*
+    net = re.sub(r'_(\d+)$', '_*', net)
+    # Trailing number without underscore: /D5 → /D*, /A0 → /A*, /G3 → /G*
+    net = re.sub(r'/([A-Za-z_]+?)(\d+)$', r'/\1*', net)
+    # Mid-path signal index: DEC3_0/ → DEC3_*/
+    net = re.sub(r'_(\d+)/', '_*/', net)
+    net = re.sub(r'([A-Za-z])(\d+)/', r'\1*/', net)
+    return net
+
+
+def _round_length(length_str: str) -> str:
+    """Round track length to 0.1mm for grouping."""
+    try:
+        return f"{round(float(length_str), 1):.1f}"
+    except ValueError:
+        return length_str
+
+
+def _item_signature(desc: str) -> str:
+    """Extract a structural signature from a single item description."""
+    m = _RE_PAD.search(desc)
+    if m:
+        pad_num, net, ref, layer = m.groups()
+        gen_ref = _generalize_ref(ref)
+        # Generalize pad number for connectors (J*) — pin index isn't structural
+        pad_display = "N" if gen_ref.startswith("J") else pad_num
+        return (f"Pad {pad_display} [{_generalize_net(net)}] "
+                f"of {gen_ref}"
+                + (f" on {layer}" if layer else ""))
+
+    m = _RE_TRACK.search(desc)
+    if m:
+        net, layer, length = m.groups()
+        return (f"Track [{_generalize_net(net)}] on {layer}, "
+                f"length ~{_round_length(length)}mm")
+
+    m = _RE_VIA.search(desc)
+    if m:
+        net, layers = m.groups()
+        return f"Via [{_generalize_net(net)}] on {layers}"
+
+    m = _RE_ZONE.search(desc)
+    if m:
+        net, layer = m.groups()
+        return f"Zone [{_generalize_net(net)}] on {layer}"
+
+    m = _RE_FP.search(desc)
+    if m:
+        return f"Footprint {_generalize_ref(m.group(1))}"
+
+    m = _RE_TEXT.search(desc)
+    if m:
+        return f"PCB text on {m.group(1)}"
+
+    # Fallback: generalize ref designators in free text
+    # Named refs: U_DFF0 → U_DFF*, R_BUF3 → R_BUF*
+    desc = re.sub(r'\b([A-Z]_[A-Z_]+?)\d+\b', r'\1*', desc)
+    # Simple refs: U44 → U*, D22 → D*, R15 → R*, J1 → J*
+    desc = re.sub(r'\b([A-Z])\d{1,4}\b', r'\1*', desc)
+    return desc
+
+
+def _violation_signature(vtype: str, desc: str,
+                         items: list) -> str:
+    """Build a structural signature for a whole violation.
+
+    Combines type, description, and generalized item signatures so that
+    structurally identical violations across repeated circuit blocks
+    (bytes, decoder stages, etc.) map to the same key.
+    """
+    item_sigs = tuple(sorted(_item_signature(it.get("description", ""))
+                             for it in items))
+    # Join item signatures with " + " for readability
+    items_str = " + ".join(item_sigs) if item_sigs else "no-items"
+    return f"{vtype}: {desc} | {items_str}"
+
+
+def _group_drc_violations(violations):
+    """Group violations by structural signature.
+
+    Args:
+        violations: list of (severity, vtype, desc, items_list)
+
+    Returns:
+        dict mapping signature → list of (severity, vtype, desc, items_list)
+    """
+    groups = {}
+    for v in violations:
+        severity, vtype, desc, items = v
+        sig = _violation_signature(vtype, desc, items)
+        groups.setdefault(sig, []).append(v)
+    return groups
+
+
+def _save_drc_groups(groups, drc_dir, pcb_path=None):
+    """Save each violation group to a separate file in drc_dir.
+
+    Files are named by sanitized signature. Each file has a summary header
+    followed by a few representative examples, then all instances.
+
+    If pcb_path is provided, also generates a PNG snapshot of the first
+    violation in each group with X markers at the item positions.
+    """
+    # Clean out old files
+    for f in os.listdir(drc_dir):
+        if f.endswith('.txt') or f.endswith('.png'):
+            os.remove(os.path.join(drc_dir, f))
+
+    # Set up SVG cache for snapshots (export once, reuse for all groups)
+    svg_cache = None
+    if pcb_path:
+        try:
+            from .snapshot import (export_svg, find_svg_offset,
+                                   snapshot_region, DEFAULT_LAYERS)
+            import tempfile as _tmpmod
+            offset = find_svg_offset(pcb_path)
+            svg_tmp = _tmpmod.NamedTemporaryFile(suffix=".svg", delete=False)
+            svg_tmp.close()
+            if export_svg(pcb_path, DEFAULT_LAYERS, svg_tmp.name):
+                svg_cache = {"svg_path": svg_tmp.name, "offset": offset}
+            else:
+                os.unlink(svg_tmp.name)
+        except Exception:
+            pass  # snapshot is best-effort
+
+    try:
+        for i, (sig, group) in enumerate(
+                sorted(groups.items(), key=lambda kv: -len(kv[1]))):
+            safe = re.sub(r'[^\w\s\-.]', '_', sig)[:80].strip('_')
+            filename = f"{i:03d}_{safe}.txt"
+            filepath = os.path.join(drc_dir, filename)
+
+            errs = sum(1 for s, *_ in group if s == "error")
+            warns = sum(1 for s, *_ in group if s == "warning")
+
+            with open(filepath, 'w') as f:
+                f.write(f"Signature: {sig}\n")
+                f.write(f"Count: {len(group)}"
+                        f" ({errs} errors, {warns} warnings)\n")
+                f.write("=" * 70 + "\n\n")
+
+                f.write("--- Representative examples ---\n\n")
+                for severity, vtype, desc, items in group[:3]:
+                    f.write(f"[{severity}] {vtype}: {desc}\n")
+                    for it in items:
+                        pos = it.get("pos", {})
+                        f.write(f"  -> {it.get('description', '')}"
+                                f" at ({pos.get('x', 0):.2f},"
+                                f" {pos.get('y', 0):.2f})\n")
+                    f.write("\n")
+
+                if len(group) > 3:
+                    f.write(f"--- All {len(group)} instances ---\n\n")
+                    for j, (severity, vtype, desc, items) in enumerate(group):
+                        items_brief = "; ".join(
+                            it.get("description", "") for it in items)
+                        f.write(f"  [{j+1}] [{severity}] {items_brief}\n")
+
+            # Generate snapshot for first violation in group
+            if svg_cache:
+                first = group[0]
+                _, _, _, items = first
+                positions = []
+                for it in items:
+                    pos = it.get("pos", {})
+                    x, y = pos.get("x"), pos.get("y")
+                    if x is not None and y is not None:
+                        positions.append((float(x), float(y)))
+
+                if positions:
+                    xs = [p[0] for p in positions]
+                    ys = [p[1] for p in positions]
+                    margin = 5.0
+                    bbox = (min(xs) - margin, min(ys) - margin,
+                            max(xs) + margin, max(ys) + margin)
+                    png_path = filepath.replace('.txt', '.png')
+                    try:
+                        snapshot_region(pcb_path, bbox, png_path,
+                                        markers=positions,
+                                        svg_cache=svg_cache)
+                    except Exception:
+                        pass  # best-effort
+    finally:
+        if svg_cache:
+            try:
+                os.unlink(svg_cache["svg_path"])
+            except OSError:
+                pass
 
 
 # ==============================================================

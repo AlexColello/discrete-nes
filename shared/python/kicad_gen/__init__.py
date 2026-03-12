@@ -22,3 +22,6 @@ from .common import (
     snap, uid, GRID, SYM_SPACING_Y, KICAD_CLI, SYMBOL_LIB_MAP,
     FOOTPRINT_MAP, DSBGA5_PIN_TO_BALL, DSBGA6_PIN_TO_BALL,
 )
+from .snapshot import (
+    find_board_outline, snapshot_region,
+)
