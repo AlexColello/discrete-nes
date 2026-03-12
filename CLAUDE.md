@@ -41,36 +41,47 @@ discrete-nes/
 ├── shared/
 │   ├── kicad-lib/          # Shared KiCad symbols and footprints
 │   │   ├── symbols/        # .kicad_sym files
-│   │   ├── footprints/     # .pretty directories
+│   │   ├── footprints/     # .pretty directories (incl. generated DSBGA_Packages.pretty)
 │   │   ├── sym-lib-table   # Symbol library table (copy to projects)
 │   │   └── fp-lib-table    # Footprint library table (copy to projects)
 │   └── python/
 │       ├── kicad_gen/      # Shared schematic/PCB generation library
-│       │   ├── __init__.py # Re-exports: SchematicBuilder, snap, uid, GRID, etc.
-│       │   ├── common.py   # Constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP), snap(), uid()
+│       │   ├── __init__.py # Re-exports: SchematicBuilder, PCBBuilder, snap, uid, etc.
+│       │   ├── common.py   # Constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP, FOOTPRINT_MAP), snap(), uid()
 │       │   ├── symbols.py  # Library loading, raw text extraction, pin offset discovery
 │       │   ├── schematic.py # SchematicBuilder class (place, wire, LED, labels, save)
-│       │   ├── verify.py   # parse_schematic, 11 general checks, run_erc, run_drc, UnionFind
-│       │   ├── pcb.py      # PCBBuilder, DSBGA footprints, netlist export/parse
-│       │   └── snapshot.py # PCB snapshot: SVG export, crop, X markers, PNG render
+│       │   ├── verify.py   # parse_schematic, 11 general checks, run_erc, run_drc + DRC grouping
+│       │   ├── pcb.py      # PCBBuilder, DSBGA footprints, netlist export/parse, fix_pcb_drc
+│       │   └── snapshot.py # PCB snapshot: SVG export, crop, X markers, PNG render (600 DPI)
 │       └── hdl_parser/     # Verilog to discrete gates conversion
 │           └── verilog_to_gates.py
 ├── boards/
-│   ├── ram-prototype/      # First board - 8 byte RAM prototype
-│   │   ├── scripts/        # Board-specific generate + verify scripts
-│   │   └── docs/           # Board-specific documentation
-│   ├── cpu-2a03/           # CPU board (future)
-│   ├── ppu-2c02/           # PPU board (future)
+│   ├── ram-prototype/      # First board — 8-byte RAM prototype
+│   │   ├── scripts/
+│   │   │   ├── generate_ram.py      # Schematic generation (hierarchical)
+│   │   │   ├── generate_pcb.py      # PCB placement + pre-routing
+│   │   │   ├── verify_schematics.py # Board-specific schematic checks + ERC
+│   │   │   ├── verify_pcb.py        # DRC verification (pre- and post-routing)
+│   │   │   ├── route_pcb.py         # FreeRouting autorouter pipeline
+│   │   │   ├── debug_1byte.py       # Integration test: 1 byte using generate_pcb functions
+│   │   │   ├── snapshot_pcb.py      # CLI for PCB region snapshots
+│   │   │   └── parse_pdf.py         # TI datasheet PDF text/pin extraction
+│   │   ├── ram.kicad_sch            # Root schematic
+│   │   ├── ram.kicad_pcb            # Generated PCB (pre-routing)
+│   │   ├── ram_routed.kicad_pcb     # Autorouted PCB
+│   │   └── verify_output/           # Generated output (gitignored)
+│   ├── cpu-2a03/           # CPU board (future, empty scripts/ dir)
+│   ├── ppu-2c02/           # PPU board (future, empty scripts/ dir)
 │   └── interconnect/       # Board interconnections (future)
+├── tools/
+│   └── freerouting/        # FreeRouting JAR (auto-downloaded by route_pcb.py)
 ├── .claude/
 │   ├── hooks/
 │   │   └── auto-verify.sh  # PostToolUse hook: auto-runs verify after generate
 │   └── settings.json       # Hook configuration
-├── reference/              # Documentation (NO submodules)
-│   ├── README.md           # How to access MiSTer NES core
-│   └── docs/               # NES architecture documentation
-└── tools/                  # Development tools
-    └── hdl_to_schematic/   # Verilog-to-schematic converters
+└── reference/              # Documentation (NO submodules)
+    ├── README.md           # How to access MiSTer NES core
+    └── docs/               # NES architecture documentation
 ```
 
 ## Development Commands
@@ -190,40 +201,6 @@ python scripts/parse_pdf.py datasheet.pdf --info         # metadata
 
 ## Technology Stack & Research Findings
 
-### KiCad Scripting - Why kiutils?
-
-**Official KiCad Status (2025):**
-
-- KiCad provides Python bindings ONLY for PCB layout (pcbnew module)
-- NO official API for schematic manipulation (eeschema)
-- Expected to change in KiCad 9, but not available yet
-
-**Why kiutils over alternatives:**
-
-1. **kiutils** - CHOSEN
-
-   - Directly parses/generates KiCad S-expression files
-   - Works for both schematics (.kicad_sch) and PCBs (.kicad_pcb)
-   - Python dataclass-based API
-   - Install: `pip install kiutils`
-   - Docs: https://pypi.org/project/kiutils/
-
-2. SKiDL (NOT used)
-
-   - High-level circuit description language
-   - Generates netlists, not direct schematics
-   - Would require manual schematic creation
-
-3. pcbnew API (avoided per user request)
-   - Official KiCad PCB API
-   - More mature but user prefers kiutils
-   - Can use as fallback if kiutils routing is too tedious
-
-**PCB Layout Strategy:**
-
-- Use kiutils for component placement in grid patterns
-- FreeRouting autorouter for trace routing (see "PCB Routing" section above)
-
 ### PCB Layout Lessons
 
 **Board outline computation — use pad + courtyard extents:**
@@ -313,6 +290,42 @@ python scripts/parse_pdf.py datasheet.pdf --info         # metadata
 - Use `skip_types` parameter in `run_drc()` to filter these
 - Target: 0 errors, 0 warnings AFTER filtering
 - **NEVER add `silk_over_copper` to skip_types without explicitly asking the user first** — silk_over_copper warnings indicate real layout problems (silkscreen crossing over pads) that need to be fixed, not suppressed
+
+### PCB Generation Architecture (generate_pcb.py)
+
+`generate_pcb.py` is the main PCB generation script. Key functions (importable for debug/test scripts):
+
+**Layout functions:**
+
+- `group_components(netlist_data)` — groups components by hierarchy sheet path
+- `sort_components_for_placement(comps)` — sorts ICs, matches LED+R pairs by output net
+- `layout_byte_group(comps)` — byte-specific layout: NAND + 8 DFF row + 8 BUF row + NAND LEDs
+- `compute_group_layout(ic_cells, standalone, max_cols, cell_w, cell_h)` — generic grid layout
+- `_place_component(pcb, comp, x, y, netlist_data)` — places one component with correct angle/layer/nets
+
+**Pre-route functions (all take `pcb, netlist_data`):**
+
+- `preroute_power_vias` — GND/VCC pad escape vias (skips DFF/BUF — too dense, left to autorouter)
+- `preroute_bcu_resistors` — LED cathode to B.Cu resistor pad vias
+- `preroute_ic_to_led` — IC output pad to LED anode traces
+- `preroute_clk_fanout` — horizontal CLK bus traces per byte
+- `preroute_oe_fanout` — horizontal OE bus + vertical stubs per byte
+- `preroute_connector_leds` — connector signal to bus LED traces
+
+**4-layer stackup:**
+
+| Layer   | Purpose                                      |
+|---------|----------------------------------------------|
+| F.Cu    | Signal routing (ICs, LEDs on front)           |
+| In1.Cu  | Jumper layer (data bus trunks, cross-routing)  |
+| In2.Cu  | VCC power plane (zone fill)                   |
+| B.Cu    | GND power plane (zone fill, resistors on back) |
+
+**Component orientations:** DFF@90° / BUF@270° (power pins outward, signal pins facing each other). Other DSBGA ICs@180°. LEDs/Rs@90°. Connectors@180° on B.Cu.
+
+**Cell dimensions:** IC_CELL_W=5.0mm horizontal, IC_CELL_H=2.0mm vertical. LED at +2.45mm X from IC. R on B.Cu directly behind LED (same x,y).
+
+**`debug_1byte.py`** imports `layout_byte_group`, `_place_component`, and `preroute_*` functions from `generate_pcb.py` to test them on a single byte from the real netlist. Changes to generate_pcb.py are automatically exercised.
 
 ### kiutils + KiCad 9 ERC Lessons
 
@@ -409,12 +422,6 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 - Stagger trunk X positions: `sel_trunk_x[i] = base_x - i * GRID` so 8 parallel trunks don't overlap
 - Place single-destination trunks (WRITE_ACTIVE, READ_EN) at X positions BETWEEN the multi-destination trunks and the target column (not on the source side) to avoid horizontal overlap at shared Y values
 
-**PWR_FLAG placement:**
-
-- Place PWR_FLAG at the root sheet connector power pins (VCC + GND) — the connector is the power source for the entire design
-- Do NOT place PWR_FLAG in sub-sheets — the connector-level PWR_FLAG propagates through the hierarchy via global VCC/GND nets
-- Having PWR_FLAG in both root and sub-sheets causes "power output to power output" ERC errors
-
 **Connector design:**
 
 - Include VCC and GND pins on the connector (e.g., 16-pin connector: 14 signals + VCC + GND)
@@ -489,30 +496,6 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 - Page boundary violations (cosmetic but important for printability)
 - Net isolation (ERC checks that pins are driven, but doesn't know which signals should be separate)
 
-### Logic Family - Why TI Little Logic (SN74LVC1G) in DSBGA?
-
-**Design Choice: Bare silicon die visibility**
-
-The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the bare silicon die on top. Each IC is a tiny (1.75 x 1.25mm) chip with the actual silicon wafer pattern visible. Combined with 0402 SMD LEDs, this creates a striking visual — thousands of bare silicon dies with LEDs glowing between them.
-
-**SN74LVC1G Key Specs:**
-
-- Supply: 1.65V - 5.5V (using 3.3V for this project)
-- Output drive: up to 24mA (IOH/IOL) — can drive LEDs directly
-- Propagation delay: ~3.5ns typical
-- Quiescent current: ~10uA per IC
-- Package: DSBGA (YZP) 1.75 x 1.25mm, 5 solder balls underneath
-- 1 gate per package — simplifies schematic (no gate sharing)
-
-**Assembly:** Solder paste stencil + hot air reflow (user has hot air station).
-
-**Why not 74HC DIP?**
-
-- 74HC DIP packages are ~20mm wide — too large, boring plastic rectangles
-- DSBGA packages show the actual silicon — much more visually interesting
-- Single-gate-per-package eliminates complex gate allocation logic
-- LVC is faster than HC (~3.5ns vs ~14ns)
-
 ### FPGA Reference - MiSTer NES Core
 
 **Primary Reference:** https://github.com/MiSTer-devel/NES_MiSTer
@@ -536,60 +519,60 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 
 ## RAM Prototype Specifications
 
-**First board to implement - validates DSBGA assembly, LED approach, and aesthetic**
+**First board to implement — validates DSBGA assembly, LED approach, and aesthetic.**
 
-**Reduced scope: 8 bytes (3 address bits) — validate before scaling to 64 bytes**
+**8 bytes of storage with full sub-decoder trees (11-bit address) for latency testing.**
 
 **Configuration:**
 
-- **8 bytes total capacity**
-- **3 address bits** (A0-A2) = 8 addressable locations
-- **8-bit data bus** (D0-D7)
-- **Control signals:** Read/Write enable, Chip Select
+- **8 bytes total capacity** (8-bit data bus D0-D7)
+- **11 address bits** — 7-bit row (A0-A6) + 4-bit column (A7-A10)
+- **Row decoder:** 3-to-8 sub-decoder (A0-A2) + 4-to-16 sub-decoder (A3-A6) + 4 final cross-product ANDs
+- **Column decoder:** 4-to-16 (A7-A10), 2 outputs used, 14 to test header
+- **Control signals:** nCE, nWE, nOE (active-low, inverted in control_logic sub-sheet)
+- **Unused decoder outputs:** DEC3_4..7 → J2 (4-pin header), DEC4_1..15 → J4 (16-pin header), COL_SEL unused → J3 (14-pin header)
 
 **Per byte (8 bits):**
 
 - 8x SN74LVC1G79 (D flip-flop, DSBGA) — stores 8 bits
 - 8x SN74LVC1G125 (tri-state buffer, DSBGA) — read gating
-- 1x SN74LVC1G08 (AND, DSBGA) — write clock = decoded_address AND write_enable
-- 1x SN74LVC1G08 (AND, DSBGA) — read OE = decoded_address AND read_enable
+- 1x SN74LVC2G00 (dual NAND, DSBGA-8) — write clock + read OE per byte
 - 10x 0402 LED + 10x 0402 resistor (every gate output visible)
 
-**Address decoder (3-to-8):**
+**Address decoder (47 ICs):**
 
-- 3x SN74LVC1G04 (inverter) — complemented address bits
-- 8x 3-input AND via 2-gate chains (16x SN74LVC1G08) or 8x SN74LVC1G11
-- ~19 decoder ICs + ~19 LEDs + ~19 resistors
+- 7x SN74LVC1G04 (inverter) — complemented address bits (A0-A6)
+- 40x SN74LVC1G08 (2-input AND) — L1+L2 decode stages for 3-to-8 and 4-to-16, plus 4 final cross-product ANDs
 
-**LED Requirements (EVERY bit visible):**
+**Column select (28 ICs):**
 
-- **64 LEDs** for RAM cell outputs (one per stored bit)
-- **3 LEDs** for address bus
-- **8 LEDs** for data bus
-- **LEDs for all control signals and intermediate gate outputs**
-- **Total estimate:** ~115 LEDs
+- 4x SN74LVC1G04 (inverter) + 24x SN74LVC1G08 (2-input AND) — 4-to-16 column decoder
 
-**Totals for 8-byte prototype (actual from generate_ram.py):**
+**Control logic (6 ICs):** 3x INV (nCE/nWE/nOE inversion) + 3x AND (WRITE_ACTIVE, READ_EN generation)
 
-- 161 ICs (DSBGA)
-- 175 LEDs (0402 SMD)
-- 175 resistors (0402 SMD)
-- 1 connector
-- **512 total BOM parts**
+**Row control (8 ICs):** 2x SN74LVC1G08 per row × 4 rows — ROW_SEL AND write/read enables
 
-**PCB size estimate:** ~60x80mm with 3-4mm pitch
+**Totals (actual from generate_ram.py + generate_pcb.py):**
+
+- 225 ICs (14 INV + 75 AND + 8 dual NAND + 64 DFF + 64 BUF)
+- 191 LEDs (0402 SMD)
+- 191 resistors (0402 SMD)
+- 4 connectors (J1=24-pin main, J2=4-pin DEC3, J3=14-pin COL_SEL, J4=16-pin DEC4)
+- **611 total BOM parts**
+
+**PCB:** 4-layer, 233 x 95 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
 
 **Power Budget (RAM Prototype):**
 
-- 115 LEDs x 2mA = 0.23A at 3.3V = 0.76W for LEDs
+- 191 LEDs x 2mA = 0.38A at 3.3V = 1.26W for LEDs
 - Logic power negligible (SN74LVC1G ~10uA per IC)
-- Very manageable power budget at this scale
+- Manageable power budget at this scale
 
 ## Full System Power Requirements
 
 **Plan power distribution from the start:**
 
-- **RAM board (8-byte):** ~0.25A at 3.3V
+- **RAM board (8-byte):** ~0.38A at 3.3V
 - **RAM board (64-byte, future):** ~1.5A at 3.3V
 - **CPU board:** ~6A at 3.3V (5000+ LEDs)
 - **PPU board:** ~4A at 3.3V (3000+ LEDs)
@@ -627,20 +610,20 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 
 1. Created `boards/ram-prototype/scripts/generate_ram.py`
 2. Generates ERC-clean hierarchical schematics with direct wire routing:
-   - ram.kicad_sch (root) — connector, bus LEDs, hierarchy refs
-   - address_decoder.kicad_sch — 3 inverters + 8 three-input ANDs
-   - control_logic.kicad_sch — active-low inversion + WRITE_ACTIVE, READ_EN
-   - write_clk_gen.kicad_sch — 8 NANDs for per-byte write clocks
-   - read_oe_gen.kicad_sch — 8 NANDs for per-byte buffer OE
-   - byte.kicad_sch — 8 DFFs + 8 tri-state buffers (shared by all 8 instances)
+   - ram.kicad_sch (root) — 24-pin connector, bus LEDs, hierarchy refs to all sub-sheets
+   - address_decoder.kicad_sch — 7 inverters + 75 ANDs (3-to-8 + 4-to-16 sub-decoders + 4 final)
+   - column_select.kicad_sch — 4 inverters + 24 ANDs (4-to-16 column decoder)
+   - control_logic.kicad_sch — active-low inversion (nCE/nWE/nOE → WRITE_ACTIVE, READ_EN)
+   - row_control.kicad_sch — dual NAND per byte for write clock + read OE (used 4x)
+   - byte.kicad_sch — 8 DFFs + 8 tri-state buffers (used 8x)
 3. Passes KiCad 9 ERC with 0 errors and 0 warnings
 
-**Step 3: PCB Layout**
+**Step 3: PCB Layout (IN PROGRESS)**
 
-1. Use kiutils to place DSBGA components in grid pattern (3-4mm pitch)
-2. Place all ~115 LEDs in organized arrays alongside ICs
-3. Manual routing (start with power/ground)
-4. SMD assembly: solder paste stencil + hot air reflow
+1. `generate_pcb.py` places all 611 components in grouped layout with pre-routing
+2. FreeRouting autorouter handles remaining traces (`route_pcb.py`)
+3. `debug_1byte.py` tests placement/preroute functions on a single byte
+4. DRC: 0 errors / 0 warnings (pre-routing, after expected-type filtering)
 
 **Step 4: Validation**
 
@@ -657,24 +640,21 @@ The DSBGA (Die-Size Ball Grid Array) package, also called NanoFree, exposes the 
 4. Order components (DSBGA ICs, 0402 LEDs, 0402 resistors)
 5. Reflow assembly and test
 
-### Phase 3: Shared Library Development (Parallel to Phase 2)
+### Phase 3: Shared Library Development (COMPLETED)
 
-**Python generation library (`shared/python/kicad_gen/`) — COMPLETED:**
+**Python generation library (`shared/python/kicad_gen/`):**
 
-- [x] `common.py` — constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP), snap(), uid(), part lookup, LED resistor calc
+- [x] `common.py` — constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP, FOOTPRINT_MAP), snap(), uid()
 - [x] `symbols.py` — library loading, raw text extraction, ERC-based pin offset discovery, caching
 - [x] `schematic.py` — `SchematicBuilder` class (place, wire, LED, labels, trunks, power, save, lib fixup)
-- [x] `verify.py` — `parse_schematic`, 11 general checks, `run_all_checks`, `run_erc`, `UnionFind`
+- [x] `verify.py` — parse_schematic, 11 general checks, run_all_checks, run_erc, run_drc + DRC grouping, UnionFind
+- [x] `pcb.py` — PCBBuilder, DSBGA footprint generation, netlist export/parse, fix_pcb_drc
+- [x] `snapshot.py` — PCB SVG export, crop, X-marker injection, PNG rendering (600 DPI)
 - [x] `__init__.py` — re-exports key public API
-- [x] `pcb.py` — PCBBuilder class, DSBGA footprints, netlist parsing
 
-**KiCad symbol/footprint libraries (still needed):**
+**KiCad symbols:** All SN74LVC1G parts use KiCad's built-in `74xx_little_logic` symbol library. No custom symbols needed.
 
-- SN74LVC1G00, 1G02, 1G04, 1G08, 1G32, 1G86 (logic gates)
-- SN74LVC1G79 (D flip-flop, DSBGA), SN74LVC1G74 (D flip-flop, X2SON)
-- SN74LVC1G07, 1G125 (buffers/drivers)
-- 0402 LED/resistor, power connectors, board interconnect connectors
-- DSBGA (YZP) 5-ball/6-ball, X2SON (DQE) 8-pin footprints
+**Custom footprints:** DSBGA-5/6/8 with numeric pads (matching KiCad symbol pin numbers) are generated programmatically by `create_dsbga_footprints()` in `pcb.py`. Standard 0402 LED/resistor and connector footprints come from KiCad's built-in libraries.
 
 ### Phase 4: FPGA Logic Extraction (Research Phase)
 
@@ -719,36 +699,9 @@ After RAM prototype success:
 4. Design backplane or cable interconnect system
 5. Integration testing
 
-## Development Workflow
-
-**For any new circuit:**
-
-1. Design first instance manually in KiCad
-2. Validate it works (schematic review)
-3. Document the pattern
-4. Write Python script using kiutils to replicate
-5. Generate full schematic with hierarchical organization
-6. Use kiutils to place DSBGA + 0402 components in grid
-7. Route manually (or assisted)
-8. Run DRC/ERC
-9. Review power distribution
-10. Generate gerbers and order (with solder paste stencil)
-
-## Critical Design Rules
-
-1. **Every gate output -> LED** - No exceptions
-2. **Power distribution from day one** - Plan for aggregate LED current
-3. **Hierarchical schematics** - Essential for managing complexity
-4. **DSBGA reflow assembly** - Solder paste stencil + hot air station
-5. **Test one cell first** - Validate before replicating
-6. **Grid layouts** - 3-4mm pitch for DSBGA + 0402 LED/resistor cells
-7. **Label everything** - With thousands of components, organization is critical
-8. **0402 LEDs smaller than ICs** - Bare silicon is the visual focus
-9. **Multiple ground/power connections** - Distribute supply across board
-
 ## TI Little Logic Parts Reference
 
-**Logic Gates (1 gate per DSBGA package):**
+**Logic Gates (1 gate per DSBGA package, except dual NAND):**
 
 - SN74LVC1G00 - Single 2-input NAND (YZP, 5-ball)
 - SN74LVC1G02 - Single 2-input NOR (YZP, 5-ball)
@@ -757,6 +710,7 @@ After RAM prototype success:
 - SN74LVC1G11 - Single 3-input AND (YZP, 6-ball)
 - SN74LVC1G32 - Single 2-input OR (YZP, 5-ball)
 - SN74LVC1G86 - Single 2-input XOR (YZP, 5-ball)
+- SN74LVC2G00 - Dual 2-input NAND (YZP, 8-ball DSBGA) — used for per-byte write CLK + read OE
 
 **Flip-Flops:**
 
@@ -791,22 +745,11 @@ After RAM prototype success:
 
 ## Current Status
 
-**Phase 1 COMPLETE** (including migration to TI Little Logic DSBGA)
-**Phase 2 Steps 1-2 COMPLETE** (schematic generation with ERC-clean output)
-**Phase 2 Step 3 IN PROGRESS** (PCB generation working — 512 components placed, 0 DRC errors; manual routing next)
-**Phase 3 Python library COMPLETE** (shared kicad_gen with SchematicBuilder, PCBBuilder, verify)
+**Phase 1 COMPLETE** — project setup, migration to TI Little Logic DSBGA
+**Phase 2 Steps 1-2 COMPLETE** — schematic generation, 0 ERC errors/warnings
+**Phase 2 Step 3 IN PROGRESS** — PCB: 611 components placed, pre-routing active, FreeRouting autorouter working, 233x95mm 4-layer board
+**Phase 3 COMPLETE** — shared kicad_gen library (SchematicBuilder, PCBBuilder, verify, snapshot)
 
-## Important Notes for Future Sessions
+## Important Notes
 
-- User has explicitly requested NO git submodules
-- User wants MiSTer as reference (not Brian Bennett's fpga_nes)
-- User confirmed kiutils is the right tool
-- User wants every single bit in RAM to have an LED
-- User wants every gate output to have an LED
-- RAM prototype: 8 bytes = 3 address bits, 8 data bits (reduced from 64 bytes to validate DSBGA first)
-- TI Little Logic SN74LVC1G in DSBGA (YZP) — bare silicon die visible on top
-- 0402 SMD LEDs — smaller than ICs so bare silicon is visual focus
-- Assembly method: solder paste stencil + hot air reflow
-- Power budget is manageable at 8-byte scale (~0.76W)
-- SN74LVC1G74 (D flip-flop with set/reset) is NOT available in DSBGA — only X2SON (DQE)
-- SN74LVC1G79 (D flip-flop, Q only) IS in DSBGA — works for RAM cells
+- SN74LVC1G74 (D flip-flop with set/reset) is NOT available in DSBGA — only X2SON (DQE, plastic). SN74LVC1G79 (Q only) IS in DSBGA — works for RAM cells
