@@ -34,6 +34,7 @@
 
 ### PCB validation
 - [ ] **Fabrication review** — verify board meets Elecrow specs (min via 0.8mm/0.4mm, trace/space, etc.)
+- [ ] **Add JLCPCB DRC rules** — include JLCPCB design rule checks alongside Elecrow for fab flexibility
 - [ ] **Power distribution review** — check VCC/GND plane integrity, via current capacity
 - [ ] **Generate gerbers** and do final visual inspection
 - [ ] **Generate BOM** for ordering

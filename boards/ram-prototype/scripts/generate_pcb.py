@@ -384,8 +384,8 @@ def compute_group_size(placements, cell_w=None, cell_h=None):
 # --------------------------------------------------------------
 
 # Via and trace sizing
-VIA_SIZE = 0.8       # mm outer diameter (Elecrow minimum)
-VIA_DRILL = 0.4      # mm drill
+VIA_SIZE = 0.6       # mm outer diameter (fits DSBGA 0.50mm pin pitch)
+VIA_DRILL = 0.3      # mm drill
 POWER_TRACE_W = 0.3  # mm trace width for power stubs
 SIGNAL_TRACE_W = 0.2 # mm trace width for signals
 VIA_OFFSET = 0.7     # mm offset from pad center to via center
@@ -393,12 +393,10 @@ DEFAULT_CLEARANCE = 0.15  # mm netclass clearance (matches Elecrow minimum)
 
 
 def _set_project_clearance(pcb_path, clearance=DEFAULT_CLEARANCE):
-    """Set default netclass settings in the .kicad_pro project file.
+    """Set default netclass and design rule settings in .kicad_pro.
 
     KiCad reads DRC clearance and via sizes from the project file's
-    net_settings, not from the PCB file. We set clearance to 0.15mm
-    (Elecrow minimum) and via diameter/drill to match our board
-    constraints (0.8mm/0.4mm) so the autorouter uses correct sizes.
+    net_settings and design_settings, not from the PCB file.
     """
     import json
 
@@ -418,6 +416,13 @@ def _set_project_clearance(pcb_path, clearance=DEFAULT_CLEARANCE):
             nc["via_diameter"] = VIA_SIZE
             nc["via_drill"] = VIA_DRILL
             break
+
+    # Update design rules to match via sizes
+    ds = project.setdefault("board", {}).setdefault("design_settings", {})
+    rules = ds.setdefault("rules", {})
+    rules["min_via_diameter"] = VIA_SIZE
+    rules["min_through_hole_diameter"] = VIA_DRILL
+    ds["via_dimensions"] = [{"diameter": VIA_SIZE, "drill": VIA_DRILL}]
 
     with open(pro_path, "w", encoding="utf-8") as f:
         json.dump(project, f, indent=2)
@@ -955,6 +960,183 @@ def preroute_oe_fanout(pcb, netlist_data):
             traces += 1
 
     return traces
+
+
+def _find_dff_buf_pairs(pcb, netlist_data):
+    """Find matched DFF-BUF pairs in byte groups.
+
+    Returns list of (dff_ref, dff_fp, buf_ref, buf_fp, data_net) tuples.
+    Matching: DFF pin 4 (Q) shares net with BUF pin 2 (A), proximity < IC_CELL_H*2.
+    """
+    ref_to_part = _build_ref_to_part(netlist_data)
+    net_to_pads = _build_net_pad_index(pcb)
+
+    dff_fps = {}
+    buf_fps = {}
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if not ref.startswith("U"):
+            continue
+        part = ref_to_part.get(ref)
+        if part == "74LVC1G79":
+            dff_fps[ref] = fp
+        elif part == "74LVC1G125":
+            buf_fps[ref] = fp
+
+    pairs = []
+    for dff_ref, dff_fp in dff_fps.items():
+        dff_q_net = pcb.get_pad_net(dff_ref, "4")
+        if dff_q_net is None or dff_q_net == 0:
+            continue
+
+        dff_x = dff_fp.position.X
+        dff_y = dff_fp.position.Y
+
+        pads_on_net = net_to_pads.get(dff_q_net, [])
+        best_dist = float("inf")
+        best_buf_ref = None
+        for pad_ref, pad_num, px, py, pnet in pads_on_net:
+            if (pad_ref.startswith("U") and pad_ref != dff_ref
+                    and pad_num == "2"
+                    and ref_to_part.get(pad_ref) == "74LVC1G125"):
+                dist = math.sqrt((px - dff_x) ** 2 + (py - dff_y) ** 2)
+                if dist < IC_CELL_H * 2 and dist < best_dist:
+                    best_dist = dist
+                    best_buf_ref = pad_ref
+
+        if best_buf_ref and best_buf_ref in buf_fps:
+            pairs.append((dff_ref, dff_fp, best_buf_ref,
+                          buf_fps[best_buf_ref], dff_q_net))
+
+    return pairs
+
+
+def preroute_dff_buf_gnd(pcb, netlist_data):
+    """Connect DFF GND (pin 3) to BUF GND (pin 3) with F.Cu trace + via.
+
+    DFF@90°: pin 3 (GND) at (ic_x+0.50, dff_y+0.25) — right-bottom.
+    BUF@180°: pin 3 (GND) at (ic_x+0.25, buf_y-0.50) — right-top.
+
+    With BUF_ROW_Y=1.75, the BUF GND is at dff_y+1.25, giving 1.0mm
+    vertical and 0.25mm horizontal between the two GND pins.
+
+    Route:
+      1. Vertical DOWN from DFF GND to via at (ic_x+0.50, dff_y+0.75)
+      2. Via to B.Cu GND plane (remove_unused_layers so In1.Cu is free
+         for the data trace jumper)
+      3. 45° diagonal DOWN-LEFT from via to (ic_x+0.25, dff_y+1.0)
+      4. Vertical DOWN to BUF GND at (ic_x+0.25, dff_y+1.25)
+
+    Returns (via_count, trace_count).
+    """
+    pairs = _find_dff_buf_pairs(pcb, netlist_data)
+    gnd_net = pcb.get_net_number("GND")
+    vias = 0
+    traces = 0
+
+    for dff_ref, dff_fp, buf_ref, buf_fp, data_net in pairs:
+        dff_gnd = pcb.get_pad_position(dff_ref, "3")
+        buf_gnd = pcb.get_pad_position(buf_ref, "3")
+        if dff_gnd is None or buf_gnd is None:
+            continue
+
+        # Via at midpoint Y, DFF GND X
+        via_x = round(dff_gnd[0], 2)
+        via_y = round((dff_gnd[1] + buf_gnd[1]) / 2, 2)
+
+        # Diagonal endpoint: align X with BUF GND
+        diag_end_x = round(buf_gnd[0], 2)
+        dx = via_x - diag_end_x
+        diag_end_y = round(via_y + dx, 2)  # 45° diagonal
+
+        # Segment 1: DFF GND straight down to via
+        pcb.add_trace(dff_gnd, (via_x, via_y), gnd_net,
+                       SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Via — remove_unused_layers=True so the In1.Cu annular is cleared
+        # for the data trace jumper that passes through this area
+        pcb.add_via((via_x, via_y), gnd_net,
+                     remove_unused_layers=True)
+        vias += 1
+
+        # Segment 2: 45° diagonal from via to BUF GND X
+        pcb.add_trace((via_x, via_y), (diag_end_x, diag_end_y), gnd_net,
+                       SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Segment 3: vertical down to BUF GND
+        if abs(diag_end_y - buf_gnd[1]) > 0.01:
+            pcb.add_trace((diag_end_x, diag_end_y), buf_gnd, gnd_net,
+                           SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+    return vias, traces
+
+
+def preroute_dff_buf_data(pcb, netlist_data):
+    """Connect DFF D (pin 1) to BUF Y (pin 4) — mirror of GND route.
+
+    DFF@90°: pin 1 (D) at (ic_x-0.50, dff_y+0.25) — left-bottom.
+    BUF@180°: pin 4 (Y) at (ic_x-0.25, buf_y-0.50) — left-top.
+
+    These pins carry the data bus signal (D0-D7) and are geometrically
+    mirrored from the GND pins (pin 3 on each IC, right side).
+
+    Route (mirror of GND):
+      1. Vertical DOWN from DFF D to via at (ic_x-0.50, dff_y+0.75)
+      2. Via (remove_unused_layers for In1.Cu/In2.Cu clearance)
+      3. 45° diagonal DOWN-RIGHT from via to (ic_x-0.25, dff_y+1.0)
+      4. Vertical DOWN to BUF Y at (ic_x-0.25, dff_y+1.25)
+
+    Returns (via_count, trace_count).
+    """
+    pairs = _find_dff_buf_pairs(pcb, netlist_data)
+    vias = 0
+    traces = 0
+
+    for dff_ref, dff_fp, buf_ref, buf_fp, _q_net in pairs:
+        dff_d = pcb.get_pad_position(dff_ref, "1")
+        buf_y = pcb.get_pad_position(buf_ref, "4")
+        if dff_d is None or buf_y is None:
+            continue
+
+        # Get the data bus net from DFF pin 1
+        dbus_net = pcb.get_pad_net(dff_ref, "1")
+        if dbus_net is None or dbus_net == 0:
+            continue
+
+        # Via at midpoint Y, DFF D X
+        via_x = round(dff_d[0], 2)
+        via_y = round((dff_d[1] + buf_y[1]) / 2, 2)
+
+        # Diagonal endpoint: align X with BUF Y pad
+        diag_end_x = round(buf_y[0], 2)
+        dx = abs(via_x - diag_end_x)
+        diag_end_y = round(via_y + dx, 2)  # 45° diagonal
+
+        # Segment 1: DFF D straight down to via
+        pcb.add_trace(dff_d, (via_x, via_y), dbus_net,
+                       SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Via
+        pcb.add_via((via_x, via_y), dbus_net,
+                     remove_unused_layers=True)
+        vias += 1
+
+        # Segment 2: 45° diagonal from via to BUF Y X
+        pcb.add_trace((via_x, via_y), (diag_end_x, diag_end_y), dbus_net,
+                       SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Segment 3: vertical down to BUF Y
+        if abs(diag_end_y - buf_y[1]) > 0.01:
+            pcb.add_trace((diag_end_x, diag_end_y), buf_y, dbus_net,
+                           SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+    return vias, traces
 
 
 def preroute_nand_connections(pcb, netlist_data):
@@ -2400,11 +2582,13 @@ def main():
     cs_vias, cs_traces = 0, 0
     print(f"  COL_SEL vias: skipped (DSBGA-8 pin 5 collision)")
 
-    # DFF→BUF skipped — data bus via at ic_cx-0.50 leaves 0mm clearance
-    # to any F.Cu route at ic_cx (BUF A). 0.80mm via + 0.50mm DSBGA pitch
-    # = geometrically impossible at 0.15mm clearance. Autorouter uses In1.Cu.
-    dff_buf_traces = 0
-    print(f"  DFF->Buffer: skipped (autorouter via In1.Cu)")
+    # Connect DFF-BUF GND pins with F.Cu trace + via to B.Cu GND plane
+    dff_buf_gnd_vias, dff_buf_gnd_traces = preroute_dff_buf_gnd(pcb, netlist_data)
+    print(f"  DFF-BUF GND: {dff_buf_gnd_vias} vias, {dff_buf_gnd_traces} traces")
+
+    # Connect DFF Q to BUF A via In1.Cu jumper (mirrored from GND trace)
+    dff_buf_data_vias, dff_buf_data_traces = preroute_dff_buf_data(pcb, netlist_data)
+    print(f"  DFF-BUF data: {dff_buf_data_vias} vias, {dff_buf_data_traces} traces")
 
     conn_traces = preroute_connector_leds(pcb, netlist_data)
     print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
@@ -2414,9 +2598,11 @@ def main():
     dbus_vias, dbus_traces = 0, 0
     print(f"  D* data bus: skipped (GND pad collision at ic_cx-0.50)")
 
-    total_vias = pwr_vias + dbus_vias + cs_vias + nand_vias
+    total_vias = (pwr_vias + dbus_vias + cs_vias + nand_vias
+                  + dff_buf_gnd_vias + dff_buf_data_vias)
     total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
-                    + oe_traces + nand_traces + dff_buf_traces
+                    + oe_traces + nand_traces + dff_buf_gnd_traces
+                    + dff_buf_data_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
