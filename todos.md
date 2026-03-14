@@ -50,6 +50,9 @@
 - [ ] **Pin names missing on connector** — connector pins should have visible names next to them
 - [ ] **Hierarchical labels outside sheet margins** — verify_schematics.py check passes but visual issues may remain. Needs user review in KiCad to identify specific problem areas
 
+### PCB generate script
+- [ ] **Fix layout ASCII art in generate_pcb.py** — the ASCII art diagram at the top of the file doesn't accurately reflect the current board layout
+
 ### Visual / layout issues
 - [ ] **Text drawn on top of components** — component text (references, values) overlapping other components where it shouldn't be
 - [ ] **VCC/GND symbols touching tip-to-tip** — verify_schematics.py doesn't catch this. Needs user review in KiCad to identify specific problem areas

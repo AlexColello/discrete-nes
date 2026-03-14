@@ -64,12 +64,18 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 
 # Cell layout dimensions (mm)
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
-IC_CELL_W = 5.0      # horizontal spacing between IC centers (courtyard 3.4mm wide at 90/270°)
-IC_CELL_H = 4.0      # vertical spacing between IC rows (R below LED needs 1.86mm + courtyard)
+IC_CELL_W = 5.0      # horizontal spacing for non-byte groups (decoder, column_select, etc.)
+IC_CELL_H = 4.0      # vertical spacing for non-byte groups
+BYTE_CELL_W = 3.5    # horizontal spacing for byte groups (NAND@90° DSBGA-8 crtyd 2.6mm + margin)
+# BUF row Y offset within byte groups.  BUFs have no LEDs in the byte group
+# (data bus LEDs are at the connector), so the constraint is IC courtyards only:
+# DFF@90° bottom = 0.75mm, BUF@180° top = BUF_ROW_Y - 1.0mm.
+# Minimum = 0.75 + 1.0 = 1.75 (courtyards touching).
+BUF_ROW_Y = 1.75     # BUF row offset from DFF row (courtyards touching)
 CTRL_CELL_W = 5.5    # horizontal spacing for control logic (wider for routing)
 CTRL_CELL_H = 4.0    # vertical spacing for control logic (wider for routing)
-LED_OFFSET_X = 2.45  # LED center offset from IC center (courtyard edge 1.7mm + 0.75mm gap)
-R_OFFSET = 2.0       # LED-to-R center offset (mm) — clears courtyard (0402 ±0.93mm at 90°)
+LED_OFFSET_X = 1.5   # LED center offset from IC center (DFF@90° crtyd 1.0 + LED@90° crtyd 0.47 + 0.03 gap)
+R_OFFSET = 1.86      # LED-to-R center offset (mm) — 0402 courtyards touching (0.93+0.93)
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
@@ -327,12 +333,17 @@ def layout_byte_group(comps):
                         + [(None, None, None)] + list(reversed(buf_cells)))
 
     placements = compute_group_layout(ic_cells_ordered, standalone, max_cols=9,
-                                      cell_w=IC_CELL_W, cell_h=IC_CELL_H)
+                                      cell_w=BYTE_CELL_W, cell_h=IC_CELL_H)
 
     # Nudge NAND IC: +1mm right, +0.25mm down relative to bits
+    # Nudge BUF row from IC_CELL_H to BUF_ROW_Y (brings BUFs closer to DFFs)
+    buf_nudge = round(IC_CELL_H - BUF_ROW_Y, 2)  # amount to move up
+    buf_row_y = IC_CELL_H  # original BUF row Y from compute_group_layout
     placements = [
         (comp, round(rx + 1.0, 2), round(ry + 0.25, 2))
         if comp is not None and comp.get("part") == "74LVC2G00"
+        else (comp, rx, round(ry - buf_nudge, 2))
+        if ry >= buf_row_y - 0.01  # BUF row and BUF LED/R below it
         else (comp, rx, ry)
         for comp, rx, ry in placements
     ]
@@ -455,7 +466,7 @@ def preroute_power_vias(pcb, netlist_data):
     Escape outward (VCC UP, GND DOWN) then nudge sideways avoids all
     intra-IC pads:
       DFF  (90°): VCC UP + nudge LEFT,  GND DOWN + nudge RIGHT
-      BUF (270°): VCC DOWN + nudge RIGHT, GND UP + nudge LEFT
+      BUF (180°): GND UP-RIGHT, VCC DOWN-LEFT
 
     This only applies to 74LVC1G79 (DFF) and 74LVC1G125 (BUF) — other
     parts have different pin-to-net assignments so the safe escape
@@ -626,7 +637,7 @@ def preroute_ic_to_led(pcb, netlist_data):
       then RIGHT to LED X, then DOWN to LED anode Y.
 
     Only routes ICs where LED anode is to the RIGHT of output pin.
-    Skips: col_select row 0 (LED above), BUF@270°, DSBGA-8, DSBGA-6.
+    Skips: col_select row 0 (LED above), BUF@180°, DSBGA-8, DSBGA-6.
 
     Returns number of trace segments added.
     """
@@ -737,7 +748,7 @@ def preroute_dff_to_buffer(pcb, netlist_data):
     """Route DFF Q (pin 4) to Buffer A (pin 2) on F.Cu.
 
     DFF @90°: Q (pin 4) at (+0.50, +0.25) — right-bottom of DFF.
-    BUF @270°: A (pin 2) at (0, -0.25) — center-top of BUF.
+    BUF @180°: A (pin 2) at (+0.25, 0) — right-center of BUF.
 
     With DFF above BUF, Q faces down and A faces up — short interconnect.
 
@@ -885,13 +896,13 @@ def preroute_clk_fanout(pcb, netlist_data):
 def preroute_oe_fanout(pcb, netlist_data):
     """Route OE fanout bus for each byte group on F.Cu.
 
-    Buffer OE is pin 1. At 270° rotation, pin 1 (nOE) is at
-    (IC_x+0.50, IC_y-0.25) — right-top of BUF.
+    Buffer OE is pin 1. At 180° rotation, pin 1 (nOE) is at
+    (IC_x+0.25, IC_y+0.50) — right-bottom of BUF.
 
-    Bus BELOW BUF row at buf_y + 1.5 (outside the DFF-BUF gap).
-    OE stubs: RIGHT 0.75mm from pin, 45° DOWN-RIGHT 0.50mm, then
-    vertical DOWN to bus at ic_cx+1.75.  Clears GND via at ic_cx+1.037
-    (perpendicular distance 0.694mm > 0.65mm needed).
+    Bus BELOW BUF row at buf_y + 1.2 (clears DFF R pads: R@270° pad 2
+    bottom edge at BUF_y+0.89, need +0.15 clearance +0.05 half-trace).
+    OE stubs: straight DOWN from pin to bus Y.
+    Horizontal bus connects adjacent stub drop points.
 
     Only matches 74LVC1G125 (Buffer) ICs.
 
@@ -926,33 +937,19 @@ def preroute_oe_fanout(pcb, netlist_data):
         # Sort by X position (left to right)
         members.sort(key=lambda m: m[1])
 
-        # Bus Y: 1.5mm below BUF center (outside DFF-BUF gap)
-        bus_y = round(members[0][4] + 1.5, 2)
+        # Bus Y: 1.2mm below BUF center (clears DFF R GND pads)
+        bus_y = round(members[0][4] + 1.2, 2)
 
-        # F.Cu stubs: RIGHT 0.75mm, 45° DOWN-RIGHT 0.50mm, vertical DOWN to bus
+        # F.Cu stubs: straight DOWN from pin to bus
         for ref, pin_x, pin_y, ic_cx, buf_cy in members:
-            # Seg 1: RIGHT 0.75mm from nOE pin
-            stub_x = round(ic_cx + 1.25, 2)
-            pcb.add_trace((pin_x, pin_y), (stub_x, pin_y), net_num,
+            pcb.add_trace((pin_x, pin_y), (pin_x, bus_y), net_num,
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-            # Seg 2: 45° DOWN-RIGHT 0.50mm
-            diag_x = round(stub_x + 0.50, 2)  # ic_cx + 1.75
-            diag_y = round(pin_y + 0.50, 2)
-            pcb.add_trace((stub_x, pin_y), (diag_x, diag_y), net_num,
-                           SIGNAL_TRACE_W, "F.Cu")
-            traces += 1
-
-            # Seg 3: vertical DOWN to bus
-            pcb.add_trace((diag_x, diag_y), (diag_x, bus_y), net_num,
-                           SIGNAL_TRACE_W, "F.Cu")
-            traces += 1
-
-        # F.Cu horizontal bus segments between adjacent stubs at ic_cx + 1.75
+        # F.Cu horizontal bus segments between adjacent drop points
         for i in range(len(members) - 1):
-            x1 = round(members[i][3] + 1.75, 2)   # ic_cx + 1.75
-            x2 = round(members[i + 1][3] + 1.75, 2)
+            x1 = members[i][1]  # pin_x
+            x2 = members[i + 1][1]
             pcb.add_trace((x1, bus_y), (x2, bus_y), net_num,
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
@@ -1058,7 +1055,7 @@ def preroute_nand_connections(pcb, netlist_data):
         clk_bus_end_x = round(leftmost_dff_pin_x, 2)
 
         # OE bus position
-        # BUF pin 1 (nOE) at 270° is at (IC_x+0.50, IC_y-0.25)
+        # BUF pin 1 (nOE) at 180° is at (IC_x+0.25, IC_y+0.50)
         buf_oe_pads.sort(key=lambda p: p[0])
         leftmost_buf_oe_x = buf_oe_pads[0][0]
         buf_center_y = round(buf_oe_pads[0][1] + 0.25, 2)
@@ -1509,8 +1506,8 @@ def preroute_connector_leds(pcb, netlist_data):
 def preroute_data_bus(pcb, netlist_data, col_boundary_x):
     """Preroute D* data bus with single via per bit per byte.
 
-    At 90°/270° rotation, DFF.D (pin 1) at (-0.50, +0.25) and BUF.Y
-    (pin 4) at (-0.50, -0.25) — both on the LEFT side at x-0.50.
+    At 90° DFF.D (pin 1) at (-0.50, +0.25), left side.
+    At 180° BUF.Y (pin 4) at (-0.25, -0.50), left-top of BUF.
 
     For each data bit (D0-D7), within each byte:
       1. DFF pin 1 (D): F.Cu vertical DOWN to via
@@ -1575,7 +1572,7 @@ def preroute_data_bus(pcb, netlist_data, col_boundary_x):
                 entries.append((ic_cx, px, py, False))
 
             elif part == "74LVC1G125" and pad_num == "4":
-                # BUF pin 4 at (IC_x - 0.50, IC_y - 0.25) at 270°
+                # BUF pin 4 at (IC_x - 0.25, IC_y - 0.50) at 180°
                 ic_cx = round(px + 0.50, 2)
                 entries.append((ic_cx, px, py, True))
 
@@ -1902,9 +1899,9 @@ def main():
     extra_root_connectors = []  # J2, J3 — placed after main layout
 
     # Pre-compute row_ctrl stride to match byte row stride
-    # Byte layout: DFF row(y=0) + BUF row(y=IC_CELL_H) + NAND LEDs(y=IC_CELL_H+0.5)
-    # byte_row_h = (IC_CELL_H + 0.5) + IC_CELL_H = 6.5mm (from compute_group_size)
-    _byte_row_h_est = IC_CELL_H + 0.5 + IC_CELL_H
+    # Byte layout: DFF row(y=0) + BUF row(y=BUF_ROW_Y) + BUF R(y=BUF_ROW_Y+R_OFFSET)
+    # byte_row_h = (BUF_ROW_Y + R_OFFSET) + IC_CELL_H (from compute_group_size)
+    _byte_row_h_est = BUF_ROW_Y + R_OFFSET + IC_CELL_H
     _rc_stride = _byte_row_h_est + GROUP_GAP_Y  # 7.0mm — matches byte row stride
     _addr_dec_final_ys = None  # set during addr_decoder layout
 
@@ -1927,6 +1924,8 @@ def main():
         # RAM bytes use tight spacing; control logic uses wider spacing
         if is_ctrl:
             cw, ch = CTRL_CELL_W, CTRL_CELL_H
+        elif is_ram:
+            cw, ch = BYTE_CELL_W, IC_CELL_H
         else:
             cw, ch = IC_CELL_W, IC_CELL_H
         group_cell_dims[name] = (cw, ch)
@@ -2410,9 +2409,8 @@ def main():
     conn_traces = preroute_connector_leds(pcb, netlist_data)
     print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
 
-    # Data bus prerouting skipped — BUF GND pad (pin 3) is now at same X
-    # as data bus via (ic_cx-0.50), and the F.Cu vertical trace passes
-    # through the pad.  Left to autorouter.
+    # Data bus prerouting skipped — BUF@180° pin layout differs from
+    # original geometry assumptions.  Left to autorouter.
     dbus_vias, dbus_traces = 0, 0
     print(f"  D* data bus: skipped (GND pad collision at ic_cx-0.50)")
 
@@ -2596,7 +2594,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
         elif part == "74LVC1G79":
             angle = 90   # DFF: VCC/GND on top, signal pins D/CLK/Q on bottom
         elif part == "74LVC1G125":
-            angle = 270  # Buffer: VCC/GND on bottom, signal pins nOE/A/Y on top
+            angle = 180  # Buffer: GND up-right, VCC down-left, signal pins right
         elif part == "74LVC2G00":
             angle = 90   # Dual NAND: COL_SEL pins (1,5) down (+Y), VCC/GND up (-Y)
         elif "74LVC" in part:
