@@ -479,6 +479,22 @@ def main():
             print(f"  DRC: {errors} error(s), {warnings} warning(s)")
         else:
             print(f"\n  SKIP Elecrow DRC (rules file not found)")
+
+        # 4. JLCPCB DRC
+        jlcpcb_rules = os.path.join(RULES_DIR, "jlcpcb.kicad_dru")
+        if os.path.exists(jlcpcb_rules):
+            print(f"\n--- DRC: JLCPCB Rules ---")
+            issues, errors, warnings = run_drc(
+                pcb_path, OUTPUT_DIR, label="jlcpcb",
+                custom_rules_path=jlcpcb_rules, skip_types=skip_types,
+                snapshot=True)
+            for issue in issues:
+                print(issue)
+            total_errors += errors
+            total_warnings += warnings
+            print(f"  DRC: {errors} error(s), {warnings} warning(s)")
+        else:
+            print(f"\n  SKIP JLCPCB DRC (rules file not found)")
     elif skip_drc:
         print(f"\n--- DRC skipped (--no-drc) ---")
     else:
