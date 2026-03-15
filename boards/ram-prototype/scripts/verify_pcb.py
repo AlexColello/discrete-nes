@@ -440,7 +440,8 @@ def main():
         # 1. Default DRC
         print(f"\n--- DRC: Default Rules ---")
         issues, errors, warnings = run_drc(
-            pcb_path, OUTPUT_DIR, label="default", skip_types=skip_types)
+            pcb_path, OUTPUT_DIR, label="default", skip_types=skip_types,
+            snapshot=True)
         for issue in issues:
             print(issue)
         total_errors += errors
@@ -453,7 +454,8 @@ def main():
             print(f"\n--- DRC: PCBWay Rules ---")
             issues, errors, warnings = run_drc(
                 pcb_path, OUTPUT_DIR, label="pcbway",
-                custom_rules_path=pcbway_rules, skip_types=skip_types)
+                custom_rules_path=pcbway_rules, skip_types=skip_types,
+                snapshot=True)
             for issue in issues:
                 print(issue)
             total_errors += errors
@@ -468,7 +470,8 @@ def main():
             print(f"\n--- DRC: Elecrow Rules ---")
             issues, errors, warnings = run_drc(
                 pcb_path, OUTPUT_DIR, label="elecrow",
-                custom_rules_path=elecrow_rules, skip_types=skip_types)
+                custom_rules_path=elecrow_rules, skip_types=skip_types,
+                snapshot=True)
             for issue in issues:
                 print(issue)
             total_errors += errors

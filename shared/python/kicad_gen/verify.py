@@ -1148,18 +1148,21 @@ def run_drc(pcb_path, output_dir, label=None, custom_rules_path=None,
             drc_dir = os.path.join(output_dir, f"drc_{label}")
             os.makedirs(drc_dir, exist_ok=True)
 
+            png_map = _save_drc_groups(groups, drc_dir,
+                                       pcb_path=pcb_path if snapshot else None)
+
             for sig, group in sorted(groups.items(),
                                      key=lambda kv: -len(kv[1])):
                 errs = sum(1 for s, *_ in group if s == "error")
                 warns = sum(1 for s, *_ in group if s == "warning")
                 sev_tag = "ERROR" if errs else "WARN"
-                issues.append(
-                    f"  {sev_tag} [{sig}]: {len(group)}x"
-                    f" ({errs} error, {warns} warning)"
-                )
+                line = (f"  {sev_tag} [{sig}]: {len(group)}x"
+                        f" ({errs} error, {warns} warning)")
+                png_path = png_map.get(sig)
+                if png_path:
+                    line += f"\n    snapshot: {png_path}"
+                issues.append(line)
 
-            _save_drc_groups(groups, drc_dir,
-                            pcb_path=pcb_path if snapshot else None)
             issues.append(f"  Details saved to: {drc_dir}/")
 
         if filtered_count > 0:
@@ -1338,7 +1341,11 @@ def _save_drc_groups(groups, drc_dir, pcb_path=None):
 
     If pcb_path is provided, also generates a PNG snapshot of the first
     violation in each group with X markers at the item positions.
+
+    Returns dict mapping signature → PNG path (only for groups with snapshots).
     """
+    png_map = {}
+
     # Clean out old files
     for f in os.listdir(drc_dir):
         if f.endswith('.txt') or f.endswith('.png'):
@@ -1416,6 +1423,8 @@ def _save_drc_groups(groups, drc_dir, pcb_path=None):
                         snapshot_region(pcb_path, bbox, png_path,
                                         markers=positions,
                                         svg_cache=svg_cache)
+                        if os.path.exists(png_path):
+                            png_map[sig] = png_path
                     except Exception:
                         pass  # best-effort
     finally:
@@ -1424,6 +1433,8 @@ def _save_drc_groups(groups, drc_dir, pcb_path=None):
                 os.unlink(svg_cache["svg_path"])
             except OSError:
                 pass
+
+    return png_map
 
 
 # ==============================================================
