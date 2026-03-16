@@ -763,14 +763,18 @@ def preroute_dff_to_buffer(pcb, netlist_data):
 
     Two vias connected by In1.Cu trace (detour right of GND via):
       Via 1: on IC→LED trace at (dff_x+0.90, dff_y-0.25)
-      Via 2: 0.5mm right, 0.75mm below BUF A at (dff_x+0.75, dff_y+2.50)
+      Via 2: 0.5mm right of BUF A, below nOE at (dff_x+0.75, dff_y+2.62)
 
-    In1.Cu path (3 segments, avoids GND via drill at dff_x+0.50, dff_y+0.75):
-      Seg 1: Via 1 → 45° right-down to (dff_x+1.20, dff_y+0.05)
-      Seg 2: vertical down to (dff_x+1.20, dff_y+2.05)
+    In1.Cu path (3 segments, avoids GND via drill at dff_x+0.65, dff_y+0.75):
+      Seg 1: Via 1 → 45° right-down to (dff_x+1.30, dff_y+0.15)
+      Seg 2: vertical down to (dff_x+1.30, dff_y+2.07)
       Seg 3: 45° left-down to Via 2
 
-    F.Cu: Via 2 → BUF pin 2.
+    F.Cu Z-shape (4 segments, threads between nOE pad and GND Z-shape):
+      Seg 1: Via 2 → 45° up-left to (dff_x+0.60, dff_y+2.47)
+      Seg 2: vertical up to (dff_x+0.60, dff_y+1.90)
+      Seg 3: 45° chamfer to (dff_x+0.45, dff_y+1.75)
+      Seg 4: horizontal left to BUF pin 2
     Via 1 sits on existing IC→LED trace (same net, no F.Cu stub needed).
 
     Via size: 0.5mm / 0.3mm drill (minimum for PCBWay/Elecrow).
@@ -780,8 +784,10 @@ def preroute_dff_to_buffer(pcb, netlist_data):
     VIA1_DX = 0.90       # Via 1 X offset from DFF center
     VIA1_DY = -0.25      # Via 1 Y offset (on IC->LED trace at Q pin Y)
     VIA2_DX = 0.75       # Via 2 X offset (0.5mm right of BUF pin 2)
-    VIA2_DY = 2.50       # Via 2 Y offset (0.75mm below BUF pin 2)
-    DETOUR_DX = 1.20     # Detour X offset for In1.Cu vertical segment
+    VIA2_DY = 2.62       # Via 2 Y offset (clears GND Z-shape chamfer)
+    DETOUR_DX = 1.30     # Detour X offset for In1.Cu vertical segment
+    STUB_VERT_DX = 0.60  # F.Cu Z-shape vertical X offset from DFF center
+    FCU_CHAMFER = 0.15   # 45° chamfer size at Z-shape corners
 
     ref_to_part = _build_ref_to_part(netlist_data)
     net_to_pads = _build_net_pad_index(pcb)
@@ -852,12 +858,19 @@ def preroute_dff_to_buffer(pcb, netlist_data):
                      layers=["F.Cu", "In1.Cu"])
         vias += 1
 
-        # F.Cu stub: Via 2 → 45° up-left → BUF pin 2
-        if (abs(via2[0] - buf_pad2_pos[0]) > 0.01
-                or abs(via2[1] - buf_pad2_pos[1]) > 0.01):
-            pcb.add_trace(via2, buf_pad2_pos, dff_q_net,
-                           SIGNAL_TRACE_W, "F.Cu")
-            traces += 1
+        # F.Cu Z-shape: Via 2 → 45° → vertical → 45° → horizontal → pin 2
+        # Threads between nOE pad (X=0.25+0.115) and GND Z-shape (X~0.95)
+        vert_x = round(dff_x + STUB_VERT_DX, 2)
+        chamfer1 = round(VIA2_DX - STUB_VERT_DX, 2)  # 0.15mm entry
+        z1 = (vert_x, round(via2[1] - chamfer1, 2))       # top of 45° entry
+        z2 = (vert_x, round(buf_pad2_pos[1] + FCU_CHAMFER, 2))  # bottom of vertical
+        z3 = (round(vert_x - FCU_CHAMFER, 2), buf_pad2_pos[1])  # after 45° exit
+
+        pcb.add_trace(via2, z1, dff_q_net, SIGNAL_TRACE_W, "F.Cu")
+        pcb.add_trace(z1, z2, dff_q_net, SIGNAL_TRACE_W, "F.Cu")
+        pcb.add_trace(z2, z3, dff_q_net, SIGNAL_TRACE_W, "F.Cu")
+        pcb.add_trace(z3, buf_pad2_pos, dff_q_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 4
 
     return vias, traces
 
@@ -971,8 +984,8 @@ def preroute_oe_fanout(pcb, netlist_data):
         # Sort by X position (left to right)
         members.sort(key=lambda m: m[1])
 
-        # Bus Y: 1.2mm below BUF center (clears DFF R GND pads)
-        bus_y = round(members[0][4] + 1.2, 2)
+        # Bus Y: 1.4mm below BUF center (clears DFF-BUF Q via at +2.62)
+        bus_y = round(members[0][4] + 1.4, 2)
 
         # F.Cu stubs: straight DOWN from pin to bus
         for ref, pin_x, pin_y, ic_cx, buf_cy in members:
@@ -1050,10 +1063,10 @@ def preroute_dff_buf_gnd(pcb, netlist_data):
     vertical and 0.25mm horizontal between the two GND pins.
 
     Route:
-      1. Vertical DOWN from DFF GND to via at (ic_x+0.50, dff_y+0.75)
+      1. Vertical DOWN from DFF GND to via at (ic_x+0.65, dff_y+0.75)
       2. Via to B.Cu GND plane (remove_unused_layers so In1.Cu is free
          for the data trace jumper)
-      3. 45° diagonal DOWN-LEFT from via to (ic_x+0.25, dff_y+1.0)
+      3. 45° diagonal DOWN-LEFT from via to (ic_x+0.25, dff_y+1.15)
       4. Vertical DOWN to BUF GND at (ic_x+0.25, dff_y+1.25)
 
     Returns (via_count, trace_count).
@@ -1069,8 +1082,8 @@ def preroute_dff_buf_gnd(pcb, netlist_data):
         if dff_gnd is None or buf_gnd is None:
             continue
 
-        # Via at midpoint Y, DFF GND X
-        via_x = round(dff_gnd[0], 2)
+        # Via at midpoint Y, shifted right of DFF GND X to clear R pad 1
+        via_x = round(dff_gnd[0] + 0.15, 2)
         via_y = round((dff_gnd[1] + buf_gnd[1]) / 2, 2)
 
         # Diagonal endpoint: align X with BUF GND
@@ -1172,19 +1185,19 @@ def preroute_r_gnd(pcb, netlist_data):
     """Connect resistor GND pads to the existing DFF-BUF GND vias on F.Cu.
 
     Each byte DFF LED has a series resistor whose pad 2 is on the GND net.
-    R pad 1 sits directly between R pad 2 and the GND via, blocking a
-    straight diagonal.  The route goes LEFT of R pad 1, then UP, then LEFT
-    to the via — a Z-shape with 45-degree chamfered corners:
+    Route: Z-shape — short vertical UP, 45° diagonal upper-left, vertical UP
+    to GND via.
 
-        R pad 2 ──LEFT──┐
-                        │ (vertical, LEFT of R pad 1)
-                        └──LEFT── GND via
+        R pad 2
+            │  (short stub UP)
+           ╱   (45° diagonal upper-left)
+          │    (vertical UP to GND via)
+        GND via
 
     Geometry (relative to DFF center):
-      R pad 2:          (dff_x+1.50, dff_y+2.37)
-      R pad 1 left edge: dff_x+1.18 (0.32mm = R pad half-width at 270°)
-      Turn X:            dff_x+0.88 (0.2mm JLCPCB clearance + 0.1mm trace half)
-      GND via:           (dff_x+0.50, dff_y+0.75)
+      R pad 2:   (dff_x+1.50, dff_y+2.37)   [0402@270°, pad 2 is lower]
+      R pad 1:   (dff_x+1.50, dff_y+1.73)   [cathode, upper pad]
+      GND via:   (dff_x+0.65, dff_y+0.75)  [shifted right 0.15mm for clearance]
 
     Non-byte Rs (decoder, control, connector) get a via escape to B.Cu
     GND plane.
@@ -1237,42 +1250,24 @@ def preroute_r_gnd(pcb, netlist_data):
                         best_via = (gvx, gvy)
 
             if best_via:
-                # Z-route: horizontal LEFT, vertical UP, horizontal LEFT
-                # Turn X: R pad 1 left edge - clearance - trace_half
-                # R pad 1 is 0.32mm left of R center (0.64mm horiz at 270°)
-                turn_x = round(pad2_pos[0] - 0.32 - 0.2 - 0.1, 2)
+                # Z-route: vertical UP, 45° diagonal, vertical UP to via
+                dx = pad2_pos[0] - best_via[0]   # positive (pad right of via)
+                dy = pad2_pos[1] - best_via[1]   # positive (pad below via)
+                diag = min(abs(dx), abs(dy))      # 45° covers this much
+                remaining_dy = dy - diag
+                # Short stub from GND pad, long stub from via
+                stub_bot = round(remaining_dy * 0.15, 2)
+                stub_top = round(remaining_dy - stub_bot, 2)
 
                 p0 = pad2_pos
-                p1 = (turn_x, pad2_pos[1])      # end of horizontal
-                p2 = (turn_x, best_via[1])       # end of vertical
-                p3 = best_via                    # GND via
+                p1 = (pad2_pos[0], round(pad2_pos[1] - stub_bot, 2))
+                p2 = (round(best_via[0], 2),
+                      round(best_via[1] + stub_top, 2))
+                p3 = best_via
 
-                # Seg 1: horizontal LEFT (with chamfer at turn)
-                # Seg 2: vertical UP
-                # Seg 3: horizontal LEFT to via
-                # Use chamfered corners (0.3mm max, clamped to shorter leg)
-                h1_len = abs(p0[0] - p1[0])
-                v_len = abs(p1[1] - p2[1])
-                h2_len = abs(p2[0] - p3[0])
-
-                c1 = min(0.3, h1_len * 0.5, v_len * 0.5)
-                c2 = min(0.3, v_len * 0.5, h2_len * 0.5)
-
-                # Turn 1: horizontal → vertical (upper-left chamfer)
-                t1_h_end = (round(turn_x + c1, 2), p0[1])
-                t1_v_start = (turn_x, round(p0[1] - c1, 2))
-
-                # Turn 2: vertical → horizontal (upper-left chamfer)
-                t2_v_end = (turn_x, round(best_via[1] + c2, 2))
-                t2_h_start = (round(turn_x - c2, 2), best_via[1])
-
-                # Build segments
-                pts = [p0, t1_h_end, t1_v_start, t2_v_end, t2_h_start, p3]
-                for i in range(len(pts) - 1):
-                    a, b = pts[i], pts[i + 1]
+                for a, b in [(p0, p1), (p1, p2), (p2, p3)]:
                     if abs(a[0] - b[0]) > 0.01 or abs(a[1] - b[1]) > 0.01:
-                        pcb.add_trace(a, b, gnd_net,
-                                      SIGNAL_TRACE_W, "F.Cu")
+                        pcb.add_trace(a, b, gnd_net, SIGNAL_TRACE_W, "F.Cu")
                         traces += 1
 
                 routed_fcu = True
