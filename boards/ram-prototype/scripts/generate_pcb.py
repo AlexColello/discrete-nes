@@ -638,7 +638,7 @@ def preroute_ic_to_led(pcb, netlist_data):
       Pin 4 (output) at rel (-0.25, -0.50) — upper-left.
       Pin 3 (GND) at rel (+0.25, -0.50) — upper-right, SAME Y as output.
       LED anode ~2.7mm to the RIGHT.
-      Route: UP 0.4mm from pin 4 (clears GND pad and R pad of cell above),
+      Route: UP 0.45mm from pin 4 (clears GND pad with JLCPCB margin),
       then RIGHT to LED X, then DOWN to LED anode Y.
 
     Only routes ICs where LED anode is to the RIGHT of output pin.
@@ -715,9 +715,10 @@ def preroute_ic_to_led(pcb, netlist_data):
                 traces += 1
 
         elif fp_angle == 180:
-            # 3-segment: UP 0.4mm from pin 4 (clears GND pad at same Y
-            # and R pad 2 of cell above), RIGHT to LED X, DOWN to LED anode
-            up_y = round(out_pos[1] - 0.4, 2)
+            # 3-segment: UP 0.45mm from pin 4 (clears GND pad at same Y
+            # with 0.235mm clearance for JLCPCB 0.2mm track-to-pad rule),
+            # RIGHT to LED X, DOWN to LED anode
+            up_y = round(out_pos[1] - 0.45, 2)
             led_x = round(led_anode_pos[0], 2)
             led_y = round(led_anode_pos[1], 2)
 
@@ -1857,7 +1858,7 @@ LAYER_RANK = {"F.Cu": 3, "In1.Cu": 2, "In2.Cu": 1, "B.Cu": 0}
 TEST_CELL_W = 6.0
 TEST_CELL_H = 3.5
 TEST_CELL_GAP = 0.5
-TEST_TEXT_SIZE = 0.8
+TEST_TEXT_SIZE = 1.0
 TEST_LABEL_W = 8.0     # width for row labels
 TEST_HEADER_H = 3.0    # height for column headers
 TEST_TITLE_H = 2.5     # height for title above headers
@@ -1906,13 +1907,13 @@ def add_layer_test_grid(pcb, origin_x, origin_y):
     for ci, header in enumerate(col_headers):
         cx = gx0 + ci * step_x + TEST_CELL_W / 2
         cy = gy0 - TEST_HEADER_H / 2
-        pcb.add_silkscreen_text(header, cx, cy, size=0.8, layer="F.SilkS")
+        pcb.add_silkscreen_text(header, cx, cy, size=1.0, layer="F.SilkS")
 
     # --- Row labels ---
     for ri, (_, label, _) in enumerate(fill_rows):
         lx = origin_x + TEST_LABEL_W / 2
         ly = gy0 + ri * step_y + TEST_CELL_H / 2
-        pcb.add_silkscreen_text(label, lx, ly, size=0.8, layer="F.SilkS")
+        pcb.add_silkscreen_text(label, lx, ly, size=1.0, layer="F.SilkS")
 
     # --- Border rectangle ---
     pcb.add_silkscreen_rect(
@@ -2404,7 +2405,7 @@ def main():
     n_conn_pins = max(conn_pin_names.keys())
     for pin_num, pin_name in conn_pin_names.items():
         label_y = round(col0_y + (n_conn_pins - 1 - pin_num) * CONN_PIN_PITCH, 2)
-        pcb.add_silkscreen_text(pin_name, label_x, label_y, size=0.8)
+        pcb.add_silkscreen_text(pin_name, label_x, label_y, size=1.0)
 
     # Place addr_decoder (column 1, vertical decode-stage columns)
     if "addr_decoder" in group_layouts:
@@ -2521,7 +2522,7 @@ def main():
                              angle_override=90)
             total_placed += 1
             pcb.add_silkscreen_text("DEC3", round(j2_x + pin_span / 2, 2),
-                                    round(j2_y - 3.0, 2), size=0.8)
+                                    round(j2_y - 3.0, 2), size=1.0)
         elif ref == "J3":
             # Unused column header below test grid, horizontal (90°)
             test_grid_h_est = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
@@ -2531,7 +2532,7 @@ def main():
                              angle_override=90)
             total_placed += 1
             pcb.add_silkscreen_text("COL_SEL", round(j3_x + pin_span / 2, 2),
-                                    round(j3_y - 3.0, 2), size=0.8)
+                                    round(j3_y - 3.0, 2), size=1.0)
         elif ref == "J4":
             # DEC4 unused header above RAM, horizontal (90°), right of J2
             j4_x = round(ram_x, 2)
@@ -2540,7 +2541,7 @@ def main():
                              angle_override=90)
             total_placed += 1
             pcb.add_silkscreen_text("DEC4", round(j4_x + pin_span / 2, 2),
-                                    round(j4_y - 3.0, 2), size=0.8)
+                                    round(j4_y - 3.0, 2), size=1.0)
         else:
             _place_component(pcb, comp, round(colsel_x + 20, 2),
                              round(colsel_y + colsel_h + GROUP_GAP_Y * 5, 2),
@@ -2686,9 +2687,9 @@ def main():
     print("  Added GND zone on B.Cu (GND plane)")
 
     # Board info text block — left-justified, bottom-right corner
-    info_margin = 3.0  # mm inset from board edge
-    # Estimate text width: longest line ~33 chars at 0.8mm font ≈ 20mm
-    info_text_w = 22.0
+    info_margin = 4.0  # mm inset from board edge (clears silk_edge_clearance)
+    # Estimate text width: longest line ~38 chars at 1.0mm font ≈ 30mm
+    info_text_w = 30.0
     info_x = round(origin_x + board_w - info_margin - info_text_w, 2)
     info_y = round(origin_y + board_h - info_margin, 2)
     info_lines = [
@@ -2699,12 +2700,12 @@ def main():
     line_spacing = 1.6  # mm between lines
     for i, line in enumerate(info_lines):
         ly = round(info_y - (len(info_lines) - 1 - i) * line_spacing, 2)
-        pcb.add_silkscreen_text(line, info_x, ly, size=0.8, justify="left")
+        pcb.add_silkscreen_text(line, info_x, ly, size=1.0, justify="left")
     print(f"  Board info text at ({info_x}, {info_y})")
 
     # Save PCB (hide all footprint text to avoid silk_overlap/silk_over_copper)
     pcb_path = os.path.join(BOARD_DIR, "ram.kicad_pcb")
-    pcb.save(pcb_path, hide_text=True)
+    pcb.save(pcb_path, hide_text=True, fix_led_silk=True)
     _set_project_clearance(pcb_path)
     print(f"\nSaved: {pcb_path}")
 

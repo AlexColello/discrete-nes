@@ -1166,7 +1166,8 @@ class PCBBuilder:
                 )
                 self.board.graphicItems.append(rect)
 
-    def save(self, filepath: str, hide_text: bool = False):
+    def save(self, filepath: str, hide_text: bool = False,
+             fix_led_silk: bool = False):
         """Save the PCB to a file.
 
         Args:
@@ -1174,12 +1175,35 @@ class PCBBuilder:
             hide_text: If True, hide all footprint reference/value text
                        (FpText on F.Fab via kiutils, property text on
                        F.SilkS via _fix_footprints post-processing)
+            fix_led_silk: If True, shrink and reposition the silkscreen
+                          polarity circle on LED footprints so it fits
+                          between the LED cathode pad and the adjacent
+                          resistor pad without overlapping either solder
+                          mask opening (fixes silk_over_copper DRC).
         """
         if hide_text:
             for fp in self.board.footprints:
                 for gi in fp.graphicItems:
                     if type(gi).__name__ == "FpText" and hasattr(gi, "effects"):
                         gi.effects.hide = True
+        if fix_led_silk:
+            for fp in self.board.footprints:
+                if "LED_" not in fp.libId:
+                    continue
+                for gi in fp.graphicItems:
+                    if (type(gi).__name__ == "FpCircle"
+                            and getattr(gi, "layer", "") == "F.SilkS"):
+                        # Move circle to courtyard edge and reduce stroke
+                        # to fit in the 0.30mm gap between LED pad and R pad.
+                        # Original: center=(-1.09, 0), end=(-1.04, 0), stroke=0.1
+                        # Fixed:    center=(-0.93, 0), end=(-0.88, 0), stroke=0.05
+                        # Gives 0.075mm clearance on both sides.
+                        gi.center.X = -0.93
+                        gi.center.Y = 0.0
+                        gi.end.X = -0.88
+                        gi.end.Y = 0.0
+                        if hasattr(gi, "stroke") and gi.stroke is not None:
+                            gi.stroke.width = 0.05
         self.board.to_file(filepath)
         self._fix_footprints(filepath, hide_text=hide_text)
 
