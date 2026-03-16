@@ -1140,6 +1140,141 @@ def preroute_dff_buf_data(pcb, netlist_data):
     return vias, traces
 
 
+def preroute_r_gnd(pcb, netlist_data):
+    """Connect resistor GND pads to the existing DFF-BUF GND vias on F.Cu.
+
+    Each byte DFF LED has a series resistor whose pad 2 is on the GND net.
+    R pad 1 sits directly between R pad 2 and the GND via, blocking a
+    straight diagonal.  The route goes LEFT of R pad 1, then UP, then LEFT
+    to the via — a Z-shape with 45-degree chamfered corners:
+
+        R pad 2 ──LEFT──┐
+                        │ (vertical, LEFT of R pad 1)
+                        └──LEFT── GND via
+
+    Geometry (relative to DFF center):
+      R pad 2:          (dff_x+1.50, dff_y+2.37)
+      R pad 1 left edge: dff_x+1.18 (0.32mm = R pad half-width at 270°)
+      Turn X:            dff_x+0.88 (0.2mm JLCPCB clearance + 0.1mm trace half)
+      GND via:           (dff_x+0.50, dff_y+0.75)
+
+    Non-byte Rs (decoder, control, connector) get a via escape to B.Cu
+    GND plane.
+
+    Returns (via_count, trace_count).
+    """
+    gnd_net = pcb.get_net_number("GND")
+    if gnd_net is None:
+        print("  WARNING: GND net not found, skipping R GND routing")
+        return 0, 0
+
+    # Collect existing GND vias (placed by preroute_dff_buf_gnd)
+    existing_gnd_vias = []
+    for item in pcb.board.traceItems:
+        if (type(item).__name__ == "Via"
+                and hasattr(item, 'net') and item.net == gnd_net):
+            existing_gnd_vias.append((item.position.X, item.position.Y))
+
+    vias = 0
+    traces = 0
+    fcu_routed = 0
+
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        lib_id = fp.libId or ""
+        if not ref.startswith("R") or "Resistor" not in lib_id:
+            continue
+
+        pad2_net = pcb.get_pad_net(ref, "2")
+        pad2_pos = pcb.get_pad_position(ref, "2")
+        if pad2_net != gnd_net or pad2_pos is None:
+            continue
+
+        fp_angle = round(fp.position.angle or 0)
+
+        # Try to find a nearby DFF-BUF GND via for F.Cu Z-route
+        # Expected offset: via at (-1.0, -1.62) from R pad 2
+        routed_fcu = False
+        if fp_angle == 270 and existing_gnd_vias:
+            best_dist = float("inf")
+            best_via = None
+            for gvx, gvy in existing_gnd_vias:
+                dx = pad2_pos[0] - gvx
+                dy = pad2_pos[1] - gvy
+                # Check the offset matches byte DFF layout (~1.0 right, ~1.62 below)
+                if 0.5 < dx < 1.5 and 1.0 < dy < 2.2:
+                    d = math.sqrt(dx * dx + dy * dy)
+                    if d < best_dist:
+                        best_dist = d
+                        best_via = (gvx, gvy)
+
+            if best_via:
+                # Z-route: horizontal LEFT, vertical UP, horizontal LEFT
+                # Turn X: R pad 1 left edge - clearance - trace_half
+                # R pad 1 is 0.32mm left of R center (0.64mm horiz at 270°)
+                turn_x = round(pad2_pos[0] - 0.32 - 0.2 - 0.1, 2)
+
+                p0 = pad2_pos
+                p1 = (turn_x, pad2_pos[1])      # end of horizontal
+                p2 = (turn_x, best_via[1])       # end of vertical
+                p3 = best_via                    # GND via
+
+                # Seg 1: horizontal LEFT (with chamfer at turn)
+                # Seg 2: vertical UP
+                # Seg 3: horizontal LEFT to via
+                # Use chamfered corners (0.3mm max, clamped to shorter leg)
+                h1_len = abs(p0[0] - p1[0])
+                v_len = abs(p1[1] - p2[1])
+                h2_len = abs(p2[0] - p3[0])
+
+                c1 = min(0.3, h1_len * 0.5, v_len * 0.5)
+                c2 = min(0.3, v_len * 0.5, h2_len * 0.5)
+
+                # Turn 1: horizontal → vertical (upper-left chamfer)
+                t1_h_end = (round(turn_x + c1, 2), p0[1])
+                t1_v_start = (turn_x, round(p0[1] - c1, 2))
+
+                # Turn 2: vertical → horizontal (upper-left chamfer)
+                t2_v_end = (turn_x, round(best_via[1] + c2, 2))
+                t2_h_start = (round(turn_x - c2, 2), best_via[1])
+
+                # Build segments
+                pts = [p0, t1_h_end, t1_v_start, t2_v_end, t2_h_start, p3]
+                for i in range(len(pts) - 1):
+                    a, b = pts[i], pts[i + 1]
+                    if abs(a[0] - b[0]) > 0.01 or abs(a[1] - b[1]) > 0.01:
+                        pcb.add_trace(a, b, gnd_net,
+                                      SIGNAL_TRACE_W, "F.Cu")
+                        traces += 1
+
+                routed_fcu = True
+                fcu_routed += 1
+
+        # Fallback: via escape to B.Cu GND plane
+        if not routed_fcu:
+            if fp_angle == 270:
+                escape_angle = 0   # RIGHT
+            elif fp_angle == 0:
+                escape_angle = 90  # DOWN
+            else:
+                escape_angle = 0
+
+            pcb.pin_to_via(
+                pad2_pos, gnd_net,
+                angle=escape_angle,
+                distance=0.75,
+                trace_width=POWER_TRACE_W,
+                via_size=VIA_SIZE, via_drill=VIA_DRILL,
+                via_layers=["F.Cu", "B.Cu"],
+            )
+            vias += 1
+            traces += 1
+
+    print(f"    ({fcu_routed} F.Cu Z-routes to DFF-BUF GND via, "
+          f"{vias} via escapes)")
+    return vias, traces
+
+
 def preroute_nand_connections(pcb, netlist_data):
     """Route 74LVC2G00 dual NAND local connections within each byte group.
 
@@ -2591,6 +2726,10 @@ def main():
     dff_buf_data_vias, dff_buf_data_traces = preroute_dff_buf_data(pcb, netlist_data)
     print(f"  DFF-BUF data: {dff_buf_data_vias} vias, {dff_buf_data_traces} traces")
 
+    # Connect R GND pads to B.Cu GND plane via local vias
+    r_gnd_vias, r_gnd_traces = preroute_r_gnd(pcb, netlist_data)
+    print(f"  R GND vias: {r_gnd_vias} vias, {r_gnd_traces} traces")
+
     conn_traces = preroute_connector_leds(pcb, netlist_data)
     print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
 
@@ -2600,10 +2739,10 @@ def main():
     print(f"  D* data bus: skipped (GND pad collision at ic_cx-0.50)")
 
     total_vias = (pwr_vias + dbus_vias + cs_vias + nand_vias
-                  + dff_buf_gnd_vias + dff_buf_data_vias)
+                  + dff_buf_gnd_vias + dff_buf_data_vias + r_gnd_vias)
     total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
                     + oe_traces + nand_traces + dff_buf_gnd_traces
-                    + dff_buf_data_traces
+                    + dff_buf_data_traces + r_gnd_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
