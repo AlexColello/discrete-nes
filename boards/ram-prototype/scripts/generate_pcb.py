@@ -384,10 +384,10 @@ def compute_group_size(placements, cell_w=None, cell_h=None):
 # --------------------------------------------------------------
 
 # Via and trace sizing
-VIA_SIZE = 0.6       # mm outer diameter (fits DSBGA 0.50mm pin pitch)
+VIA_SIZE = 0.5       # mm outer diameter (minimum for PCBWay/Elecrow, 0.1mm annular)
 VIA_DRILL = 0.3      # mm drill
-SIG_VIA_SIZE = 0.5   # mm signal via (minimum for PCBWay/Elecrow)
-SIG_VIA_DRILL = 0.3  # mm signal via drill
+SIG_VIA_SIZE = VIA_SIZE    # unified — all vias use same size
+SIG_VIA_DRILL = VIA_DRILL  # unified
 POWER_TRACE_W = 0.3  # mm trace width for power stubs
 SIGNAL_TRACE_W = 0.2 # mm trace width for signals
 VIA_OFFSET = 0.7     # mm offset from pad center to via center
@@ -422,11 +422,10 @@ def _set_project_clearance(pcb_path, clearance=DEFAULT_CLEARANCE):
     # Update design rules to match via sizes
     ds = project.setdefault("board", {}).setdefault("design_settings", {})
     rules = ds.setdefault("rules", {})
-    rules["min_via_diameter"] = SIG_VIA_SIZE  # allow smaller signal vias
+    rules["min_via_diameter"] = VIA_SIZE
     rules["min_through_hole_diameter"] = VIA_DRILL
     ds["via_dimensions"] = [
         {"diameter": VIA_SIZE, "drill": VIA_DRILL},
-        {"diameter": SIG_VIA_SIZE, "drill": SIG_VIA_DRILL},
     ]
 
     with open(pro_path, "w", encoding="utf-8") as f:
@@ -1102,6 +1101,7 @@ def preroute_dff_buf_gnd(pcb, netlist_data):
         # Via — remove_unused_layers=True so the In1.Cu annular is cleared
         # for the data trace jumper that passes through this area
         pcb.add_via((via_x, via_y), gnd_net,
+                     size=VIA_SIZE, drill=VIA_DRILL,
                      remove_unused_layers=True)
         vias += 1
 
@@ -1167,6 +1167,7 @@ def preroute_dff_buf_data(pcb, netlist_data):
 
         # Via
         pcb.add_via((via_x, via_y), dbus_net,
+                     size=VIA_SIZE, drill=VIA_DRILL,
                      remove_unused_layers=True)
         vias += 1
 
@@ -1180,6 +1181,84 @@ def preroute_dff_buf_data(pcb, netlist_data):
             pcb.add_trace((diag_end_x, diag_end_y), buf_y, dbus_net,
                            SIGNAL_TRACE_W, "F.Cu")
             traces += 1
+
+    return vias, traces
+
+
+def preroute_dff_buf_vcc(pcb, netlist_data):
+    """Connect DFF VCC (pin 5) to BUF VCC (pin 5) with a single shared via.
+
+    DFF@90°: pin 5 (VCC) at (ic_x-0.50, dff_y-0.25) — left-top.
+    BUF@180°: pin 5 (VCC) at (ic_x-0.25, dff_y+2.25) — left-bottom.
+
+    Via on the BUF VCC diagonal at same X as DFF VCC pin (ic_x-0.50).
+    DFF VCC trace jogs left to avoid data via at (ic_x-0.50, dff_y+0.75).
+
+    Route DFF VCC → via:
+      1. ~35° angled LEFT-DOWN to (ic_x-1.00, dff_y+0.10) [clears pin 1]
+      2. Vertical DOWN to (ic_x-1.00, dff_y+1.50)         [past data via]
+      3. 45° diagonal RIGHT-DOWN to via at (ic_x-0.50, dff_y+2.00)
+
+    Route via → BUF VCC:
+      4. 45° diagonal RIGHT-DOWN to BUF VCC (ic_x-0.25, dff_y+2.25)
+
+    Returns (via_count, trace_count).
+    """
+    JOG_X = -1.01        # vertical column X (clears data via h2h + PCBWay via-track)
+    JOG_ENTRY_DY = 0.51  # Y drop during angled entry (45° = matches dx)
+
+    pairs = _find_dff_buf_pairs(pcb, netlist_data)
+    vcc_net = pcb.get_net_number("VCC")
+    if vcc_net is None:
+        print("  WARNING: VCC net not found, skipping DFF-BUF VCC routing")
+        return 0, 0
+
+    vias = 0
+    traces = 0
+
+    for dff_ref, dff_fp, buf_ref, buf_fp, _data_net in pairs:
+        dff_vcc = pcb.get_pad_position(dff_ref, "5")
+        buf_vcc = pcb.get_pad_position(buf_ref, "5")
+        if dff_vcc is None or buf_vcc is None:
+            continue
+
+        dff_x = dff_fp.position.X
+
+        # Via at DFF VCC pin X, on the 45° diagonal to BUF VCC
+        via_x = round(dff_vcc[0], 2)
+        diag_to_buf = abs(buf_vcc[0] - via_x)  # 45°: dx = dy
+        via_y = round(buf_vcc[1] - diag_to_buf, 2)
+
+        jog_x = round(dff_x + JOG_X, 2)
+
+        # --- DFF VCC to via (3 segments: angled, DOWN, 45° to via) ---
+        # 1. Angled LEFT-DOWN from DFF VCC (~35°, clears DFF pin 1)
+        p1 = (jog_x, round(dff_vcc[1] + JOG_ENTRY_DY, 2))
+        pcb.add_trace(dff_vcc, p1, vcc_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # 2. Vertical DOWN past data via area
+        diag_back = abs(via_x - jog_x)  # 45° back: dx = dy
+        p2_y = round(via_y - diag_back, 2)
+        pcb.add_trace(p1, (jog_x, p2_y), vcc_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # 3. 45° diagonal RIGHT-DOWN to via
+        pcb.add_trace((jog_x, p2_y), (via_x, via_y), vcc_net,
+                      SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Via to In2.Cu (VCC plane)
+        pcb.add_via((via_x, via_y), vcc_net,
+                    size=VIA_SIZE, drill=VIA_DRILL,
+                    layers=["F.Cu", "In2.Cu"],
+                    remove_unused_layers=True)
+        vias += 1
+
+        # --- Via to BUF VCC (1 segment: 45° diagonal) ---
+        pcb.add_trace((via_x, via_y), buf_vcc, vcc_net,
+                      SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
 
     return vias, traces
 
@@ -2751,6 +2830,10 @@ def main():
     # Connect DFF Q to BUF A via In1.Cu jumper (mirrored from GND trace)
     dff_buf_data_vias, dff_buf_data_traces = preroute_dff_buf_data(pcb, netlist_data)
     print(f"  DFF-BUF data: {dff_buf_data_vias} vias, {dff_buf_data_traces} traces")
+
+    # Connect DFF VCC to BUF VCC with single shared via to In2.Cu
+    dff_buf_vcc_vias, dff_buf_vcc_traces = preroute_dff_buf_vcc(pcb, netlist_data)
+    print(f"  DFF-BUF VCC: {dff_buf_vcc_vias} vias, {dff_buf_vcc_traces} traces")
 
     # Route DFF Q (pin 4) to BUF A (pin 2) via In1.Cu vias
     dff_buf_q_vias, dff_buf_q_traces = preroute_dff_to_buffer(pcb, netlist_data)
