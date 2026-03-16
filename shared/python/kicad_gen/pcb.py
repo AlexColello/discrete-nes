@@ -1180,6 +1180,7 @@ class PCBBuilder:
                           between the LED cathode pad and the adjacent
                           resistor pad without overlapping either solder
                           mask opening (fixes silk_over_copper DRC).
+                          Causes lib_footprint_mismatch (already skipped).
         """
         if hide_text:
             for fp in self.board.footprints:

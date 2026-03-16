@@ -53,7 +53,7 @@ PRE_ROUTING_SKIP_TYPES = {
     "track_dangling",          # Fanout stubs intentionally end mid-air
     "silk_overlap",            # Stock 0402 silk 0.1mm from pads (PCBWay/Elecrow require 0.15mm)
     "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
-    "lib_footprint_mismatch",  # J1 connector: B.Cu with F.SilkS (intentional)
+    "lib_footprint_mismatch",  # J1 connector + LED circle fix (intentional)
 }
 
 # DRC violation types to skip after routing
@@ -61,7 +61,7 @@ PRE_ROUTING_SKIP_TYPES = {
 POST_ROUTING_SKIP_TYPES = {
     "silk_overlap",            # Stock 0402 silk 0.1mm from pads (PCBWay/Elecrow require 0.15mm)
     "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
-    "lib_footprint_mismatch",  # J1 connector: B.Cu with F.SilkS (intentional)
+    "lib_footprint_mismatch",  # J1 connector + LED circle fix (intentional)
 }
 
 
