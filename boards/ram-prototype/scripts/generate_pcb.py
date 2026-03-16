@@ -386,6 +386,8 @@ def compute_group_size(placements, cell_w=None, cell_h=None):
 # Via and trace sizing
 VIA_SIZE = 0.6       # mm outer diameter (fits DSBGA 0.50mm pin pitch)
 VIA_DRILL = 0.3      # mm drill
+SIG_VIA_SIZE = 0.5   # mm signal via (minimum for PCBWay/Elecrow)
+SIG_VIA_DRILL = 0.3  # mm signal via drill
 POWER_TRACE_W = 0.3  # mm trace width for power stubs
 SIGNAL_TRACE_W = 0.2 # mm trace width for signals
 VIA_OFFSET = 0.7     # mm offset from pad center to via center
@@ -420,9 +422,12 @@ def _set_project_clearance(pcb_path, clearance=DEFAULT_CLEARANCE):
     # Update design rules to match via sizes
     ds = project.setdefault("board", {}).setdefault("design_settings", {})
     rules = ds.setdefault("rules", {})
-    rules["min_via_diameter"] = VIA_SIZE
+    rules["min_via_diameter"] = SIG_VIA_SIZE  # allow smaller signal vias
     rules["min_through_hole_diameter"] = VIA_DRILL
-    ds["via_dimensions"] = [{"diameter": VIA_SIZE, "drill": VIA_DRILL}]
+    ds["via_dimensions"] = [
+        {"diameter": VIA_SIZE, "drill": VIA_DRILL},
+        {"diameter": SIG_VIA_SIZE, "drill": SIG_VIA_DRILL},
+    ]
 
     with open(pro_path, "w", encoding="utf-8") as f:
         json.dump(project, f, indent=2)
@@ -751,23 +756,36 @@ def _build_ref_to_part(netlist_data):
 
 
 def preroute_dff_to_buffer(pcb, netlist_data):
-    """Route DFF Q (pin 4) to Buffer A (pin 2) on F.Cu.
+    """Route DFF Q (pin 4) to Buffer A (pin 2) via two In1.Cu vias.
 
-    DFF @90°: Q (pin 4) at (+0.50, +0.25) — right-bottom of DFF.
-    BUF @180°: A (pin 2) at (+0.25, 0) — right-center of BUF.
+    DFF @90°: Q (pin 4) at (dff_x+0.50, dff_y-0.25).
+    BUF @180°: A (pin 2) at (dff_x+0.25, dff_y+1.75).
 
-    With DFF above BUF, Q faces down and A faces up — short interconnect.
+    Two vias connected by In1.Cu trace (detour right of GND via):
+      Via 1: on IC→LED trace at (dff_x+0.90, dff_y-0.25)
+      Via 2: 0.5mm right, 0.75mm below BUF A at (dff_x+0.75, dff_y+2.50)
 
-    Route: vertical DOWN from Q, then 45° diagonal DOWN-LEFT to BUF.A.
-    Clears the DFF→LED trace (which goes right from Q) and the data bus
-    via at ic_cx-0.50.
+    In1.Cu path (3 segments, avoids GND via drill at dff_x+0.50, dff_y+0.75):
+      Seg 1: Via 1 → 45° right-down to (dff_x+1.20, dff_y+0.05)
+      Seg 2: vertical down to (dff_x+1.20, dff_y+2.05)
+      Seg 3: 45° left-down to Via 2
 
-    Only matches 74LVC1G79 (DFF) to 74LVC1G125 (Buffer) pairs.
+    F.Cu: Via 2 → BUF pin 2.
+    Via 1 sits on existing IC→LED trace (same net, no F.Cu stub needed).
 
-    Returns number of trace segments added.
+    Via size: 0.5mm / 0.3mm drill (minimum for PCBWay/Elecrow).
+
+    Returns (via_count, trace_count).
     """
+    VIA1_DX = 0.90       # Via 1 X offset from DFF center
+    VIA1_DY = -0.25      # Via 1 Y offset (on IC->LED trace at Q pin Y)
+    VIA2_DX = 0.75       # Via 2 X offset (0.5mm right of BUF pin 2)
+    VIA2_DY = 2.50       # Via 2 Y offset (0.75mm below BUF pin 2)
+    DETOUR_DX = 1.20     # Detour X offset for In1.Cu vertical segment
+
     ref_to_part = _build_ref_to_part(netlist_data)
     net_to_pads = _build_net_pad_index(pcb)
+    vias = 0
     traces = 0
 
     for fp in pcb.board.footprints:
@@ -803,35 +821,45 @@ def preroute_dff_to_buffer(pcb, netlist_data):
         if buf_ref is None:
             continue
 
-        # DFF Q position (dynamically from PCB)
-        q_pos = pcb.get_pad_position(ref, "4")
+        # Via positions (absolute)
+        via1 = (round(dff_x + VIA1_DX, 2), round(dff_y + VIA1_DY, 2))
+        via2 = (round(dff_x + VIA2_DX, 2), round(dff_y + VIA2_DY, 2))
 
-        # Route: vertical DOWN, 45° DOWN-LEFT, vertical DOWN to BUF.A
-        # 3-segment approach avoids BUF nOE pad at same X as Q.
-        dx = q_pos[0] - buf_pad2_pos[0]  # horizontal distance (+0.50)
+        # Via 1 — sits on IC→LED trace on F.Cu (same net, no stub needed)
+        pcb.add_via(via1, dff_q_net,
+                     size=SIG_VIA_SIZE, drill=SIG_VIA_DRILL,
+                     layers=["F.Cu", "In1.Cu"])
+        vias += 1
 
-        # Segment 1: vertical DOWN from Q — stop dx above midpoint
-        # to start diagonal well above nOE pad
-        mid_y = round((q_pos[1] + buf_pad2_pos[1]) / 2, 2)
-        diag_start_y = round(mid_y - dx / 2, 2)
-        pcb.add_trace(q_pos, (q_pos[0], diag_start_y),
-                       dff_q_net, SIGNAL_TRACE_W, "F.Cu")
-        traces += 1
+        # In1.Cu: 3-segment detour right of GND via at (dff_x+0.50, dff_y+0.75)
+        detour_x = round(dff_x + DETOUR_DX, 2)
+        jog = round(DETOUR_DX - VIA1_DX, 2)  # 0.30mm — 45° jog distance
+        jog2 = round(DETOUR_DX - VIA2_DX, 2)  # 0.70mm — 45° back to Via 2
 
-        # Segment 2: 45° DOWN-LEFT
-        diag_end_x = round(q_pos[0] - dx, 2)  # = buf_pad2_pos X
-        diag_end_y = round(diag_start_y + dx, 2)
-        pcb.add_trace((q_pos[0], diag_start_y), (diag_end_x, diag_end_y),
-                       dff_q_net, SIGNAL_TRACE_W, "F.Cu")
-        traces += 1
+        # Seg 1: 45° right-down from Via 1 to detour column
+        p1 = (detour_x, round(via1[1] + jog, 2))
+        # Seg 2: vertical down to point where 45° reaches Via 2
+        p2 = (detour_x, round(via2[1] - jog2, 2))
 
-        # Segment 3: vertical DOWN to BUF.A
-        if abs(diag_end_y - buf_pad2_pos[1]) > 0.01:
-            pcb.add_trace((diag_end_x, diag_end_y), buf_pad2_pos,
-                           dff_q_net, SIGNAL_TRACE_W, "F.Cu")
+        pcb.add_trace(via1, p1, dff_q_net, SIGNAL_TRACE_W, "In1.Cu")
+        pcb.add_trace(p1, p2, dff_q_net, SIGNAL_TRACE_W, "In1.Cu")
+        pcb.add_trace(p2, via2, dff_q_net, SIGNAL_TRACE_W, "In1.Cu")
+        traces += 3
+
+        # Via 2 — right of BUF A, below nOE
+        pcb.add_via(via2, dff_q_net,
+                     size=SIG_VIA_SIZE, drill=SIG_VIA_DRILL,
+                     layers=["F.Cu", "In1.Cu"])
+        vias += 1
+
+        # F.Cu stub: Via 2 → 45° up-left → BUF pin 2
+        if (abs(via2[0] - buf_pad2_pos[0]) > 0.01
+                or abs(via2[1] - buf_pad2_pos[1]) > 0.01):
+            pcb.add_trace(via2, buf_pad2_pos, dff_q_net,
+                           SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-    return traces
+    return vias, traces
 
 
 def preroute_clk_fanout(pcb, netlist_data):
@@ -2726,6 +2754,10 @@ def main():
     dff_buf_data_vias, dff_buf_data_traces = preroute_dff_buf_data(pcb, netlist_data)
     print(f"  DFF-BUF data: {dff_buf_data_vias} vias, {dff_buf_data_traces} traces")
 
+    # Route DFF Q (pin 4) to BUF A (pin 2) via In1.Cu vias
+    dff_buf_q_vias, dff_buf_q_traces = preroute_dff_to_buffer(pcb, netlist_data)
+    print(f"  DFF-BUF Q->A: {dff_buf_q_vias} vias, {dff_buf_q_traces} traces")
+
     # Connect R GND pads to B.Cu GND plane via local vias
     r_gnd_vias, r_gnd_traces = preroute_r_gnd(pcb, netlist_data)
     print(f"  R GND vias: {r_gnd_vias} vias, {r_gnd_traces} traces")
@@ -2739,10 +2771,11 @@ def main():
     print(f"  D* data bus: skipped (GND pad collision at ic_cx-0.50)")
 
     total_vias = (pwr_vias + dbus_vias + cs_vias + nand_vias
-                  + dff_buf_gnd_vias + dff_buf_data_vias + r_gnd_vias)
+                  + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
+                  + r_gnd_vias)
     total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
                     + oe_traces + nand_traces + dff_buf_gnd_traces
-                    + dff_buf_data_traces + r_gnd_traces
+                    + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
