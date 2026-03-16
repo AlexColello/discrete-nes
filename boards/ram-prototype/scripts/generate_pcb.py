@@ -783,10 +783,10 @@ def preroute_dff_to_buffer(pcb, netlist_data):
     """
     VIA1_DX = 0.90       # Via 1 X offset from DFF center
     VIA1_DY = -0.25      # Via 1 Y offset (on IC->LED trace at Q pin Y)
-    VIA2_DX = 0.75       # Via 2 X offset (0.5mm right of BUF pin 2)
-    VIA2_DY = 2.62       # Via 2 Y offset (clears GND Z-shape chamfer)
+    VIA2_DX = 0.76       # Via 2 X offset (0.51mm right of BUF pin 2)
+    VIA2_DY = 2.64       # Via 2 Y offset (clears GND Z-shape chamfer)
     DETOUR_DX = 1.30     # Detour X offset for In1.Cu vertical segment
-    STUB_VERT_DX = 0.60  # F.Cu Z-shape vertical X offset from DFF center
+    STUB_VERT_DX = 0.76  # F.Cu Z-shape vertical X offset from DFF center
     FCU_CHAMFER = 0.15   # 45° chamfer size at Z-shape corners
 
     ref_to_part = _build_ref_to_part(netlist_data)
@@ -861,10 +861,13 @@ def preroute_dff_to_buffer(pcb, netlist_data):
         # F.Cu Z-shape: Via 2 → 45° → vertical → 45° → horizontal → pin 2
         # Threads between nOE pad (X=0.25+0.115) and GND Z-shape (X~0.95)
         vert_x = round(dff_x + STUB_VERT_DX, 2)
-        chamfer1 = round(VIA2_DX - STUB_VERT_DX, 2)  # 0.15mm entry
-        z1 = (vert_x, round(via2[1] - chamfer1, 2))       # top of 45° entry
-        z2 = (vert_x, round(buf_pad2_pos[1] + FCU_CHAMFER, 2))  # bottom of vertical
-        z3 = (round(vert_x - FCU_CHAMFER, 2), buf_pad2_pos[1])  # after 45° exit
+        chamfer1 = round(VIA2_DX - STUB_VERT_DX, 2)  # bottom 45° entry
+        # Top chamfer: extend to reach vertical while keeping z3 fixed
+        z3_x = round(dff_x + 0.45, 2)                     # fixed exit X
+        chamfer_top = round(vert_x - z3_x, 2)             # top 45° size
+        z1 = (vert_x, round(via2[1] - max(chamfer1, 0), 2))  # top of bottom 45°
+        z2 = (vert_x, round(buf_pad2_pos[1] + chamfer_top, 2))  # bottom of vertical
+        z3 = (z3_x, buf_pad2_pos[1])                       # after top 45° exit
 
         pcb.add_trace(via2, z1, dff_q_net, SIGNAL_TRACE_W, "F.Cu")
         pcb.add_trace(z1, z2, dff_q_net, SIGNAL_TRACE_W, "F.Cu")
@@ -1253,7 +1256,7 @@ def preroute_r_gnd(pcb, netlist_data):
                 # Z-route: vertical UP, 45° diagonal, vertical UP to via
                 dx = pad2_pos[0] - best_via[0]   # positive (pad right of via)
                 dy = pad2_pos[1] - best_via[1]   # positive (pad below via)
-                diag = min(abs(dx), abs(dy))      # 45° covers this much
+                diag = min(abs(dx), abs(dy))          # 45° covers this much
                 remaining_dy = dy - diag
                 # Short stub from GND pad, long stub from via
                 stub_bot = round(remaining_dy * 0.15, 2)
