@@ -67,6 +67,7 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 IC_CELL_W = 5.0      # horizontal spacing for non-byte groups (decoder, column_select, etc.)
 IC_CELL_H = 4.0      # vertical spacing for non-byte groups
 BYTE_CELL_W = 3.25   # horizontal spacing for byte DFF/BUF cells
+BYTE_CELL_H = 2.0    # vertical spacing for byte groups (1.7mm inter-row courtyard gap)
 NAND_EXTRA_X = 0.25  # extra X gap after NAND column (DSBGA-8 courtyard 2.6mm)
 # BUF row Y offset within byte groups.  BUFs have no LEDs in the byte group
 # (data bus LEDs are at the connector), so the constraint is IC courtyards only:
@@ -80,9 +81,9 @@ R_OFFSET = 1.86      # LED-to-R center offset (mm) — 0402 courtyards touching 
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
-GROUP_GAP_Y = 1.5    # vertical gap between byte rows (keeps 1mm between OE/CLK buses)
+GROUP_GAP_Y = 0.5    # vertical gap between byte rows
 CTRL_GROUP_GAP_X = 4.0  # horizontal gap between control logic groups
-BYTE_COL_GAP = 2.0   # horizontal gap between the two byte columns (physical gap)
+BYTE_COL_GAP = 1.0   # horizontal gap between the two byte columns (physical gap)
 CTRL_ROW_GAP = 7.5   # vertical gap between RAM area and control logic row
 BOARD_MARGIN = 7.0   # margin from board edge to components
 SHEET_BORDER = 13.0  # minimum distance from sheet edge to board outline
@@ -334,32 +335,39 @@ def layout_byte_group(comps):
                         + [(None, None, None)] + list(reversed(buf_cells)))
 
     placements = compute_group_layout(ic_cells_ordered, standalone, max_cols=9,
-                                      cell_w=BYTE_CELL_W, cell_h=IC_CELL_H)
+                                      cell_w=BYTE_CELL_W, cell_h=BYTE_CELL_H)
 
     # Nudge NAND IC: +1mm right, +0.25mm down relative to bits
     # Shift all non-NAND columns right by NAND_EXTRA_X (DSBGA-8 needs more space)
-    # Nudge BUF row from IC_CELL_H to BUF_ROW_Y (brings BUFs closer to DFFs)
-    buf_nudge = round(IC_CELL_H - BUF_ROW_Y, 2)  # amount to move up
-    buf_row_y = IC_CELL_H  # original BUF row Y from compute_group_layout
+    # Nudge BUF ICs from grid row Y (BYTE_CELL_H) to BUF_ROW_Y
+    # Identify BUFs by part type — Y threshold is fragile when BYTE_CELL_H < R_OFFSET
+    buf_nudge = round(BYTE_CELL_H - BUF_ROW_Y, 2)
     placements = [
         (comp, round(rx + 1.0, 2), round(ry - 0.25, 2))
         if comp is not None and comp.get("part") == "74LVC2G00"
         else (comp, round(rx + NAND_EXTRA_X, 2), round(ry - buf_nudge, 2))
-        if ry >= buf_row_y - 0.01  # BUF row and BUF LED/R below it
+        if comp is not None and comp.get("part") == "74LVC1G125"
         else (comp, round(rx + NAND_EXTRA_X, 2), ry)
         for comp, rx, ry in placements
     ]
 
-    # Place both NAND LEDs side by side below the NAND IC
-    # Reverse so pin 3 (OE) LED goes LEFT (x=0.5), pin 7 (CLK) LED RIGHT (x=2.0)
+    # Place NAND LEDs: Rs and LEDs in separate rows below NAND IC.
+    # NAND IC courtyard bottom = -0.25 + 1.3 = 1.05mm.
+    # R/LED 0402@0/180 courtyard Y extent = ±0.475mm.
+    # R placed above LED within each pair to clear NAND courtyard.
     nand_led_pairs = list(reversed(nand_led_pairs))
-    nand_led_y = 2.5  # below NAND IC courtyard (DSBGA-8 bottom at ~2.22mm)
+    r_col_x = -1.0       # R column X (clear of NAND crtyd X=[0.2,1.8])
+    led_col_x = 1.0      # LED column X (under NAND center)
+    nand_led_y0 = 1.55   # first row Y — LED top (1.55-0.475=1.075) clears NAND bottom (1.05)
+    led_spacing_y = 1.25  # vertical spacing between pairs (was 1.5)
     for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
-        lx = round(0.5 + i * 1.5, 2)  # below NAND IC
-        if led_comp:
-            placements.append((led_comp, lx, nand_led_y))
+        row_y = round(nand_led_y0 + i * led_spacing_y, 2)
         if r_comp:
-            placements.append((r_comp, lx, nand_led_y + R_OFFSET))
+            r_tagged = dict(r_comp, angle_override=180)   # horizontal, pad 1 RIGHT
+            placements.append((r_tagged, r_col_x, row_y))
+        if led_comp:
+            led_tagged = dict(led_comp, angle_override=0)  # horizontal, pad 1 LEFT
+            placements.append((led_tagged, led_col_x, row_y))
 
     return placements
 
@@ -597,6 +605,11 @@ def preroute_led_to_resistor(pcb, netlist_data):
     for fp in pcb.board.footprints:
         ref = fp.properties.get("Reference", "")
         if not ref.startswith("D") or ref in processed:
+            continue
+
+        # Skip NAND LEDs (horizontal at 0°) — no prerouted LED-to-R trace
+        fp_angle = round(fp.position.angle or 0)
+        if fp_angle == 0:
             continue
 
         # Get LED cathode pad and net
@@ -1322,6 +1335,10 @@ def preroute_r_gnd(pcb, netlist_data):
             continue
 
         fp_angle = round(fp.position.angle or 0)
+
+        # Skip NAND Rs (horizontal at 180°) — routing left to autorouter
+        if fp_angle == 180:
+            continue
 
         # Try to find a nearby DFF-BUF GND via for F.Cu Z-route
         # Expected offset: via at (-1.0, -1.62) from R pad 2
@@ -2330,9 +2347,9 @@ def main():
     extra_root_connectors = []  # J2, J3 — placed after main layout
 
     # Pre-compute row_ctrl stride to match byte row stride
-    # Byte layout: DFF row(y=0) + BUF row(y=BUF_ROW_Y) + BUF R(y=BUF_ROW_Y+R_OFFSET)
-    # byte_row_h = (BUF_ROW_Y + R_OFFSET) + IC_CELL_H (from compute_group_size)
-    _byte_row_h_est = BUF_ROW_Y + R_OFFSET + IC_CELL_H
+    # Byte layout Y span: NAND IC at -0.25 to NAND LED at 2.75 = 3.0mm
+    # byte_row_h = Y_span + BYTE_CELL_H (from compute_group_size)
+    _byte_row_h_est = 3.0 + BYTE_CELL_H
     _rc_stride = _byte_row_h_est + GROUP_GAP_Y  # 7.0mm — matches byte row stride
     _addr_dec_final_ys = None  # set during addr_decoder layout
 
@@ -2356,7 +2373,7 @@ def main():
         if is_ctrl:
             cw, ch = CTRL_CELL_W, CTRL_CELL_H
         elif is_ram:
-            cw, ch = BYTE_CELL_W, IC_CELL_H
+            cw, ch = BYTE_CELL_W, BYTE_CELL_H
         else:
             cw, ch = IC_CELL_W, IC_CELL_H
         group_cell_dims[name] = (cw, ch)
@@ -2698,15 +2715,27 @@ def main():
                 ys = [p[1] for p in abs_positions]
                 byte_bounds[name] = (min(xs), min(ys), max(xs), max(ys))
 
-    # Add unified silkscreen grid around all 8 bytes
-    # Exact placement-grid cells: each cell = (col_stride × row_stride)
+    # Add unified silkscreen grid around all 8 bytes.
+    # Grid is fully defined by byte dimensions and strides — no placed-bounds needed.
     row_stride = byte_row_h + GROUP_GAP_Y
     col_stride = byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75
-    bx0 = ram_x  # column 0 origin
-    gap_x = col_stride - byte_center_span_x
 
-    grid_x1 = round(bx0 - gap_x / 2, 2)
-    grid_y1 = round(ram_y - GROUP_GAP_Y / 2 - IC_CELL_H / 2, 2)
+    # Byte content span (from layout_byte_group, same for all bytes)
+    ref_layout = group_layouts.get("byte_0", [])
+    byte_min_x = min(x for _, x, _ in ref_layout)
+    byte_max_x = max(x for _, x, _ in ref_layout)
+    byte_min_y = min(y for _, x, y in ref_layout)
+    byte_max_y = max(y for _, x, y in ref_layout)
+    content_span_x = byte_max_x - byte_min_x
+    content_span_y = byte_max_y - byte_min_y
+
+    # Uniform margins: content centered within each col_stride × row_stride cell
+    margin_x = (col_stride - content_span_x) / 2
+    margin_y = (row_stride - content_span_y) / 2
+
+    # Grid origin: byte_0 origin is (ram_x, ram_y), content starts at +byte_min_x/y
+    grid_x1 = round(ram_x + byte_min_x - margin_x, 2)
+    grid_y1 = round(ram_y + byte_min_y - margin_y, 2)
     grid_x2 = round(grid_x1 + 2 * col_stride, 2)
     grid_y2 = round(grid_y1 + 4 * row_stride, 2)
     grid_w = round(grid_x2 - grid_x1, 2)
@@ -2714,16 +2743,16 @@ def main():
 
     pcb.add_silkscreen_rect(grid_x1, grid_y1, grid_w, grid_h)
 
-    # Vertical divider
+    # Vertical divider between byte columns
     div_x = round(grid_x1 + col_stride, 2)
     pcb.add_silkscreen_line(div_x, grid_y1, div_x, grid_y2)
 
-    # Horizontal dividers
+    # Horizontal dividers at row_stride intervals
     for k in range(1, 4):
         div_y = round(grid_y1 + k * row_stride, 2)
         pcb.add_silkscreen_line(grid_x1, div_y, grid_x2, div_y)
 
-    # Address labels beside each cell
+    # Address labels: centered within each grid cell
     for byte_idx in range(8):
         col_idx = byte_idx // 4
         row_idx = byte_idx % 4
@@ -3008,6 +3037,10 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
     """
     ref = comp["ref"]
     part = comp["part"]
+
+    # Check for angle_override embedded in the component dict
+    if angle_override is None and "angle_override" in comp:
+        angle_override = comp["angle_override"]
     tstamp = comp["tstamp"]
 
     # Determine footprint
