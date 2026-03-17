@@ -342,7 +342,7 @@ def layout_byte_group(comps):
     buf_nudge = round(IC_CELL_H - BUF_ROW_Y, 2)  # amount to move up
     buf_row_y = IC_CELL_H  # original BUF row Y from compute_group_layout
     placements = [
-        (comp, round(rx + 1.0, 2), round(ry + 0.25, 2))
+        (comp, round(rx + 1.0, 2), round(ry - 0.25, 2))
         if comp is not None and comp.get("part") == "74LVC2G00"
         else (comp, round(rx + NAND_EXTRA_X, 2), round(ry - buf_nudge, 2))
         if ry >= buf_row_y - 0.01  # BUF row and BUF LED/R below it
@@ -3044,7 +3044,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
         elif part == "74LVC1G125":
             angle = 180  # Buffer: GND up-right, VCC down-left, signal pins right
         elif part == "74LVC2G00":
-            angle = 90   # Dual NAND: COL_SEL pins (1,5) down (+Y), VCC/GND up (-Y)
+            angle = 270  # Dual NAND: rotated 180° from 90°, VCC/GND down (+Y)
         elif "74LVC" in part:
             angle = 180  # Other logic (INV, AND, NAND) unchanged
         elif part.startswith("Conn_01x"):
