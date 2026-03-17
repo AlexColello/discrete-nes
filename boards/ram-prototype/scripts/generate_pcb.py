@@ -66,7 +66,8 @@ SHARED_FP_DIR = os.path.normpath(os.path.join(
 # DSBGA courtyard ~3.4x3.4mm, R_0402 courtyard ~1.9x1.0mm, LED_0402 ~1.9x1.0mm
 IC_CELL_W = 5.0      # horizontal spacing for non-byte groups (decoder, column_select, etc.)
 IC_CELL_H = 4.0      # vertical spacing for non-byte groups
-BYTE_CELL_W = 3.5    # horizontal spacing for byte groups (NAND@90° DSBGA-8 crtyd 2.6mm + margin)
+BYTE_CELL_W = 3.25   # horizontal spacing for byte DFF/BUF cells
+NAND_EXTRA_X = 0.25  # extra X gap after NAND column (DSBGA-8 courtyard 2.6mm)
 # BUF row Y offset within byte groups.  BUFs have no LEDs in the byte group
 # (data bus LEDs are at the connector), so the constraint is IC courtyards only:
 # DFF@90° bottom = 0.75mm, BUF@180° top = BUF_ROW_Y - 1.0mm.
@@ -336,15 +337,16 @@ def layout_byte_group(comps):
                                       cell_w=BYTE_CELL_W, cell_h=IC_CELL_H)
 
     # Nudge NAND IC: +1mm right, +0.25mm down relative to bits
+    # Shift all non-NAND columns right by NAND_EXTRA_X (DSBGA-8 needs more space)
     # Nudge BUF row from IC_CELL_H to BUF_ROW_Y (brings BUFs closer to DFFs)
     buf_nudge = round(IC_CELL_H - BUF_ROW_Y, 2)  # amount to move up
     buf_row_y = IC_CELL_H  # original BUF row Y from compute_group_layout
     placements = [
         (comp, round(rx + 1.0, 2), round(ry + 0.25, 2))
         if comp is not None and comp.get("part") == "74LVC2G00"
-        else (comp, rx, round(ry - buf_nudge, 2))
+        else (comp, round(rx + NAND_EXTRA_X, 2), round(ry - buf_nudge, 2))
         if ry >= buf_row_y - 0.01  # BUF row and BUF LED/R below it
-        else (comp, rx, ry)
+        else (comp, round(rx + NAND_EXTRA_X, 2), ry)
         for comp, rx, ry in placements
     ]
 
@@ -894,7 +896,7 @@ def preroute_clk_fanout(pcb, netlist_data):
     ref_to_part = _build_ref_to_part(netlist_data)
     traces = 0
 
-    CLK_BUS_Y_OFFSET = -1.5   # bus Y relative to DFF center (above DFF)
+    CLK_BUS_Y_OFFSET = -1.25  # bus Y relative to DFF center (above DFF)
 
     # Group DFF pin 2 (CLK) by net number
     clk_groups = defaultdict(list)
@@ -1205,7 +1207,7 @@ def preroute_dff_buf_vcc(pcb, netlist_data):
     Returns (via_count, trace_count).
     """
     JOG_X = -1.01        # vertical column X (clears data via h2h + PCBWay via-track)
-    JOG_ENTRY_DY = 0.51  # Y drop during angled entry (45° = matches dx)
+    STUB_LEFT = 0.05     # horizontal stub before 45° entry (clears DFF pin 1)
 
     pairs = _find_dff_buf_pairs(pcb, netlist_data)
     vcc_net = pcb.get_net_number("VCC")
@@ -1231,10 +1233,16 @@ def preroute_dff_buf_vcc(pcb, netlist_data):
 
         jog_x = round(dff_x + JOG_X, 2)
 
-        # --- DFF VCC to via (3 segments: angled, DOWN, 45° to via) ---
-        # 1. Angled LEFT-DOWN from DFF VCC (~35°, clears DFF pin 1)
-        p1 = (jog_x, round(dff_vcc[1] + JOG_ENTRY_DY, 2))
-        pcb.add_trace(dff_vcc, p1, vcc_net, SIGNAL_TRACE_W, "F.Cu")
+        # --- DFF VCC to via (4 segments: stub, 45°, DOWN, 45° to via) ---
+        # 1. Short horizontal LEFT stub (clears DFF pin 1 from 45°)
+        stub_end = (round(dff_vcc[0] - STUB_LEFT, 2), dff_vcc[1])
+        pcb.add_trace(dff_vcc, stub_end, vcc_net, SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # 2. 45° LEFT-DOWN from stub end to jog column
+        diag_dx = abs(stub_end[0] - jog_x)
+        p1 = (jog_x, round(stub_end[1] + diag_dx, 2))
+        pcb.add_trace(stub_end, p1, vcc_net, SIGNAL_TRACE_W, "F.Cu")
         traces += 1
 
         # 2. Vertical DOWN past data via area
