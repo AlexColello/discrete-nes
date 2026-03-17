@@ -1021,6 +1021,83 @@ def preroute_oe_fanout(pcb, netlist_data):
     return traces
 
 
+def preroute_enable_buses(pcb, netlist_data):
+    """Route WRITE_EN_ROW_n and READ_EN_ROW_n horizontal buses on F.Cu.
+
+    WRITE_EN buses run above the CLK bus (top of byte row).
+    READ_EN buses run below the OE bus (bottom of byte row).
+    These Y positions are clear of CLK/OE vertical stubs.
+
+    Buses span from the row_ctrl LED area across both byte columns.
+    Does NOT connect to NAND (DSBGA-8) pins — autorouter handles that.
+
+    Returns trace count.
+    """
+    ref_to_part = {c['ref']: c['part'] for c in netlist_data['components']}
+    name_to_net = {n.name: n.number for n in pcb.board.nets}
+    traces = 0
+
+    ENABLE_TRACE_W = 0.16   # thinner than SIGNAL_TRACE_W for inter-row clearance
+    WRITE_EN_OFFSET = -0.40  # above CLK bus (CLK_bus_y + offset)
+    READ_EN_OFFSET = 0.40    # below OE bus (OE_bus_y + offset)
+
+    CLK_BUS_Y_OFFSET = -1.25  # from preroute_clk_fanout
+    OE_BUS_Y_OFFSET = 1.4     # from preroute_oe_fanout (relative to BUF Y)
+
+    for row in range(4):
+        for signal, pin_num in [("WRITE_EN", "2"), ("READ_EN", "6")]:
+            net_name = f"/{signal}_ROW_{row}"
+            net_num = name_to_net.get(net_name)
+            if net_num is None:
+                continue
+
+            # Find NAND pads and row_ctrl LED pads on this net
+            nand_pads = []
+            led_pads = []
+            dff_y = None
+            buf_y = None
+            for fp in pcb.board.footprints:
+                ref = fp.properties.get("Reference", "")
+                part = ref_to_part.get(ref, "")
+                for pad in fp.pads:
+                    pad_net = pad.net if isinstance(pad.net, int) else (
+                        pad.net.number if hasattr(pad.net, 'number') else 0)
+                    if pad_net != net_num:
+                        continue
+                    pos = pcb.get_pad_position(ref, pad.number)
+                    if part == "74LVC2G00":
+                        nand_pads.append(pos)
+                        # Derive DFF/BUF Y from NAND position
+                        # NAND at byte_y - 0.25, so byte_y = nand_y + 0.25
+                        if dff_y is None:
+                            byte_y = fp.position.Y + 0.25
+                            dff_y = byte_y
+                            buf_y = byte_y + BUF_ROW_Y
+                    elif part == "LED_Small":
+                        led_pads.append(pos)
+
+            if len(nand_pads) < 2 or dff_y is None:
+                continue
+
+            # Bus Y: above CLK bus for WRITE_EN, below OE bus for READ_EN
+            if signal == "WRITE_EN":
+                clk_bus_y = dff_y + CLK_BUS_Y_OFFSET
+                bus_y = round(clk_bus_y + WRITE_EN_OFFSET, 2)
+            else:
+                oe_bus_y = buf_y + OE_BUS_Y_OFFSET
+                bus_y = round(oe_bus_y + READ_EN_OFFSET, 2)
+
+            # Bus X: from left of RAM block (past row_ctrl) to past rightmost NAND
+            x_start = round(min(p[0] for p in nand_pads) - 2.0, 2)
+            x_end = round(max(p[0] for p in nand_pads) + 1.0, 2)
+
+            pcb.add_trace((x_start, bus_y), (x_end, bus_y), net_num,
+                          ENABLE_TRACE_W, "F.Cu")
+            traces += 1
+
+    return traces
+
+
 def _find_dff_buf_pairs(pcb, netlist_data):
     """Find matched DFF-BUF pairs in byte groups.
 
@@ -2720,12 +2797,18 @@ def main():
     row_stride = byte_row_h + GROUP_GAP_Y
     col_stride = byte_center_span_x + 0.5 + BYTE_COL_GAP + 0.75
 
-    # Byte content span (from layout_byte_group, same for all bytes)
+    # Byte content span including enable bus traces.
+    # Enable buses extend beyond components: WRITE_EN above CLK bus, READ_EN below OE bus.
+    # CLK bus at byte_y - 1.25, WRITE_EN at byte_y - 1.65 (offset from byte_min_y=-0.25: -1.40)
+    # OE bus at byte_y + 3.15, READ_EN at byte_y + 3.55 (offset from byte_max_y=2.80: +0.75)
+    WRITE_EN_BUS_REL_Y = -1.65   # relative to byte origin (CLK_BUS_Y_OFFSET + WRITE_EN_OFFSET)
+    READ_EN_BUS_REL_Y = BUF_ROW_Y + 1.4 + 0.40  # OE_bus + READ_EN_OFFSET
+
     ref_layout = group_layouts.get("byte_0", [])
     byte_min_x = min(x for _, x, _ in ref_layout)
     byte_max_x = max(x for _, x, _ in ref_layout)
-    byte_min_y = min(y for _, x, y in ref_layout)
-    byte_max_y = max(y for _, x, y in ref_layout)
+    byte_min_y = min(min(y for _, x, y in ref_layout), WRITE_EN_BUS_REL_Y)
+    byte_max_y = max(max(y for _, x, y in ref_layout), READ_EN_BUS_REL_Y)
     content_span_x = byte_max_x - byte_min_x
     content_span_y = byte_max_y - byte_min_y
 
@@ -2845,6 +2928,9 @@ def main():
 
     oe_traces = preroute_oe_fanout(pcb, netlist_data)
     print(f"  OE fanout: {oe_traces} trace segments")
+
+    enable_traces = preroute_enable_buses(pcb, netlist_data)
+    print(f"  Enable buses (F.Cu): {enable_traces} trace segments")
 
     # NAND connections skipped — OE escape path offsets tuned for IC_CELL_H=3.5.
     # With IC_CELL_H=3.0 + LED Y offset, paths cross COL_SEL vias and each other.
