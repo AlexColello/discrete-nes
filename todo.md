@@ -65,6 +65,24 @@
 ### Architecture improvement
 - [ ] **Simplify LED indicators** — investigate using a symbol, sub-sheet, or other encapsulation method to hold the LED+resistor chain so that LEDs don't have to be drawn inline in every gate logic sheet. Would significantly reduce schematic clutter and simplify the generate scripts
 
+## Assembly Method
+
+Need a custom assembly approach — a pick-and-place machine in budget range can't place all 611+ components before solder paste dries out.
+
+**Proposed approach: tray + suction sheet**
+
+1. **Part tray** — a fixture/tray where all components (DSBGA ICs, 0402 LEDs, 0402 resistors) can be slowly placed by hand into their correct positions at leisure, without time pressure
+2. **Suction sheet** — picks up all placed components from the tray at once and deposits them onto the solder-pasted PCB in a single transfer
+
+This decouples the slow placement step from the solder paste window. Parts can be arranged in the tray over hours/days, then transferred all at once when the paste is fresh.
+
+### Open questions
+- Tray material and fabrication method (3D printed? CNC milled?)
+- Suction sheet mechanism — vacuum manifold? adhesive film?
+- Alignment method between tray and PCB
+- Whether DSBGA (1.75x1.25mm) and 0402 parts need different pocket depths in the tray
+- Tolerance requirements for the transfer to land parts on pads accurately
+
 ## RAM Prototype - Fabrication (Phase 2 Step 5)
 
 - [ ] Order PCBs + solder paste stencil
