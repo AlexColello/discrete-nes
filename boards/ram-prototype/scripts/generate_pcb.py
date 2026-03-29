@@ -78,6 +78,7 @@ CTRL_CELL_W = 5.5    # horizontal spacing for control logic (wider for routing)
 CTRL_CELL_H = 4.0    # vertical spacing for control logic (wider for routing)
 LED_OFFSET_X = 1.5   # LED center offset from IC center (DFF@90° crtyd 1.0 + LED@90° crtyd 0.47 + 0.03 gap)
 R_OFFSET = 1.86      # LED-to-R center offset (mm) — 0402 courtyards touching (0.93+0.93)
+R_HORIZ_OFFSET = 1.3 # horizontal R offset from LED center (side-by-side, clearance for 3-seg trace between)
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
@@ -250,11 +251,12 @@ def sort_components_for_placement(components):
 # --------------------------------------------------------------
 
 def compute_group_layout(ic_cells, standalone, max_cols=4,
-                         cell_w=None, cell_h=None):
+                         cell_w=None, cell_h=None, r_beside_led=True):
     """Compute relative positions for components within a group.
 
     Returns list of (component, rel_x, rel_y) for all components.
-    Each IC cell is laid out as: IC at (0,0), LED at (+1.8, 0), R at (+3.5, 0)
+    r_beside_led=True:  IC → LED → R (side by side, non-byte groups)
+    r_beside_led=False: IC → LED, R below LED (stacked, byte groups)
     ICs are arranged in a grid with max_cols columns.
     """
     cw = cell_w if cell_w is not None else IC_CELL_W
@@ -272,7 +274,11 @@ def compute_group_layout(ic_cells, standalone, max_cols=4,
         if led:
             placements.append((led, x + LED_OFFSET_X, y))
         if r:
-            placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
+            if r_beside_led:
+                r_tagged = dict(r, angle_override=90)  # pad 1 at bottom, near LED cathode
+                placements.append((r_tagged, x + LED_OFFSET_X + R_HORIZ_OFFSET, y))
+            else:
+                placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
 
         col += 1
         if col >= max_cols:
@@ -335,7 +341,8 @@ def layout_byte_group(comps):
                         + [(None, None, None)] + list(reversed(buf_cells)))
 
     placements = compute_group_layout(ic_cells_ordered, standalone, max_cols=9,
-                                      cell_w=BYTE_CELL_W, cell_h=BYTE_CELL_H)
+                                      cell_w=BYTE_CELL_W, cell_h=BYTE_CELL_H,
+                                      r_beside_led=False)
 
     # Nudge NAND IC: +0.5mm right, +0.25mm down relative to bits
     # (moved left from +1.0 to open routing corridor to DFF column)
@@ -591,11 +598,14 @@ def preroute_power_vias(pcb, netlist_data):
 
 
 def preroute_led_to_resistor(pcb, netlist_data):
-    """Route LED cathode to R pad 1 on F.Cu (short straight trace).
+    """Route LED cathode to R pad 1 on F.Cu.
 
-    LED at 90° has cathode (pad 1) at y+0.485.  R at 270° below has
-    pad 1 at y+R_OFFSET-0.51.  Gap ~1mm — draw a vertical F.Cu trace.
-    Root connector LEDs at 180°/R at 0° get a horizontal trace instead.
+    Non-byte LEDs: LED@90° cathode at y+0.485, R@90° pad 1 at (x+R_HORIZ, y+0.51).
+    Side-by-side layout — nearly horizontal straight trace (0.025mm Y diff).
+    Byte LEDs (DFF/BUF): LED@90° cathode at y+0.485, R@270° pad 1 at y+R_OFFSET-0.51.
+    Stacked layout — straight vertical trace.
+    Root connector LEDs at 180°/R at 0° get a horizontal trace.
+    Rotated column_select: LED@180°/R@180° in vertical line — straight trace.
 
     Returns trace count.
     """
@@ -637,10 +647,35 @@ def preroute_led_to_resistor(pcb, netlist_data):
             continue
         processed.add(ref)
 
-        # Straight trace from LED cathode to R pad
-        pcb.add_trace(cathode_pos, r_pos, cathode_net,
-                      SIGNAL_TRACE_W, "F.Cu")
-        traces += 1
+        cx, cy = cathode_pos
+        rx, ry = r_pos
+
+        # Check if R is approximately aligned (same X = stacked, same Y = horizontal)
+        if abs(cx - rx) < 0.1:
+            # Stacked (byte groups): straight vertical trace
+            pcb.add_trace(cathode_pos, r_pos, cathode_net,
+                          SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+        elif abs(cy - ry) < 0.1:
+            # Horizontal (connector LEDs): straight horizontal trace
+            pcb.add_trace(cathode_pos, r_pos, cathode_net,
+                          SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+        else:
+            # Side-by-side (non-byte groups): 3-segment route via midpoint X
+            # Avoids passing through R's body/GND pad
+            mid_x = round((cx + rx) / 2, 2)
+            seg1_end = (mid_x, round(cy, 2))
+            seg2_end = (mid_x, round(ry, 2))
+            pcb.add_trace(cathode_pos, seg1_end, cathode_net,
+                          SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_trace(seg1_end, seg2_end, cathode_net,
+                          SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_trace(seg2_end, r_pos, cathode_net,
+                          SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
 
     return traces
 
@@ -1415,8 +1450,18 @@ def preroute_r_gnd(pcb, netlist_data):
 
         fp_angle = round(fp.position.angle or 0)
 
-        # Skip NAND Rs (horizontal at 180°) — routing left to autorouter
-        if fp_angle == 180:
+        # Skip NAND Rs: identified by having a NAND LED (at 0°) on the
+        # cathode net.  NAND R routing is left to the autorouter.
+        pad1_net = pcb.get_pad_net(ref, "1")
+        is_nand_r = False
+        if pad1_net is not None:
+            for other_fp in pcb.board.footprints:
+                oref = other_fp.properties.get("Reference", "")
+                if oref.startswith("D") and round(other_fp.position.angle or 0) == 0:
+                    if pcb.get_pad_net(oref, "1") == pad1_net:
+                        is_nand_r = True
+                        break
+        if is_nand_r:
             continue
 
         # Try to find a nearby DFF-BUF GND via for F.Cu Z-route
@@ -1462,9 +1507,13 @@ def preroute_r_gnd(pcb, netlist_data):
         # Fallback: via escape to B.Cu GND plane
         if not routed_fcu:
             if fp_angle == 270:
-                escape_angle = 0   # RIGHT
+                escape_angle = 0   # RIGHT (pad 2 at bottom)
+            elif fp_angle == 90:
+                escape_angle = 270  # UP (pad 2 at top, into inter-row gap)
             elif fp_angle == 0:
-                escape_angle = 90  # DOWN
+                escape_angle = 90  # DOWN (pad 2 at right)
+            elif fp_angle == 180:
+                escape_angle = 180  # LEFT (pad 2 at left, into inter-cell gap)
             else:
                 escape_angle = 0
 
@@ -2619,6 +2668,33 @@ def main():
     _rc_stride = _byte_row_h_est + GROUP_GAP_Y  # 7.0mm — matches byte row stride
     _addr_dec_final_ys = None  # set during addr_decoder layout
 
+    def _place_col(cells, col_x, total_h, cell_h, placements, ys=None):
+        """Place cells vertically in a column, centered within total_h."""
+        n = len(cells)
+        if ys is not None:
+            for i, (ic, r, led) in enumerate(cells):
+                x, y = col_x, ys[i]
+                if ic is not None:
+                    placements.append((ic, x, y))
+                if led:
+                    placements.append((led, x + LED_OFFSET_X, y))
+                if r:
+                    r_tagged = dict(r, angle_override=90)
+                    placements.append((r_tagged, x + LED_OFFSET_X + R_HORIZ_OFFSET, y))
+        else:
+            span = (n - 1) * cell_h
+            start = round((total_h - span) / 2, 2)
+            for i, (ic, r, led) in enumerate(cells):
+                x = col_x
+                y = round(start + i * cell_h, 2)
+                if ic is not None:
+                    placements.append((ic, x, y))
+                if led:
+                    placements.append((led, x + LED_OFFSET_X, y))
+                if r:
+                    r_tagged = dict(r, angle_override=90)
+                    placements.append((r_tagged, x + LED_OFFSET_X + R_HORIZ_OFFSET, y))
+
     for name, comps in groups.items():
         # Determine max columns and cell dimensions based on group type
         is_ram = name.startswith("byte")
@@ -2685,30 +2761,6 @@ def main():
             _addr_dec_final_ys = [round(final_start + i * _rc_stride, 2)
                                   for i in range(4)]
 
-            def _place_col(cells, col_x, total_h, cell_h, placements, ys=None):
-                n = len(cells)
-                if ys is not None:
-                    for i, (ic, r, led) in enumerate(cells):
-                        x, y = col_x, ys[i]
-                        if ic is not None:
-                            placements.append((ic, x, y))
-                        if led:
-                            placements.append((led, x + LED_OFFSET_X, y))
-                        if r:
-                            placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
-                else:
-                    span = (n - 1) * cell_h
-                    start = round((total_h - span) / 2, 2)
-                    for i, (ic, r, led) in enumerate(cells):
-                        x = col_x
-                        y = round(start + i * cell_h, 2)
-                        if ic is not None:
-                            placements.append((ic, x, y))
-                        if led:
-                            placements.append((led, x + LED_OFFSET_X, y))
-                        if r:
-                            placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
-
             placements = []
             _place_col(inv_cells,            0 * col_sp, total_h, cell_h, placements)
             _place_col(g_cells + hahb_cells, 1 * col_sp, total_h, cell_h, placements)
@@ -2719,62 +2771,48 @@ def main():
 
             group_cell_dims[name] = (col_sp, cell_h)
 
-        # Custom column_select layout: horizontal rows, bottom-to-top decode
-        # Row 0 LEDs (top):    16 LEDs above level-2 ANDs (output indicators)
-        # Row 0 (y=led_row_h): 16 Level-2 ANDs (COL_SEL_0-15 outputs)
-        # Row 1:                8 Level-1 ANDs (GA0-3, GB0-3 intermediates), inline LEDs
-        # Row 2:                4 INVs (address inverters), inline LEDs
+        # Custom column_select layout: vertical columns, left-to-right decode
+        # Col 0: 4 INVs (address inverters), inline LED+R
+        # Col 1: 8 Level-1 ANDs (GA0-3, GB0-3 intermediates), inline LED+R
+        # Col 2: 16 Level-2 ANDs (COL_SEL_0-15 outputs), inline LED+R
         elif name == "column_select":
             inv_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] == "74LVC1G04"]
             and_cells = [c for c in ic_cells if c[0] is not None and c[0]["part"] != "74LVC1G04"]
             level1_ands = and_cells[:8]   # GA0-3, GB0-3
             level2_ands = and_cells[8:]   # COL_SEL_0-15
 
-            col_w = IC_CELL_W     # 5.0mm horizontal spacing
-            row_h = CTRL_CELL_H   # 4.0mm vertical spacing between IC rows
-            led_row_h = 4.5       # space for LED+R above level-2 ANDs (R courtyard bottom at 2.93, IC top at 3.57)
-            top_count = len(level2_ands)  # 16
+            cell_h = CTRL_CELL_H   # 4.0mm vertical spacing within columns
+            col_sp = 7.5           # horizontal spacing between columns
+
+            # Level-2 column (tallest, 16 cells) determines total height
+            l2_span = (len(level2_ands) - 1) * cell_h
+            total_h = l2_span
 
             placements = []
+            _place_col(inv_cells,    0 * col_sp, total_h, cell_h, placements)
+            _place_col(level1_ands,  1 * col_sp, total_h, cell_h, placements)
+            _place_col(level2_ands,  2 * col_sp, total_h, cell_h, placements)
 
-            # LED row (top, y=0): 16 output indicator LEDs above level-2 ANDs
-            # Row 0 (y=led_row_h): 16 level-2 ANDs
-            for i, (ic, r, led) in enumerate(level2_ands):
-                x = round(i * col_w, 2)
-                ic_y = led_row_h
-                if ic is not None:
-                    placements.append((ic, x, ic_y))
-                if led:
-                    placements.append((led, x, 0))
-                if r:
-                    placements.append((r, x, R_OFFSET))
+            # Rotate entire group 90° CW: (x, y) → (y, max_x - x)
+            # Puts L2 outputs (rightmost col) at top (closest to RAM)
+            # and INV inputs (leftmost col) at bottom
+            _DEFAULT_ANGLES = {
+                "LED_Small": 90, "R_Small": 270, "74LVC1G04": 180,
+                "74LVC1G08": 180,
+            }
+            max_x_cs = max(x for _, x, _ in placements)
+            rotated = []
+            for comp, x, y in placements:
+                new_x = round(y, 2)
+                new_y = round(max_x_cs - x, 2)
+                comp_r = dict(comp)
+                cur = comp_r.get("angle_override",
+                                _DEFAULT_ANGLES.get(comp_r.get("part", ""), 0))
+                comp_r["angle_override"] = (cur + 90) % 360
+                rotated.append((comp_r, new_x, new_y))
+            placements = rotated
 
-            # Row 1 (y=led_row_h + row_h): 8 level-1 ANDs, centered, inline LEDs
-            l1_offset = round((top_count - len(level1_ands)) * col_w / 2, 2)
-            for i, (ic, r, led) in enumerate(level1_ands):
-                x = round(l1_offset + i * col_w, 2)
-                y = round(led_row_h + row_h, 2)
-                if ic is not None:
-                    placements.append((ic, x, y))
-                if led:
-                    placements.append((led, x + LED_OFFSET_X, y))
-                if r:
-                    placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
-
-            # Row 2 (y=led_row_h + 2*row_h): 4 INVs, centered, inline LEDs
-            inv_offset = round((top_count - len(inv_cells)) * col_w / 2, 2)
-            for i, (ic, r, led) in enumerate(inv_cells):
-                x = round(inv_offset + i * col_w, 2)
-                y = round(led_row_h + 2 * row_h, 2)
-                if ic is not None:
-                    placements.append((ic, x, y))
-                if led:
-                    placements.append((led, x + LED_OFFSET_X, y))
-                if r:
-                    placements.append((r, x + LED_OFFSET_X, y + R_OFFSET))
-
-            # Override cell dims for group size computation
-            group_cell_dims[name] = (col_w, row_h)
+            group_cell_dims[name] = (cell_h, col_sp)  # swapped after rotation
 
         else:
             placements = compute_group_layout(ic_cells, standalone, max_cols,
@@ -3055,10 +3093,8 @@ def main():
     colsel_y = round(ram_y + ram_total_h + GROUP_GAP_Y * 3 + 20.0, 2)
     if "column_select" in group_layouts:
         for comp, rel_x, rel_y in group_layouts["column_select"]:
-            # Column select ICs at 90° for bottom-to-top signal flow
-            override = 90 if comp["ref"].startswith("U") else None
             _place_component(pcb, comp, colsel_x + rel_x, colsel_y + rel_y,
-                             netlist_data, angle_override=override)
+                             netlist_data)
             total_placed += 1
 
     # Place extra connectors (J2 DEC3 unused, J3 COL_SEL unused, J4 DEC4 unused)
