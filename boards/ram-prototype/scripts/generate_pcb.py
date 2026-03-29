@@ -2243,6 +2243,141 @@ def preroute_column_dbus(pcb, netlist_data):
     return traces
 
 
+def preroute_dbus_fanout(pcb, netlist_data):
+    """Route D0-D7 data bus fanout below the byte grid.
+
+    Extends the column trunks (In1.Cu) down to vias, then routes a
+    single set of 8 horizontal F.Cu traces across both byte columns.
+
+    For each data bit:
+      1. In each column, extend the In1.Cu trunk DOWN to a via
+      2. Via transitions from In1.Cu to F.Cu
+      3. F.Cu horizontal trace connects col0 and col1 vias
+      4. F.Cu trace extends LEFT past col0 for autorouter pickup
+
+    The vertical In1.Cu extensions are at different X positions within
+    each column, so they cannot cross each other.  The horizontal F.Cu
+    traces are at different Y levels (one per bit), so they cannot
+    cross each other either.
+
+    Returns (via_count, trace_count).
+    """
+    ref_to_part = _build_ref_to_part(netlist_data)
+    net_to_pads = _build_net_pad_index(pcb)
+    vias = 0
+    traces = 0
+
+    # Bus lane parameters
+    # Via pad to adjacent trace: VIA_SIZE/2 + TRACE_W/2 + PCBWay clearance = 0.25+0.10+0.254 = 0.604
+    DBUS_LANE_SPACING = 0.61  # mm between adjacent lanes (PCBWay via-to-track clean)
+    # Gap must clear enable bus traces: READ_EN at byte_y+3.55, trunk vias at ~byte_y+0.75
+    # Need 3.55 - 0.75 + VIA_radius(0.25) + clearance(0.15) = 3.20mm minimum
+    BUS_GAP_FROM_BYTES = 4.0  # mm gap from lowest trunk bottom to first bus lane
+    BUS_LEFT_PAD = 3.0        # mm left of col0's leftmost trunk for F.Cu extension
+
+    # Find D* nets: nets connecting both a DFF pin 1 and a BUF pin 4
+    dbus_nets = set()
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if ref_to_part.get(ref) != "74LVC1G79":
+            continue
+        d_net = pcb.get_pad_net(ref, "1")
+        if not d_net or d_net == 0:
+            continue
+        pads_on_net = net_to_pads.get(d_net, [])
+        if any(ref_to_part.get(pr) == "74LVC1G125" and pn == "4"
+               for pr, pn, *_ in pads_on_net if pr.startswith("U")):
+            dbus_nets.add(d_net)
+
+    # For each D* net, collect trunk positions grouped by column.
+    # Trunk X = dff_pin1_x + 0.55 (same as preroute_column_dbus).
+    # Bottom of trunk = max via_y in that column.
+    all_trunk_xs = []
+    net_trunk_info = {}  # net_num -> [(trunk_x, bottom_via_y), ...]
+
+    for net_num in sorted(dbus_nets):
+        pads_on_net = net_to_pads.get(net_num, [])
+        trunk_groups = defaultdict(list)  # trunk_x -> [via_y, ...]
+
+        for pad_ref, pad_num, px, py, _pnet in pads_on_net:
+            if (pad_ref.startswith("U") and pad_num == "1"
+                    and ref_to_part.get(pad_ref) == "74LVC1G79"):
+                trunk_x = round(px + 0.55, 2)
+                via_y = round(py + 0.50, 2)
+                trunk_groups[trunk_x].append(via_y)
+
+        trunks = []
+        for tx, ys in trunk_groups.items():
+            trunks.append((tx, max(ys)))
+            all_trunk_xs.append(tx)
+
+        if trunks:
+            net_trunk_info[net_num] = trunks
+
+    if not all_trunk_xs:
+        return 0, 0
+
+    # Split trunks into byte columns at the midpoint of all trunk Xs
+    all_trunk_xs.sort()
+    col_boundary_x = (all_trunk_xs[0] + all_trunk_xs[-1]) / 2
+
+    # Build per-net column map: net_num -> {0: (trunk_x, bottom_y), 1: ...}
+    net_cols = {}  # net_num -> {col_idx: (trunk_x, bottom_y)}
+    for net_num, trunks in net_trunk_info.items():
+        cols = {}
+        for tx, bottom_y in trunks:
+            col_idx = 0 if tx < col_boundary_x else 1
+            cols[col_idx] = (tx, bottom_y)
+        net_cols[net_num] = cols
+
+    # Bus corridor Y: below ALL trunk bottoms across both columns
+    all_bottom_ys = [by for trunks in net_trunk_info.values()
+                     for _, by in trunks]
+    bus_top_y = round(max(all_bottom_ys) + BUS_GAP_FROM_BYTES, 2)
+
+    # Sort nets by col0 trunk_x for consistent lane ordering
+    sorted_nets = sorted(
+        net_cols.keys(),
+        key=lambda n: net_cols[n].get(0, (999, 0))[0])
+
+    # Leftmost trunk X across all col0 entries (for F.Cu left extension)
+    col0_min_tx = min(
+        net_cols[n][0][0] for n in sorted_nets if 0 in net_cols[n])
+    left_x = round(col0_min_tx - BUS_LEFT_PAD, 2)
+
+    for lane_idx, net_num in enumerate(sorted_nets):
+        cols = net_cols[net_num]
+        lane_y = round(bus_top_y + lane_idx * DBUS_LANE_SPACING, 2)
+
+        via_positions = []  # (via_x, via_y) on F.Cu for horizontal trace
+
+        # For each column: extend trunk on In1.Cu, place via to F.Cu
+        for col_idx in sorted(cols.keys()):
+            trunk_x, bottom_y = cols[col_idx]
+
+            # Vertical In1.Cu: extend trunk down to lane Y
+            pcb.add_trace((trunk_x, bottom_y), (trunk_x, lane_y),
+                          net_num, SIGNAL_TRACE_W, "In1.Cu")
+            traces += 1
+
+            # Via: In1.Cu → F.Cu at the trunk bottom extension
+            pcb.add_via((trunk_x, lane_y), net_num,
+                        VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
+            vias += 1
+
+            via_positions.append(trunk_x)
+
+        # F.Cu horizontal trace connecting all vias + left extension
+        via_positions.sort()
+        all_x = [left_x] + via_positions
+        for i in range(len(all_x) - 1):
+            pcb.add_trace((all_x[i], lane_y), (all_x[i + 1], lane_y),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+    return vias, traces
+
+
 # --------------------------------------------------------------
 # Layer visibility test grid (for clear PCB fabrication)
 # --------------------------------------------------------------
@@ -3030,13 +3165,18 @@ def main():
     dbus_traces = preroute_column_dbus(pcb, netlist_data)
     print(f"  D* column trunks (In1.Cu): {dbus_traces} trace segments")
 
+    # D* data bus fanout below byte grid (connects columns + extends left)
+    dbus_fan_vias, dbus_fan_traces = preroute_dbus_fanout(pcb, netlist_data)
+    print(f"  D* bus fanout (In1.Cu): {dbus_fan_vias} vias, {dbus_fan_traces} traces")
+
     total_vias = (pwr_vias + cs_vias + nand_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
-                  + r_gnd_vias)
+                  + r_gnd_vias + dbus_fan_vias)
     total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
                     + oe_traces + nand_traces + dff_buf_gnd_traces
                     + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
-                    + colsel_traces + cs_traces + conn_traces + dbus_traces)
+                    + colsel_traces + cs_traces + conn_traces + dbus_traces
+                    + dbus_fan_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
     # Layer visibility test grid (for clear PCB) — right of RAM
