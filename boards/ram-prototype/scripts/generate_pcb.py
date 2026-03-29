@@ -2887,7 +2887,7 @@ def main():
             j2_x = round(ram_x + dec4_span + 5.0, 2)
             j2_y = round(ram_y - GROUP_GAP_Y * 3 - 9.0, 2)  # same Y as DEC4
             _place_component(pcb, comp, j2_x, j2_y, netlist_data,
-                             angle_override=90)
+                             angle_override=90, layer_override="F.Cu")
             total_placed += 1
             pcb.add_silkscreen_text("DEC3", round(j2_x + pin_span / 2, 2),
                                     round(j2_y - 3.0, 2), size=1.0)
@@ -2897,7 +2897,7 @@ def main():
             j3_x = round(test_x, 2)
             j3_y = round(test_y + test_grid_h_est + GROUP_GAP_Y * 3 + 3.0, 2)
             _place_component(pcb, comp, j3_x, j3_y, netlist_data,
-                             angle_override=90)
+                             angle_override=90, layer_override="F.Cu")
             total_placed += 1
             pcb.add_silkscreen_text("COL_SEL", round(j3_x + pin_span / 2, 2),
                                     round(j3_y - 3.0, 2), size=1.0)
@@ -2906,7 +2906,7 @@ def main():
             j4_x = round(ram_x, 2)
             j4_y = round(ram_y - GROUP_GAP_Y * 3 - 9.0, 2)
             _place_component(pcb, comp, j4_x, j4_y, netlist_data,
-                             angle_override=90)
+                             angle_override=90, layer_override="F.Cu")
             total_placed += 1
             pcb.add_silkscreen_text("DEC4", round(j4_x + pin_span / 2, 2),
                                     round(j4_y - 3.0, 2), size=1.0)
@@ -3127,11 +3127,13 @@ def main():
     return 0
 
 
-def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
+def _place_component(pcb, comp, x, y, netlist_data, angle_override=None,
+                     layer_override=None):
     """Place a single component on the PCB.
 
     Determines the correct footprint from the part name and assigns nets.
     angle_override: if not None, overrides the default angle for this part type.
+    layer_override: if not None, overrides the default layer for this part type.
     """
     ref = comp["ref"]
     part = comp["part"]
@@ -3157,9 +3159,12 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
             net_map[pin_num] = net_name
 
     # Determine layer (independent of angle)
-    layer = "F.Cu"
-    if part.startswith("Conn_01x"):
-        layer = "B.Cu"  # Soldered on back side
+    if layer_override is not None:
+        layer = layer_override
+    elif part.startswith("Conn_01x"):
+        layer = "B.Cu"  # Default: soldered on back side
+    else:
+        layer = "F.Cu"
 
     # Determine rotation
     if angle_override is not None:
@@ -3193,6 +3198,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
     )
 
     # Connector on B.Cu: keep silkscreen on F.SilkS (visible from front)
+    # and fix 3D model rotation (B.Cu mirror causes 180° visual flip)
     if part.startswith("Conn_01x") and layer == "B.Cu":
         fp = pcb.board.footprints[-1]  # just placed
         for gi in fp.graphicItems:
@@ -3202,6 +3208,8 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None):
                 gi.layer = "F.Fab"
             if hasattr(gi, 'layer') and gi.layer == "B.CrtYd":
                 gi.layer = "F.CrtYd"
+        for model in fp.models:
+            model.rotate.Z = (model.rotate.Z + 180) % 360
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@
 ### Footprint rework
 - [x] **Create custom DSBGA footprints** — done: removed silkscreen pin-1 triangle, reduced courtyard to 0.3mm offset from chip outline (DSBGA-5: ±0.75×±1.0, DSBGA-6: ±0.8×±1.0, DSBGA-8: ±0.8×±1.3)
 
-- [ ] **Pin connector 3D models rotated 180°** — all pin header connectors (J1-J4) have their 3D model rotated 180° around the square pad in the 3D viewer. Need to fix the model rotation in the footprint or placement
+- [x] **Pin connector 3D models rotated 180°** — fixed: added 180° Z rotation to 3D model for B.Cu connectors in `_place_component()` to compensate for B.Cu mirror
 - [ ] **Add 3D models for DSBGA-5 and DSBGA-6 footprints** — custom footprints currently lack 3D models for KiCad 3D viewer
 - [ ] **Investigate moving resistors to front of board** — currently on B.Cu for space reasons, but this makes assembly and rework harder. Explore using a smaller resistor footprint (e.g., 0201) to fit R on F.Cu alongside the LED
 
