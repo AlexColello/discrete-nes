@@ -60,7 +60,8 @@
 
 ### Component selection
 - [ ] **Choose LED part numbers and colors** — select specific 0402 LED parts. Consider using different colors to visually distinguish gate types or functional purposes (e.g., address decoder vs data path vs control signals)
-- [ ] **Choose resistor values** — calculate and select appropriate current-limiting resistor values for each LED color at 3.3V (different Vf per color means different R values)
+- [ ] **Update LED resistor values from 750R to 1K** in generate scripts (generate_ram.py and shared kicad_gen code) to match 1.5mA target for full 2KB RAM power budget
+- [ ] **Choose resistor values per LED color** — different Vf per color means different R values to maintain consistent 1.5mA across colors
 
 ### Architecture improvement
 - [ ] **Simplify LED indicators** — investigate using a symbol, sub-sheet, or other encapsulation method to hold the LED+resistor chain so that LEDs don't have to be drawn inline in every gate logic sheet. Would significantly reduce schematic clutter and simplify the generate scripts

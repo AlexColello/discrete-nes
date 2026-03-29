@@ -75,6 +75,7 @@ discrete-nes/
 │   └── interconnect/       # Board interconnections (future)
 ├── tools/
 │   └── freerouting/        # FreeRouting JAR (auto-downloaded by route_pcb.py)
+├── todo.md                 # Project-wide TODO list — check here for pending work
 ├── .claude/
 │   ├── hooks/
 │   │   └── auto-verify.sh  # PostToolUse hook: auto-runs verify after generate
@@ -584,28 +585,30 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 
 **PCB:** 4-layer, 233 x 95 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
 
-**Power Budget (RAM Prototype):**
+**LED Current & Resistors:**
 
-- 191 LEDs x 2mA = 0.38A at 3.3V = 1.26W for LEDs
+- **1.5mA per LED with 1K resistors** (changed from 2mA / 750R — see below)
 - Logic power negligible (SN74LVC1G ~10uA per IC)
-- Manageable power budget at this scale
+
+**Power Budget (RAM Prototype, 8-byte):**
+
+- 191 LEDs × 1.5mA = 0.29A at 3.3V = 0.94W for LEDs
 
 ## Full System Power Requirements
 
-**Plan power distribution from the start:**
+**Each major board gets its own ATX 8-pin PCIe connector (150W at 12V) with on-board 12V→3.3V buck converter.**
 
-- **RAM board (8-byte):** ~0.38A at 3.3V
-- **RAM board (64-byte, future):** ~1.5A at 3.3V
-- **CPU board:** ~6A at 3.3V (5000+ LEDs)
-- **PPU board:** ~4A at 3.3V (3000+ LEDs)
-- **Total system estimate:** 12A+ at 3.3V = ~40W for LEDs
+- **RAM board (2KB, full NES):** ~21,000 LEDs × 1.5mA = ~31.5A at 3.3V = ~104W → ~116W at 12V (90% converter) → fits single 8-pin PCIe (150W)
+- **CPU board:** ~6A at 3.3V (5000+ LEDs) — separate 8-pin connector
+- **PPU board:** ~4A at 3.3V (3000+ LEDs) — separate 8-pin connector
+
+**Why 1.5mA / 1K resistors:** Full 2KB RAM has ~21,000 LEDs. At 2mA = 42A = ~139W, exceeding a single 8-pin PCIe connector. At 1.5mA = 31.5A = ~104W with 23% headroom. Worst case is all bits = 1 (all storage LEDs on).
 
 **Design implications:**
 
 - 3.3V supply (lower than 5V, but LVC works great at 3.3V)
-- Distributed regulation across boards
+- ATX 8-pin PCIe connector per board with on-board 12V→3.3V synchronous buck converter
 - Adequate power traces for SMD board
-- Multiple connector pins dedicated to power
 - DO NOT use LED multiplexing (defeats visibility purpose)
 
 ## Implementation Plan - Phase by Phase
