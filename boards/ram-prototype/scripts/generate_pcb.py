@@ -568,6 +568,17 @@ def preroute_power_vias(pcb, netlist_data):
                     else:
                         escape_angle = 135  # down-left
                         escape_dist = VIA_OFFSET
+                elif fp_angle == 270:
+                    # Rotated column_select: same geometry as 180°
+                    # rotated 90° CW.  IC→LED goes LEFT then UP.
+                    # GND pad left-above → escape 300° UP-RIGHT, d=0.55
+                    # VCC pad right-below → default diagonal (45°)
+                    if net_name == "GND":
+                        escape_angle = 300  # up-right
+                        escape_dist = 0.55
+                    else:
+                        escape_angle = 45   # down-right (default)
+                        escape_dist = VIA_OFFSET
                 else:
                     # Other angles: diagonal away from center, 45° grid
                     escape_dist = VIA_OFFSET
@@ -715,8 +726,14 @@ def preroute_ic_to_led(pcb, netlist_data):
       Route: UP 0.45mm from pin 4 (clears GND pad with JLCPCB margin),
       then RIGHT to LED X, then DOWN to LED anode Y.
 
-    Only routes ICs where LED anode is to the RIGHT of output pin.
-    Skips: col_select row 0 (LED above), BUF@180°, DSBGA-8, DSBGA-6.
+    AND/INV@270° (rotated column_select):
+      Pin 4 (output) at rel (-0.50, +0.25) — left, slightly below.
+      Pin 3 (GND) at rel (-0.50, -0.25) — left, slightly above, SAME X.
+      LED anode ~1.75mm ABOVE.
+      Route: LEFT 0.45mm from pin 4 (clears GND pad at same X),
+      then UP to LED Y, then RIGHT to LED anode X.
+
+    Skips: col_select row 0 (LED above at 90°), BUF, DSBGA-8, DSBGA-6.
 
     Returns number of trace segments added.
     """
@@ -738,8 +755,8 @@ def preroute_ic_to_led(pcb, netlist_data):
 
         fp_angle = round(fp.position.angle or 0)
 
-        # Only handle 90° and 180° ICs
-        if fp_angle not in (90, 180):
+        # Only handle 90°, 180°, and 270° ICs
+        if fp_angle not in (90, 180, 270):
             continue
 
         out_pin = "4"
@@ -768,13 +785,12 @@ def preroute_ic_to_led(pcb, netlist_data):
         out_pos = pcb.get_pad_position(ref, out_pin)
         led_anode_pos = pcb.get_pad_position(led_ref, led_pad_num)
 
-        # Only route if LED anode is to the RIGHT of output pin.
-        # Skips col_select row 0 (LED directly above IC, vertical path
-        # would cross R pads and LED cathode).
-        if led_anode_pos[0] <= out_pos[0]:
-            continue
-
         if fp_angle == 90:
+            # Only route if LED anode is to the RIGHT of output pin.
+            # Skips col_select row 0 at 90° (LED directly above IC).
+            if led_anode_pos[0] <= out_pos[0]:
+                continue
+
             # L-trace: horizontal RIGHT then vertical to LED anode
             mid_x = round(led_anode_pos[0], 2)
             mid_y = round(out_pos[1], 2)
@@ -809,6 +825,32 @@ def preroute_ic_to_led(pcb, netlist_data):
             # Seg 3: vertical DOWN to LED anode
             if abs(up_y - led_y) > 0.01:
                 pcb.add_trace((led_x, up_y), led_anode_pos,
+                               ic_out_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+
+        elif fp_angle == 270:
+            # Rotated column_select: output and GND share same X.
+            # LED anode is ABOVE (negative Y).
+            # 3-segment: LEFT 0.45mm from pin 4 (clears GND pad at
+            # same X), then UP to LED Y, then RIGHT to LED anode X.
+            left_x = round(out_pos[0] - 0.45, 2)
+            led_x = round(led_anode_pos[0], 2)
+            led_y = round(led_anode_pos[1], 2)
+
+            # Seg 1: horizontal LEFT from pin 4
+            if abs(out_pos[0] - left_x) > 0.01:
+                pcb.add_trace(out_pos, (left_x, round(out_pos[1], 2)),
+                               ic_out_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+            # Seg 2: vertical UP to LED Y
+            if abs(out_pos[1] - led_y) > 0.01:
+                pcb.add_trace((left_x, round(out_pos[1], 2)),
+                               (left_x, led_y),
+                               ic_out_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+            # Seg 3: horizontal RIGHT to LED anode
+            if abs(left_x - led_x) > 0.01:
+                pcb.add_trace((left_x, led_y), led_anode_pos,
                                ic_out_net, SIGNAL_TRACE_W, "F.Cu")
                 traces += 1
 
@@ -1535,7 +1577,7 @@ def preroute_r_gnd(pcb, netlist_data):
             if fp_angle == 270:
                 escape_angle = 0   # RIGHT (pad 2 at bottom)
             elif fp_angle == 90:
-                escape_angle = 270  # UP (pad 2 at top, into inter-row gap)
+                escape_angle = 0    # RIGHT (pad 2 at top, escape rightward)
             elif fp_angle == 0:
                 escape_angle = 90  # DOWN (pad 2 at right)
             elif fp_angle == 180:
