@@ -82,7 +82,7 @@ R_HORIZ_OFFSET = 1.3 # horizontal R offset from LED center (side-by-side, cleara
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
-GROUP_GAP_Y = 0.5    # vertical gap between byte rows
+GROUP_GAP_Y = 0.75   # vertical gap between byte rows (enable buses span 5.2mm, need clearance)
 CTRL_GROUP_GAP_X = 4.0  # horizontal gap between control logic groups
 BYTE_COL_GAP = 1.0   # horizontal gap between the two byte columns (physical gap)
 CTRL_ROW_GAP = 7.5   # vertical gap between RAM area and control logic row
@@ -310,7 +310,7 @@ def layout_byte_group(comps):
     """Compute relative placements for a byte group.
 
     Handles NAND + 8 DFF + 8 BUF + LEDs + Rs with the standard byte layout:
-    row 0 = NAND + 8 DFFs (MSB left), row 1 = spacer + 8 BUFs, NAND LEDs below.
+    row 0 = NAND + 8 DFFs (MSB left), row 1 = spacer + 8 BUFs, NAND LEDs side by side below.
 
     Args:
         comps: list of component dicts from group_components()
@@ -360,23 +360,28 @@ def layout_byte_group(comps):
         for comp, rx, ry in placements
     ]
 
-    # Place NAND LEDs: Rs and LEDs in separate rows below NAND IC.
+    # Place NAND LEDs side by side (same Y), centered under NAND IC.
     # NAND IC courtyard bottom = -0.25 + 1.3 = 1.05mm.
-    # R/LED 0402@0/180 courtyard Y extent = ±0.475mm.
-    # R placed above LED within each pair to clear NAND courtyard.
+    # R/LED 0402@0/180 courtyard: ±0.93mm X, ±0.475mm Y.
+    # LEDs in one row below NAND, Rs in a row below LEDs.
+    # Left pair mirrored so R GND pads (pad 2) face inward toward each other.
     nand_led_pairs = list(reversed(nand_led_pairs))
-    r_col_x = -1.0       # R column X (clear of NAND crtyd X=[0.2,1.8])
-    led_col_x = 1.0      # LED column X (under NAND center)
-    nand_led_y0 = 1.55   # first row Y — LED top (1.55-0.475=1.075) clears NAND bottom (1.05)
-    led_spacing_y = 1.25  # vertical spacing between pairs (was 1.5)
+    nand_center_x = NAND_X_NUDGE   # 0.5 — match NAND IC X offset
+    led_spacing_x = 1.86            # 0402 courtyard touching (0.93+0.93)
+    nand_led_y = 1.55               # LED row Y — top (1.075) clears NAND bottom (1.05)
+    nand_r_y = 2.55                 # R row Y — top (2.075) clears LED bottom (2.025)
     for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
-        row_y = round(nand_led_y0 + i * led_spacing_y, 2)
+        col_x = round(nand_center_x + (i - 0.5) * led_spacing_x, 2)
+        # i=0 (left): R@0°/LED@180° — GND(pad2) faces RIGHT (inward)
+        # i=1 (right): R@180°/LED@0° — GND(pad2) faces LEFT (inward)
+        r_angle = 0 if i == 0 else 180
+        led_angle = 180 if i == 0 else 0
         if r_comp:
-            r_tagged = dict(r_comp, angle_override=180)   # horizontal, pad 1 RIGHT
-            placements.append((r_tagged, r_col_x, row_y))
+            r_tagged = dict(r_comp, angle_override=r_angle)
+            placements.append((r_tagged, col_x, nand_r_y))
         if led_comp:
-            led_tagged = dict(led_comp, angle_override=0)  # horizontal, pad 1 LEFT
-            placements.append((led_tagged, led_col_x, row_y))
+            led_tagged = dict(led_comp, angle_override=led_angle)
+            placements.append((led_tagged, col_x, nand_led_y))
 
     return placements
 
@@ -614,15 +619,28 @@ def preroute_led_to_resistor(pcb, netlist_data):
     traces = 0
     processed = set()
 
+    # Build set of NAND LED refs — handled by preroute_nand_leds instead
+    nand_led_refs = set()
+    for fp2 in pcb.board.footprints:
+        ref2 = fp2.properties.get("Reference", "")
+        if ref2.startswith("U") and ref_to_part.get(ref2) == "74LVC2G00":
+            for out_pin in ["7", "3"]:
+                out_net = pcb.get_pad_net(ref2, out_pin)
+                if out_net:
+                    for pr, pn, px, py, pnet in net_to_pads.get(out_net, []):
+                        if pr.startswith("D"):
+                            nand_led_refs.add(pr)
+
     for fp in pcb.board.footprints:
         ref = fp.properties.get("Reference", "")
         if not ref.startswith("D") or ref in processed:
             continue
 
-        # Skip NAND LEDs (horizontal at 0°) — no prerouted LED-to-R trace
-        fp_angle = round(fp.position.angle or 0)
-        if fp_angle == 0:
+        # Skip NAND LEDs — routed with 45° traces by preroute_nand_leds
+        if ref in nand_led_refs:
             continue
+
+        fp_angle = round(fp.position.angle or 0)
 
         # Get LED cathode pad and net
         # LED pad 2 = anode (signal), pad 1 = cathode (to R)
@@ -1505,7 +1523,15 @@ def preroute_r_gnd(pcb, netlist_data):
                 fcu_routed += 1
 
         # Fallback: via escape to B.Cu GND plane
+        # Skip if a GND via already exists nearby (e.g., placed by preroute_nand_leds)
         if not routed_fcu:
+            has_nearby_via = any(
+                math.sqrt((gvx - pad2_pos[0])**2 + (gvy - pad2_pos[1])**2) < 1.5
+                for gvx, gvy in existing_gnd_vias
+            )
+            if has_nearby_via:
+                continue
+
             if fp_angle == 270:
                 escape_angle = 0   # RIGHT (pad 2 at bottom)
             elif fp_angle == 90:
@@ -1741,6 +1767,124 @@ def preroute_nand_connections(pcb, netlist_data):
                         VIA_SIZE, VIA_DRILL, ["F.Cu", "In2.Cu"],
                         remove_unused_layers=True)
             vias += 1
+
+    return vias, traces
+
+
+def preroute_nand_leds(pcb, netlist_data):
+    """Route NAND LED+R pairs and connect R GND pads together.
+
+    Each NAND (74LVC2G00) has two output LEDs placed side by side in a
+    mirrored layout:
+      Left pair (i=0):  LED@180°, R@0°
+      Right pair (i=1): LED@0°,   R@180°
+
+    This function:
+    1. Routes both pairs' LED cathode to R pad 1 with 45° traces
+       (vertical stub + 45° diagonal)
+    2. Places a shared GND via centered below the two R GND pads,
+       routes each R GND pad to it at 45°
+
+    Returns (via_count, trace_count).
+    """
+    ref_to_part = _build_ref_to_part(netlist_data)
+    net_to_pads = _build_net_pad_index(pcb)
+    gnd_net = pcb.get_net_number("GND")
+    vias = 0
+    traces = 0
+
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if not ref.startswith("U"):
+            continue
+        if ref_to_part.get(ref) != "74LVC2G00":
+            continue
+
+        # Find LED+R pairs on each NAND output net
+        r_gnd_pads = []  # (x, y) of R pad 2 (GND) for each pair
+
+        for out_pin in ["7", "3"]:
+            out_net = pcb.get_pad_net(ref, out_pin)
+            if not out_net:
+                continue
+
+            pads = net_to_pads.get(out_net, [])
+
+            # Find LED on this net
+            led_ref = None
+            led_dist = float("inf")
+            for pr, pn, px, py, pnet in pads:
+                if pr.startswith("D"):
+                    d = math.sqrt((px - fp.position.X)**2 +
+                                  (py - fp.position.Y)**2)
+                    if d < 10 and d < led_dist:
+                        led_dist = d
+                        led_ref = pr
+
+            if not led_ref:
+                continue
+
+            # Route LED cathode to R pad 1 with 45° trace
+            cathode_net = pcb.get_pad_net(led_ref, "1")
+            cathode_pos = pcb.get_pad_position(led_ref, "1")
+            if cathode_net is None or cathode_pos is None:
+                continue
+
+            # Find nearest R on cathode net
+            cathode_pads = net_to_pads.get(cathode_net, [])
+            r_pos = None
+            best_d = float("inf")
+            for pr, pn, px, py, pnet in cathode_pads:
+                if pr.startswith("R"):
+                    d = math.sqrt((px - cathode_pos[0])**2 +
+                                  (py - cathode_pos[1])**2)
+                    if d < 5 and d < best_d:
+                        best_d = d
+                        r_pos = (px, py)
+
+            if r_pos:
+                dx = abs(r_pos[0] - cathode_pos[0])
+                dy = abs(r_pos[1] - cathode_pos[1])
+                stub = abs(dy - dx)
+                if stub > 0.01:
+                    # Vertical stub from cathode, then 45° diagonal to R
+                    stub_y = round(cathode_pos[1] + stub, 2)
+                    pcb.add_trace(cathode_pos,
+                                  (round(cathode_pos[0], 2), stub_y),
+                                  cathode_net, SIGNAL_TRACE_W, "F.Cu")
+                    pcb.add_trace((round(cathode_pos[0], 2), stub_y),
+                                  r_pos,
+                                  cathode_net, SIGNAL_TRACE_W, "F.Cu")
+                    traces += 2
+                else:
+                    # Already 45° — single trace
+                    pcb.add_trace(cathode_pos, r_pos, cathode_net,
+                                  SIGNAL_TRACE_W, "F.Cu")
+                    traces += 1
+
+            # Collect R GND pad position for this pair
+            for pr, pn, px, py, pnet in cathode_pads:
+                if pr.startswith("R"):
+                    r_gnd_pos = pcb.get_pad_position(pr, "2")
+                    if r_gnd_pos:
+                        r_gnd_pads.append(r_gnd_pos)
+                    break
+
+        # Place a shared GND via centered between and below the two R GND pads,
+        # then route each R GND pad to it with 45° diagonal traces.
+        if len(r_gnd_pads) == 2 and gnd_net is not None:
+            via_x = round((r_gnd_pads[0][0] + r_gnd_pads[1][0]) / 2, 2)
+            # Y offset = X offset for 45° diagonals
+            dx = abs(r_gnd_pads[1][0] - r_gnd_pads[0][0]) / 2
+            via_y = round(max(r_gnd_pads[0][1], r_gnd_pads[1][1]) + dx, 2)
+            pcb.add_via((via_x, via_y), gnd_net,
+                        VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"],
+                        remove_unused_layers=True)
+            vias += 1
+            for gnd_pos in r_gnd_pads:
+                pcb.add_trace(gnd_pos, (via_x, via_y), gnd_net,
+                              SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
 
     return vias, traces
 
@@ -2662,10 +2806,10 @@ def main():
     extra_root_connectors = []  # J2, J3 — placed after main layout
 
     # Pre-compute row_ctrl stride to match byte row stride
-    # Byte layout Y span: NAND IC at -0.25 to NAND LED at 2.75 = 3.0mm
+    # Byte layout Y span: NAND IC at -0.25 to NAND R at 2.55 = 2.80mm
     # byte_row_h = Y_span + BYTE_CELL_H (from compute_group_size)
-    _byte_row_h_est = 3.0 + BYTE_CELL_H
-    _rc_stride = _byte_row_h_est + GROUP_GAP_Y  # 7.0mm — matches byte row stride
+    _byte_row_h_est = 2.80 + BYTE_CELL_H
+    _rc_stride = _byte_row_h_est + GROUP_GAP_Y  # matches byte row stride
     _addr_dec_final_ys = None  # set during addr_decoder layout
 
     def _place_col(cells, col_x, total_h, cell_h, placements, ys=None):
@@ -3035,7 +3179,7 @@ def main():
     # Byte content span including enable bus traces.
     # Enable buses extend beyond components: WRITE_EN above CLK bus, READ_EN below OE bus.
     # CLK bus at byte_y - 1.25, WRITE_EN at byte_y - 1.65 (offset from byte_min_y=-0.25: -1.40)
-    # OE bus at byte_y + 3.15, READ_EN at byte_y + 3.55 (offset from byte_max_y=2.80: +0.75)
+    # OE bus at byte_y + 3.15, READ_EN at byte_y + 3.55 (offset from byte_max_y=2.55: +1.0)
     WRITE_EN_BUS_REL_Y = -1.65   # relative to byte origin (CLK_BUS_Y_OFFSET + WRITE_EN_OFFSET)
     READ_EN_BUS_REL_Y = BUF_ROW_Y + 1.4 + 0.40  # OE_bus + READ_EN_OFFSET
 
@@ -3168,6 +3312,9 @@ def main():
     nand_vias, nand_traces = preroute_nand_connections(pcb, netlist_data)
     print(f"  NAND local: {nand_vias} vias, {nand_traces} traces")
 
+    nand_led_vias, nand_led_traces = preroute_nand_leds(pcb, netlist_data)
+    print(f"  NAND LEDs: {nand_led_vias} vias, {nand_led_traces} traces")
+
     colsel_traces = preroute_column_select(pcb, netlist_data)
     print(f"  Column select: {colsel_traces} traces")
 
@@ -3205,11 +3352,12 @@ def main():
     dbus_fan_vias, dbus_fan_traces = preroute_dbus_fanout(pcb, netlist_data)
     print(f"  D* bus fanout (In1.Cu): {dbus_fan_vias} vias, {dbus_fan_traces} traces")
 
-    total_vias = (pwr_vias + cs_vias + nand_vias
+    total_vias = (pwr_vias + cs_vias + nand_vias + nand_led_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
                   + r_gnd_vias + dbus_fan_vias)
     total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
-                    + oe_traces + nand_traces + dff_buf_gnd_traces
+                    + oe_traces + nand_traces + nand_led_traces
+                    + dff_buf_gnd_traces
                     + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces
                     + dbus_fan_traces)
