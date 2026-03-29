@@ -2571,6 +2571,104 @@ def preroute_dbus_fanout(pcb, netlist_data):
     return vias, traces
 
 
+def preroute_colsel_fanout(pcb, netlist_data):
+    """Extend COL_SEL In1.Cu trunks down below the D* bus and add vias.
+
+    The col_sel trunks (from preroute_col_sel_vias) connect the 4 bytes
+    in each column vertically on In1.Cu at trunk_x = byte_x - 1.05.
+    This function extends those trunks past the D* bus fanout area and
+    places an In1.Cu → F.Cu via at the bottom for autorouter pickup.
+
+    Returns (via_count, trace_count).
+    """
+    ref_to_part = _build_ref_to_part(netlist_data)
+    net_to_pads = _build_net_pad_index(pcb)
+    vias = 0
+    traces = 0
+
+    NAND_X_NUDGE = 0.5
+    TRUNK_X_OFFSET = -1.05
+    COLSEL_GAP_BELOW_DBUS = 2.0  # mm below last D* bus lane
+
+    # --- Compute D* bus bottom Y (same logic as preroute_dbus_fanout) ---
+    dbus_nets = set()
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if ref_to_part.get(ref) != "74LVC1G79":
+            continue
+        d_net = pcb.get_pad_net(ref, "1")
+        if not d_net or d_net == 0:
+            continue
+        pads_on_net = net_to_pads.get(d_net, [])
+        if any(ref_to_part.get(pr) == "74LVC1G125" and pn == "4"
+               for pr, pn, *_ in pads_on_net if pr.startswith("U")):
+            dbus_nets.add(d_net)
+
+    # Find trunk bottom Ys for D* bus computation
+    all_dbus_bottom_ys = []
+    for net_num in dbus_nets:
+        pads_on_net = net_to_pads.get(net_num, [])
+        for pad_ref, pad_num, px, py, _pnet in pads_on_net:
+            if (pad_ref.startswith("U") and pad_num == "1"
+                    and ref_to_part.get(pad_ref) == "74LVC1G79"):
+                via_y = round(py + 0.50, 2)
+                all_dbus_bottom_ys.append(via_y)
+
+    if not all_dbus_bottom_ys:
+        return 0, 0
+
+    DBUS_BUS_GAP = 4.0
+    DBUS_LANE_SPACING = 0.61
+    bus_top_y = round(max(all_dbus_bottom_ys) + DBUS_BUS_GAP, 2)
+    n_dbus_lanes = len(dbus_nets)
+    bus_bottom_y = round(bus_top_y + (n_dbus_lanes - 1) * DBUS_LANE_SPACING, 2)
+
+    colsel_via_y = round(bus_bottom_y + COLSEL_GAP_BELOW_DBUS, 2)
+
+    # --- Find COL_SEL trunk positions (same logic as preroute_col_sel_vias) ---
+    net_trunk_bottoms = {}  # net_num -> (trunk_x, max_y)
+
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if not ref.startswith("U"):
+            continue
+        if ref_to_part.get(ref) != "74LVC2G00":
+            continue
+
+        nand_x, nand_y = fp.position.X, fp.position.Y
+        byte_x = round(nand_x - NAND_X_NUDGE, 2)
+        byte_y = round(nand_y + 0.25, 2)
+
+        pin1_net = pcb.get_pad_net(ref, "1")
+        if not pin1_net:
+            continue
+
+        net = pin1_net
+        trunk_x = round(byte_x + TRUNK_X_OFFSET, 2)
+        # Trunk point Y from preroute_col_sel_vias: via5 at courtyard bottom
+        crtyd_bot_y = round(byte_y + 0.55, 2)
+
+        if net not in net_trunk_bottoms:
+            net_trunk_bottoms[net] = (trunk_x, crtyd_bot_y)
+        else:
+            prev_tx, prev_max_y = net_trunk_bottoms[net]
+            net_trunk_bottoms[net] = (prev_tx, max(prev_max_y, crtyd_bot_y))
+
+    # --- Extend each trunk down to colsel_via_y and place via ---
+    for net, (trunk_x, trunk_bottom_y) in net_trunk_bottoms.items():
+        # Vertical In1.Cu extension from trunk bottom to below D* bus
+        pcb.add_trace((trunk_x, trunk_bottom_y), (trunk_x, colsel_via_y),
+                      net, SIGNAL_TRACE_W, "In1.Cu")
+        traces += 1
+
+        # Via: In1.Cu → F.Cu at the terminus
+        pcb.add_via((trunk_x, colsel_via_y), net,
+                    VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
+        vias += 1
+
+    return vias, traces
+
+
 # --------------------------------------------------------------
 # Layer visibility test grid (for clear PCB fabrication)
 # --------------------------------------------------------------
@@ -3366,15 +3464,19 @@ def main():
     dbus_fan_vias, dbus_fan_traces = preroute_dbus_fanout(pcb, netlist_data)
     print(f"  D* bus fanout (In1.Cu): {dbus_fan_vias} vias, {dbus_fan_traces} traces")
 
+    # COL_SEL trunks extended below D* bus with termination vias
+    cs_fan_vias, cs_fan_traces = preroute_colsel_fanout(pcb, netlist_data)
+    print(f"  COL_SEL fanout: {cs_fan_vias} vias, {cs_fan_traces} traces")
+
     total_vias = (pwr_vias + cs_vias + nand_vias + nand_led_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
-                  + r_gnd_vias + dbus_fan_vias)
+                  + r_gnd_vias + dbus_fan_vias + cs_fan_vias)
     total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
                     + oe_traces + nand_traces + nand_led_traces
                     + dff_buf_gnd_traces
                     + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces
-                    + dbus_fan_traces)
+                    + dbus_fan_traces + cs_fan_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
     # Layer visibility test grid (for clear PCB) — centered above RAM
