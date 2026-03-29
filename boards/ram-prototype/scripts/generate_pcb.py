@@ -2712,11 +2712,18 @@ def main():
 
     # Compute total board content height
     total_content_h = max(dec_h + GROUP_GAP_Y * 3 + ctrl_h,
-                          ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h)
+                          ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h + 10.0)
 
-    # Col 0: connector centered with the full left edge of the board
+    # Col 0: connector bottom-justified with the board bottom edge.
+    # Pre-compute the bottom extent from known group positions.
+    COLSEL_BOTTOM_PAD = 10.0  # routing buffer below column_select
+    _colsel_bottom = ram_y + ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h + COLSEL_BOTTOM_PAD
+    board_bottom_y = max(
+        ctrl_abs_y + ctrl_h,                                          # control_logic
+        _colsel_bottom,                                               # column_select
+    )
     col0_x = PLACEMENT_ORIGIN
-    col0_y = col1_y + max(0, (total_content_h - root_h) / 2)
+    col0_y = round(board_bottom_y - root_h, 2)
 
     # Place connector (root) — connector bus LEDs horizontal (180°),
     # connector Rs horizontal (0°) for clean LED→R trace clearance
@@ -2743,11 +2750,12 @@ def main():
         21: "A4", 22: "A5", 23: "A6",
         24: "VCC",
     }
-    label_x = round(col0_x - 3.0, 2)
+    label_x = round(col0_x - 4.5, 2)
     n_conn_pins = max(conn_pin_names.keys())
     for pin_num, pin_name in conn_pin_names.items():
         label_y = round(col0_y + (n_conn_pins - 1 - pin_num) * CONN_PIN_PITCH, 2)
-        pcb.add_silkscreen_text(pin_name, label_x, label_y, size=1.0)
+        pcb.add_silkscreen_text(pin_name, label_x, label_y, size=1.0,
+                                justify="left")
 
     # Place addr_decoder (column 1, vertical decode-stage columns)
     if "addr_decoder" in group_layouts:
@@ -3032,6 +3040,10 @@ def main():
         # Extend board bounds for test grid (GrText, not footprints)
         comp_max_x = max(comp_max_x, test_x + test_grid_w)
         comp_max_y = max(comp_max_y, test_y + test_grid_h)
+
+        # Extend board bounds for connector pin name labels (right-justified,
+        # so text extends right from anchor; anchor is leftmost point)
+        comp_min_x = min(comp_min_x, label_x)
 
         # Add margin around component extents, ensuring the outline
         # stays within the sheet border (A4 landscape = 297x210mm,
