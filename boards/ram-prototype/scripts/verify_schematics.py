@@ -46,6 +46,7 @@ SCHEMATIC_FILES = [
     "control_logic.kicad_sch",
     "row_control.kicad_sch",
     "byte.kicad_sch",
+    "power_supply.kicad_sch",
 ]
 
 

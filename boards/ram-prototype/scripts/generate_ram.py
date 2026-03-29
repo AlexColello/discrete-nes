@@ -1034,6 +1034,305 @@ def generate_byte_sheet():
 
 
 # --------------------------------------------------------------
+# Power supply generator
+# --------------------------------------------------------------
+
+def generate_power_supply():
+    """
+    Power supply: 8-pin PCIe connector + TPS546D24A 40A buck converter.
+
+    12V from ATX PSU -> TPS546D24A synchronous buck -> 3.3V VCC output.
+
+    Layout: connector on left, input caps, buck IC center, output section right.
+    All routing is orthogonal. Uses local labels for +12V to avoid long wires.
+    Global VCC/GND power symbols — no hierarchy labels needed.
+    """
+    b = SchematicBuilder(title="Power Supply (12V -> 3.3V)",
+                         page_size="A3", project_name=PROJECT_NAME)
+    bx, by = 30.48, 30.48
+    G = GRID  # shorthand
+
+    # ================================================================
+    # 8-pin PCIe connector (Molex Mini-Fit Jr 2x4)
+    # Conn_02x04_Odd_Even: odd pins (1,3,5,7) on left, even (2,4,6,8) on right
+    # PCIe 8-pin: odd = +12V, even = GND
+    # ================================================================
+    conn_x = bx
+    conn_y = snap(by + 5 * G)
+    _, conn_pins = b.place_symbol("Conn_02x04_Odd_Even", conn_x, conn_y,
+                                  ref_prefix="J", value="PCIe_8pin")
+
+    # Wire all odd pins (12V) together with a label
+    twelve_v_ys = sorted([conn_pins[str(p)][1] for p in [1, 3, 5, 7]])
+    rail_12v_x = snap(conn_pins["1"][0] - 3 * G)
+    for p in [1, 3, 5, 7]:
+        px, py = conn_pins[str(p)]
+        b.add_wire(px, py, rail_12v_x, py)
+    b.add_segmented_trunk(rail_12v_x, twelve_v_ys)
+    b.add_label("+12V", rail_12v_x, twelve_v_ys[0], justify="right")
+    b.place_power("PWR_FLAG", rail_12v_x, twelve_v_ys[0])
+
+    # Wire all even pins (GND) together
+    gnd_ys = sorted([conn_pins[str(p)][1] for p in [2, 4, 6, 8]])
+    gnd_rail_x = snap(conn_pins["2"][0] + 3 * G)
+    for p in [2, 4, 6, 8]:
+        px, py = conn_pins[str(p)]
+        b.add_wire(px, py, gnd_rail_x, py)
+    b.add_segmented_trunk(gnd_rail_x, gnd_ys)
+    b.wire_power("GND", (gnd_rail_x, gnd_ys[-1]), offset_y=2 * G)
+    b.place_power("PWR_FLAG", gnd_rail_x, snap(gnd_ys[-1] + 2 * G))
+
+    # ================================================================
+    # Input capacitors (below connector, on +12V rail via label)
+    # Bulk caps filter low-freq ripple; 100nF decouples high-freq switching noise
+    # ================================================================
+    cin_y = snap(by + 25 * G)
+    cin_rail_y = snap(cin_y - 2 * G)  # top of caps = +12V
+
+    # Input bulk caps (low-freq ripple) + HF decoupling for PVIN
+    cin1_x = snap(bx)
+    _, cin1_pins = b.place_symbol("C_Small", cin1_x, cin_y,
+                                  ref_prefix="C", value="22uF 25V PVIN bulk")
+    b.add_label("+12V", cin1_pins["1"][0], cin1_pins["1"][1], justify="right")
+    b.wire_power("GND", cin1_pins["2"], offset_y=2 * G)
+
+    cin2_x = snap(cin1_x + 8 * G)
+    _, cin2_pins = b.place_symbol("C_Small", cin2_x, cin_y,
+                                  ref_prefix="C", value="22uF 25V PVIN bulk")
+    b.add_wire(cin1_pins["1"][0], cin1_pins["1"][1], cin2_pins["1"][0], cin2_pins["1"][1])
+    b.add_junction(cin1_pins["1"][0], cin1_pins["1"][1])
+    b.wire_power("GND", cin2_pins["2"], offset_y=2 * G)
+
+    cin3_x = snap(cin2_x + 8 * G)
+    _, cin3_pins = b.place_symbol("C_Small", cin3_x, cin_y,
+                                  ref_prefix="C", value="100nF PVIN HF")
+    b.add_wire(cin2_pins["1"][0], cin2_pins["1"][1], cin3_pins["1"][0], cin3_pins["1"][1])
+    b.add_junction(cin2_pins["1"][0], cin2_pins["1"][1])
+    b.wire_power("GND", cin3_pins["2"], offset_y=2 * G)
+
+    # ================================================================
+    # TPS546D24A buck converter (centered, right of input caps)
+    # ================================================================
+    reg_x = snap(bx + 55 * G)
+    reg_y = snap(by + 15 * G)
+    _, reg_pins = b.place_symbol("TPS546D24A", reg_x, reg_y, ref_prefix="U",
+                                 value="TPS546D24A")
+
+    # -- PVIN (pins 19-25): all connect to +12V via shared bus + label --
+    pvin_pins = [reg_pins[str(p)] for p in range(19, 26)]
+    pvin_bus_x = snap(pvin_pins[0][0] - 3 * G)
+    pvin_ys = sorted([p[1] for p in pvin_pins])
+    for p in pvin_pins:
+        b.add_wire(p[0], p[1], pvin_bus_x, p[1])
+    b.add_segmented_trunk(pvin_bus_x, pvin_ys)
+    b.add_label("+12V", pvin_bus_x, pvin_ys[0], justify="right")
+
+    # -- AVIN: connect to +12V via label --
+    avin = reg_pins["26"]
+    avin_label_x = snap(avin[0] - 3 * G)
+    b.add_wire(avin[0], avin[1], avin_label_x, avin[1])
+    b.add_label("+12V", avin_label_x, avin[1], justify="right")
+
+    # -- EN/UVLO: resistor divider from +12V --
+    en = reg_pins["27"]
+    en_div_x = snap(en[0] - 12 * G)
+    # Place resistors so the midpoint aligns with EN pin Y
+    ren1_y = snap(en[1] - 4 * G)
+    _, ren1_pins = b.place_symbol("R_Small", en_div_x, ren1_y,
+                                  ref_prefix="R", value="100K")
+    ren2_y = snap(en[1] + 4 * G)
+    _, ren2_pins = b.place_symbol("R_Small", en_div_x, ren2_y,
+                                  ref_prefix="R", value="22.1K")
+    # Wire R_EN1 bottom to junction at EN pin Y, then to R_EN2 top
+    # Use segmented trunk to avoid overlap
+    trunk_ys = sorted([ren1_pins["2"][1], en[1], ren2_pins["1"][1]])
+    b.add_segmented_trunk(en_div_x, trunk_ys)
+    # Horizontal wire from junction to EN pin
+    b.add_wire(en_div_x, en[1], en[0], en[1])
+    b.add_junction(en_div_x, en[1])
+    # R_EN1 top to +12V
+    b.add_label("+12V", ren1_pins["1"][0], ren1_pins["1"][1], justify="right",
+                angle=180)
+    # R_EN2 bottom to GND
+    b.wire_power("GND", ren2_pins["2"], offset_y=2 * G)
+
+    # -- PGND (pins 12-18) + AGND (37) + DRTN (5) + EP (41): shared bus to GND --
+    # All bottom pins including NC (36) are at the same Y. Segment the bus
+    # between each pin position to avoid "wire through pin" on interiors.
+    gnd_bottom_pins = [str(p) for p in range(12, 19)] + ["37", "5", "41"]
+    gnd_bot_positions = [reg_pins[p] for p in gnd_bottom_pins]
+    gnd_bus_y = gnd_bot_positions[0][1]
+    # Include NC pin position so bus segments don't skip over it
+    nc_x = snap(reg_pins["36"][0])
+    all_bottom_xs = sorted(set(snap(p[0]) for p in gnd_bot_positions) | {nc_x})
+    # Segmented horizontal bus (wire between each adjacent pair)
+    for i in range(len(all_bottom_xs) - 1):
+        b.add_wire(all_bottom_xs[i], gnd_bus_y, all_bottom_xs[i + 1], gnd_bus_y)
+    # Single GND symbol from center of bus
+    gnd_center_x = snap(reg_pins["17"][0])  # pin 17 is near center
+    b.wire_power("GND", (gnd_center_x, gnd_bus_y), offset_y=3 * G)
+    b.add_junction(gnd_center_x, gnd_bus_y)
+
+    # -- VSEL, MSEL1, MSEL2, ADRSEL: tie to GND via shared bus --
+    config_pin_nums = ["30", "32", "29", "31"]
+    config_bus_x = snap(reg_pins["30"][0] - 5 * G)
+    config_ys = sorted([reg_pins[p][1] for p in config_pin_nums])
+    for p in config_pin_nums:
+        pin = reg_pins[p]
+        b.add_wire(pin[0], pin[1], config_bus_x, pin[1])
+    b.add_segmented_trunk(config_bus_x, config_ys)
+    # GND will be placed at the bottom of the extended trunk (after GOSNS)
+
+    # -- GOSNS: connect to same config GND bus --
+    gosns = reg_pins["34"]
+    b.add_wire(gosns[0], gosns[1], config_bus_x, gosns[1])
+    # Extend the trunk from last config pin to GOSNS, then to GND
+    all_gnd_ys = sorted(config_ys + [gosns[1]])
+    # Replace the earlier GND with one at the very bottom
+    gnd_bottom_y = snap(all_gnd_ys[-1] + 2 * G)
+    b.add_segmented_trunk(config_bus_x, [config_ys[-1], gosns[1], gnd_bottom_y])
+    b.add_junction(config_bus_x, config_ys[-1])
+    b.place_power("GND", config_bus_x, gnd_bottom_y)
+
+    # -- SW (pins 8-11): shared bus going right to inductor + boot cap --
+    sw_pins = [reg_pins[str(p)] for p in range(8, 12)]
+    sw_bus_x = snap(sw_pins[0][0] + 3 * G)
+    sw_ys = sorted([p[1] for p in sw_pins])
+    for p in sw_pins:
+        b.add_wire(p[0], p[1], sw_bus_x, p[1])
+    b.add_segmented_trunk(sw_bus_x, sw_ys)
+
+    # -- Right-side bypass caps --
+    boot = reg_pins["7"]
+    sw = reg_pins["8"]
+    vdd5 = reg_pins["28"]
+    bp1v5 = reg_pins["4"]
+
+    cap_col_x = snap(boot[0] + 12 * G)
+    cap_start_y = snap(reg_y - 5 * G)
+
+    # C_BOOT: 100nF bootstrap (charges high-side gate driver)
+    cboot_x = snap(cap_col_x + 3 * G)
+    _, cboot_pins = b.place_symbol("C_Small", cboot_x, cap_start_y,
+                                   ref_prefix="C", value="100nF BOOT")
+    b.add_label("BOOT_INT", boot[0], boot[1])
+    b.add_label("BOOT_INT", cboot_pins["1"][0], cboot_pins["1"][1], justify="right")
+    # BOOT cap pin 2 -> L-route to SW bus at BOTTOM (sw_ys[-1])
+    # Go horizontal left first to clear cap body, then vertical down
+    cboot_p2 = cboot_pins["2"]
+    cboot_turn_x = snap(sw_bus_x + 2 * G)  # between SW bus and cap
+    b.add_wire(cboot_p2[0], cboot_p2[1], cboot_turn_x, cboot_p2[1])
+    b.add_wire(cboot_turn_x, cboot_p2[1], cboot_turn_x, sw_ys[-1])
+    b.add_wire(cboot_turn_x, sw_ys[-1], sw_bus_x, sw_ys[-1])
+    b.add_junction(sw_bus_x, sw_ys[-1])
+
+    # C_VDD5: 4.7uF bypass for internal 5V LDO (powers gate driver)
+    cvdd5_y = snap(cap_start_y + 10 * G)
+    cvdd5_x = snap(cap_col_x + 10 * G)
+    _, cvdd5_pins = b.place_symbol("C_Small", cvdd5_x, cvdd5_y,
+                                   ref_prefix="C", value="4.7uF 10V VDD5")
+    b.add_label("VDD5_INT", vdd5[0], vdd5[1])
+    b.add_label("VDD5_INT", cvdd5_pins["1"][0], cvdd5_pins["1"][1], justify="right")
+    b.wire_power("GND", cvdd5_pins["2"], offset_y=2 * G)
+
+    # C_BP: 1uF bypass for internal 1.5V digital regulator
+    cbp_y = snap(cvdd5_y + 8 * G)
+    _, cbp_pins = b.place_symbol("C_Small", cvdd5_x, cbp_y,
+                                 ref_prefix="C", value="1uF BP1V5")
+    b.add_label("BP1V5_INT", bp1v5[0], bp1v5[1])
+    b.add_label("BP1V5_INT", cbp_pins["1"][0], cbp_pins["1"][1], justify="right")
+    b.wire_power("GND", cbp_pins["2"], offset_y=2 * G)
+
+    # -- SW: inductor wired directly to SW bus at top (sw_ys[0]) --
+    ind_x = snap(sw_bus_x + 10 * G)
+    ind_y = snap(sw_ys[0])
+    _, l1_pins = b.place_symbol("L_Small", ind_x, ind_y,
+                                ref_prefix="L", value="0.22uH", angle=90)
+    b.add_wire(l1_pins["1"][0], l1_pins["1"][1], sw_bus_x, sw_ys[0])
+    b.add_junction(sw_bus_x, sw_ys[0])
+
+    # -- VOSNS: label to output VCC --
+    vosns = reg_pins["33"]
+    vosns_label_x = snap(vosns[0] - 3 * G)
+    b.add_wire(vosns[0], vosns[1], vosns_label_x, vosns[1])
+    b.place_power("VCC", vosns_label_x, vosns[1])
+
+    # -- PGD: power-good pull-up + LED indicator --
+    # Use label to route PGD to indicator section (avoids long wires through caps)
+    pgd = reg_pins["1"]
+    pgd_label_x = snap(pgd[0] + 3 * G)
+    b.add_wire(pgd[0], pgd[1], pgd_label_x, pgd[1])
+    b.add_label("PGOOD", pgd_label_x, pgd[1])
+
+    # PGD indicator section (below output caps, plenty of space)
+    pgd_sec_x = snap(bx + 70 * G)
+    pgd_sec_y = snap(by + 45 * G)
+    b.add_label("PGOOD", pgd_sec_x, pgd_sec_y, justify="right")
+
+    # Pull-up resistor (vertical, above PGD)
+    rpg_y = snap(pgd_sec_y - 6 * G)
+    _, rpg_pins = b.place_symbol("R_Small", pgd_sec_x, rpg_y,
+                                 ref_prefix="R", value="10K")
+    b.add_wire(pgd_sec_x, pgd_sec_y, rpg_pins["2"][0], rpg_pins["2"][1])
+    b.place_power("VCC", rpg_pins["1"][0], rpg_pins["1"][1])
+
+    # LED indicator chain (right of PGD)
+    led_entry_x = snap(pgd_sec_x + 3 * G)
+    b.add_wire(pgd_sec_x, pgd_sec_y, led_entry_x, pgd_sec_y)
+    b.add_junction(pgd_sec_x, pgd_sec_y)
+    led_pos = b.place_led_indicator(led_entry_x, pgd_sec_y)
+
+    # -- Floating pins (standalone mode): mark with no-connect flags --
+    # Pin 36 (NC) excluded — datasheet says "connect to PGND", handled by GND bus
+    for nc_pin in ["6", "38", "2", "3", "35", "39", "40"]:
+        nc_pos = reg_pins[nc_pin]
+        b.add_no_connect(nc_pos[0], nc_pos[1])
+
+    # ================================================================
+    # Output rail: inductor out -> output caps -> VCC + PWR_FLAG
+    # ================================================================
+    out_x = l1_pins["2"][0]
+    out_y = l1_pins["2"][1]
+
+    # Vertical trunk down to output cap row
+    cout_y = snap(out_y + 10 * G)
+    out_rail_x = snap(out_x + 2 * G)
+    b.add_wire(out_x, out_y, out_rail_x, out_y)
+    b.place_power("VCC", out_rail_x, out_y)
+
+    prev_p1 = None
+    for i in range(4):
+        cx = snap(out_rail_x + i * 8 * G)
+        _, cp = b.place_symbol("C_Small", cx, cout_y,
+                               ref_prefix="C", value="47uF 6.3V VOUT bulk")
+        if prev_p1 is not None:
+            b.add_wire(prev_p1[0], prev_p1[1], cp["1"][0], cp["1"][1])
+            b.add_junction(prev_p1[0], prev_p1[1])
+        else:
+            # First cap: VCC power symbol connects to global VCC net
+            b.place_power("VCC", cp["1"][0], cp["1"][1])
+        prev_p1 = cp["1"]
+        b.wire_power("GND", cp["2"], offset_y=2 * G)
+
+    # C_OUT5: 100nF HF decoupling on output
+    cx = snap(out_rail_x + 4 * 8 * G)
+    _, cp5 = b.place_symbol("C_Small", cx, cout_y,
+                            ref_prefix="C", value="100nF VOUT HF")
+    b.add_wire(prev_p1[0], prev_p1[1], cp5["1"][0], cp5["1"][1])
+    b.add_junction(prev_p1[0], prev_p1[1])
+    b.wire_power("GND", cp5["2"], offset_y=2 * G)
+
+    # PWR_FLAG on VCC output (at end of cap chain)
+    vcc_x = snap(cx + 8 * G)
+    b.add_wire(cp5["1"][0], cp5["1"][1], vcc_x, cp5["1"][1])
+    b.add_junction(cp5["1"][0], cp5["1"][1])
+    b.place_power("VCC", vcc_x, cp5["1"][1], angle=0)
+    b.place_power("PWR_FLAG", vcc_x, cp5["1"][1])
+
+    return b
+
+
+# --------------------------------------------------------------
 # Root sheet generator
 # --------------------------------------------------------------
 
@@ -1227,6 +1526,16 @@ def generate_root_sheet():
         byte_pp.append(pp)
 
     # ================================================================
+    # Power Supply sheet block (no hierarchy pins — uses global VCC/GND)
+    # ================================================================
+    purple_fill = ColorRGBA(R=240, G=225, B=255, A=255, precision=4)
+    pwr_w = snap(20 * GRID)
+    pwr_h = snap(10 * GRID)
+    pwr_sy = snap(ctrl_sy + ctrl_h + sheet_gap)  # below control logic
+    _add_sheet_block("Power Supply", "power_supply.kicad_sch",
+                     [], col2_x, pwr_sy, pwr_w, pwr_h, purple_fill)
+
+    # ================================================================
     # Pre-compute connector placement
     # ================================================================
     byte_h_pre = _sheet_height(len(byte_pin_defs))
@@ -1255,7 +1564,7 @@ def generate_root_sheet():
         conn_signal_pos[sig] = conn_pins[str(pin_num_int)]
 
     # ================================================================
-    # Connector power pins
+    # Connector power pins (test points — PWR_FLAG is on power_supply sheet)
     # ================================================================
     vcc_pos = conn_pins["24"]
     gnd_pos = conn_pins["1"]
@@ -1263,11 +1572,9 @@ def generate_root_sheet():
     vcc_sym_x = snap(vcc_pos[0] + pwr_wire_len)
     b.add_wire(vcc_pos[0], vcc_pos[1], vcc_sym_x, vcc_pos[1])
     b.place_power("VCC", vcc_sym_x, vcc_pos[1])
-    b.place_power("PWR_FLAG", vcc_sym_x, vcc_pos[1])
     gnd_sym_x = snap(gnd_pos[0] + pwr_wire_len)
     b.add_wire(gnd_pos[0], gnd_pos[1], gnd_sym_x, gnd_pos[1])
     b.place_power("GND", gnd_sym_x, gnd_pos[1])
-    b.place_power("PWR_FLAG", gnd_sym_x, gnd_pos[1])
 
     # ================================================================
     # Connector signal wires + LED indicators + direct wiring
@@ -1642,6 +1949,9 @@ def main():
 
     builders["byte"] = generate_byte_sheet()
     print("  [+] byte.kicad_sch (shared by all 8 byte instances)")
+
+    builders["power_supply"] = generate_power_supply()
+    print("  [+] power_supply.kicad_sch")
 
     builders["ram"] = generate_root_sheet()
     print("  [+] ram.kicad_sch (root)")

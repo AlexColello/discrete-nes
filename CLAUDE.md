@@ -40,15 +40,15 @@ Don't wait — update immediately when the insight is fresh. A lesson not record
 discrete-nes/
 ├── shared/
 │   ├── kicad-lib/          # Shared KiCad symbols and footprints
-│   │   ├── symbols/        # .kicad_sym files
+│   │   ├── symbols/        # .kicad_sym files (Power_Discrete.kicad_sym for TPS546D24A)
 │   │   ├── footprints/     # .pretty directories (incl. generated DSBGA_Packages.pretty)
 │   │   ├── sym-lib-table   # Symbol library table (copy to projects)
 │   │   └── fp-lib-table    # Footprint library table (copy to projects)
 │   └── python/
 │       ├── kicad_gen/      # Shared schematic/PCB generation library
 │       │   ├── __init__.py # Re-exports: SchematicBuilder, PCBBuilder, snap, uid, etc.
-│       │   ├── common.py   # Constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP, FOOTPRINT_MAP), snap(), uid()
-│       │   ├── symbols.py  # Library loading, raw text extraction, pin offset discovery
+│       │   ├── common.py   # Constants (GRID, KICAD_CLI, SYMBOL_LIB_MAP, FOOTPRINT_MAP, CUSTOM_SYMBOL_LIBS), snap(), uid()
+│       │   ├── symbols.py  # Library loading (stock + custom), raw text extraction, pin offset discovery
 │       │   ├── schematic.py # SchematicBuilder class (place, wire, LED, labels, save)
 │       │   ├── verify.py   # parse_schematic, 11 general checks, run_erc, run_drc + DRC grouping
 │       │   ├── pcb.py      # PCBBuilder, DSBGA footprints, netlist export/parse, fix_pcb_drc
@@ -67,6 +67,7 @@ discrete-nes/
 │   │   │   ├── snapshot_pcb.py      # CLI for PCB region snapshots
 │   │   │   └── parse_pdf.py         # TI datasheet PDF text/pin extraction
 │   │   ├── ram.kicad_sch            # Root schematic
+│   │   ├── power_supply.kicad_sch   # Power supply sub-sheet (12V→3.3V buck)
 │   │   ├── ram.kicad_pcb            # Generated PCB (pre-routing)
 │   │   ├── ram_routed.kicad_pcb     # Autorouted PCB
 │   │   └── verify_output/           # Generated output (gitignored)
@@ -575,13 +576,22 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 
 **Row control (8 ICs):** 2x SN74LVC1G08 per row × 4 rows — ROW_SEL AND write/read enables
 
+**Power supply:**
+
+- 1x TPS546D24A (40A PMBus synchronous buck, LQFN-CLIP-40, 7mm × 5mm) — placeholder footprint
+- 1x Molex Mini-Fit Jr 2×4 connector (J5, 8-pin PCIe power, 12V input)
+- 1x 0.22µH inductor (shielded, L1)
+- 9x capacitors: 2× 22µF/25V PVIN bulk, 1× 100nF PVIN HF, 4× 47µF/6.3V VOUT bulk, 1× 100nF VOUT HF, plus 100nF BOOT, 4.7µF VDD5, 1µF BP1V5 IC bypass caps
+- 4x resistors: 100K + 22.1K EN divider, 10K PGOOD pull-up, 1K LED resistor
+- 1x power-good LED indicator
+
 **Totals (actual from generate_ram.py + generate_pcb.py):**
 
-- 225 ICs (14 INV + 75 AND + 8 dual NAND + 64 DFF + 64 BUF)
-- 191 LEDs (0402 SMD)
-- 191 resistors (0402 SMD)
-- 4 connectors (J1=24-pin main, J2=4-pin DEC3, J3=14-pin COL_SEL, J4=16-pin DEC4)
-- **611 total BOM parts**
+- 226 ICs (14 INV + 75 AND + 8 dual NAND + 64 DFF + 64 BUF + 1 TPS546D24A)
+- 192 LEDs (0402 SMD)
+- 195 resistors (0402 SMD)
+- 5 connectors (J1=24-pin main, J2=4-pin DEC3, J3=14-pin COL_SEL, J4=16-pin DEC4, J5=8-pin PCIe)
+- **618 total BOM parts**
 
 **PCB:** 4-layer, 233 x 95 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
 
@@ -610,6 +620,32 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 - ATX 8-pin PCIe connector per board with on-board 12V→3.3V synchronous buck converter
 - Adequate power traces for SMD board
 - DO NOT use LED multiplexing (defeats visibility purpose)
+
+### Power Supply Circuit (TPS546D24A)
+
+**IC:** TPS546D24A — 2.95-16V input, 40A synchronous buck, PMBus, LQFN-CLIP-40 (7mm × 5mm, 0.5mm pitch). Chosen as the production part for the full 2KB RAM board (~31.5A at 3.3V).
+
+**Standalone mode (no PMBus required):** Output voltage set by VSEL pin resistor divider. MSEL1/MSEL2 set switching frequency and compensation. ADRSEL sets PMBus address. All three pins tied to GND for default configuration. PMB_DATA, PMB_CLK, SYNC, VSHARE, BCX_CLK, BCX_DAT left floating (no-connect).
+
+**Pin groups (symbol has all 41 pins at unique positions):**
+- PVIN (pins 19-25, 7 pins): power input, connect to +12V via shared vertical bus
+- SW (pins 8-11, 4 pins): switch node output, connect via shared vertical bus to inductor + bootstrap cap
+- PGND (pins 12-18, 7 pins) + AGND (37) + DRTN (5) + NC (36) + EP (41): all on bottom, connected by horizontal bus with single GND symbol. NC pin 36 connects to PGND per datasheet
+- BOOT (pin 7): bootstrap cap (100nF between BOOT and SW)
+- VDD5 (pin 28): internal 5V LDO, bypass with 4.7µF
+- BP1V5 (pin 4): internal 1.5V digital regulator, bypass with 1µF
+- PGD/RST_B (pin 1): open-drain power good, 10K pull-up to VCC + LED indicator
+
+**Application circuit:** 2× 22µF + 100nF input filter → TPS546D24A → 0.22µH inductor → 4× 47µF + 100nF output filter → VCC (3.3V). EN/UVLO divider (100K/22.1K) sets input UVLO at ~4.5V. VOSNS connected to output for remote sensing.
+
+**KiCad library status:** Symbol is custom (`Power_Discrete.kicad_sym`). Footprint is a placeholder (QFN-40 5×5mm — real package is 7×5mm LQFN-CLIP not in KiCad 9). Custom footprint creation needed before PCB fabrication.
+
+**Schematic generation notes:**
+- Power sub-sheet uses global VCC/GND power symbols (no hierarchy pins needed)
+- Multi-pin groups (PVIN, SW, PGND) wired as vertical/horizontal buses with labels or direct wires
+- Bypass caps placed at offset positions with label connections to avoid wire-through-body errors (IC right-side pins are only 2.54mm apart vertically)
+- Boot cap connects to SW bus at bottom Y, inductor at top Y, to avoid horizontal wire overlap
+- J1 VCC/GND pins retained as test points (PWR_FLAG moved to power sub-sheet)
 
 ## Implementation Plan - Phase by Phase
 
@@ -641,6 +677,7 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
    - control_logic.kicad_sch — active-low inversion (nCE/nWE/nOE → WRITE_ACTIVE, READ_EN)
    - row_control.kicad_sch — dual NAND per byte for write clock + read OE (used 4x)
    - byte.kicad_sch — 8 DFFs + 8 tri-state buffers (used 8x)
+   - power_supply.kicad_sch — 8-pin PCIe connector + TPS546D24A 40A buck (12V → 3.3V)
 3. Passes KiCad 9 ERC with 0 errors and 0 warnings
 
 **Step 3: PCB Layout (IN PROGRESS)**
@@ -677,9 +714,10 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 - [x] `snapshot.py` — PCB SVG export, crop, X-marker injection, PNG rendering (600 DPI)
 - [x] `__init__.py` — re-exports key public API
 
-**KiCad symbols:** All SN74LVC1G parts use KiCad's built-in `74xx_little_logic` symbol library. No custom symbols needed.
+**KiCad symbols:** SN74LVC1G parts use KiCad's built-in `74xGxx` symbol library. Custom symbols live in `shared/kicad-lib/symbols/`:
+- `Power_Discrete.kicad_sym` — TPS546D24A (40-pin LQFN-CLIP, 7mm × 5mm). All 41 pins (including EP) at unique positions. Custom library loaded by `symbols.py` via `CUSTOM_SYMBOL_LIBS` dict in `common.py`
 
-**Custom footprints:** DSBGA-5/6/8 with numeric pads (matching KiCad symbol pin numbers) are generated programmatically by `create_dsbga_footprints()` in `pcb.py`. Standard 0402 LED/resistor and connector footprints come from KiCad's built-in libraries.
+**Custom footprints:** DSBGA-5/6/8 with numeric pads (matching KiCad symbol pin numbers) are generated programmatically by `create_dsbga_footprints()` in `pcb.py`. Standard 0402 LED/resistor and connector footprints come from KiCad's built-in libraries. TPS546D24A uses a placeholder QFN footprint (real 7×5mm LQFN-CLIP not in KiCad 9).
 
 ### Phase 4: FPGA Logic Extraction (Research Phase)
 

@@ -4,4 +4,5 @@
   (lib (name "Connector_Generic")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/Connector_Generic.kicad_sym")(options "")(descr ""))
   (lib (name "Device")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/Device.kicad_sym")(options "")(descr ""))
   (lib (name "power")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/power.kicad_sym")(options "")(descr ""))
+  (lib (name "Power_Discrete")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/symbols/Power_Discrete.kicad_sym")(options "")(descr "Custom power supply symbols"))
 )

@@ -14,7 +14,7 @@ from kiutils.schematic import Schematic
 from kiutils.items.schitems import (
     SchematicSymbol, Connection, LocalLabel, GlobalLabel,
     HierarchicalLabel, SymbolProjectInstance, SymbolProjectPath,
-    Junction,
+    Junction, NoConnect, Text,
 )
 from kiutils.items.common import (
     Position, Property, Effects, Font, Justify, PageSettings, ColorRGBA,
@@ -318,6 +318,26 @@ class SchematicBuilder:
             self.add_wire(x, sorted_ys[i], x, sorted_ys[i + 1])
         for y in sorted_ys[1:-1]:
             self.add_junction(x, y)
+
+    def add_text(self, text, x, y, size=1.27):
+        """Add a text annotation to the schematic."""
+        t = Text()
+        t.text = text
+        t.position = Position(X=snap(x), Y=snap(y))
+        t.effects = Effects(font=Font(width=size, height=size))
+        t.uuid = uid()
+        if not hasattr(self.sch, 'texts'):
+            self.sch.texts = []
+        self.sch.texts.append(t)
+
+    def add_no_connect(self, x, y):
+        """Place a no-connect (X) flag at the given position."""
+        nc = NoConnect()
+        nc.position = Position(X=snap(x), Y=snap(y))
+        nc.uuid = uid()
+        if not hasattr(self.sch, 'noConnects'):
+            self.sch.noConnects = []
+        self.sch.noConnects.append(nc)
 
     def place_led_below(self, x, y, drop=None):
         """Branch an LED indicator below a main horizontal wire.

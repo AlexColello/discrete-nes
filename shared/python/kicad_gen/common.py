@@ -213,6 +213,14 @@ SYMBOL_LIB_MAP = {
     "Conn_01x14": "Connector_Generic",
     "Conn_01x16": "Connector_Generic",
     "Conn_01x24": "Connector_Generic",
+    "Conn_02x04_Odd_Even": "Connector_Generic",
+    "L_Small": "Device",
+    "TPS546D24A": "Power_Discrete",
+}
+
+# Custom symbol library paths (not in KiCad stock)
+CUSTOM_SYMBOL_LIBS = {
+    "Power_Discrete.kicad_sym": ["TPS546D24A"],
 }
 
 
@@ -240,6 +248,9 @@ FOOTPRINT_MAP = {
     "Conn_01x14": "Connector_PinHeader_2.54mm:PinHeader_1x14_P2.54mm_Vertical",
     "Conn_01x16": "Connector_PinHeader_2.54mm:PinHeader_1x16_P2.54mm_Vertical",
     "Conn_01x24": "Connector_PinHeader_2.54mm:PinHeader_1x24_P2.54mm_Vertical",
+    "Conn_02x04_Odd_Even": "Connector_Molex:Molex_Mini-Fit_Jr_5566-08A2_2x04_P4.20mm_Vertical",
+    "L_Small": "Inductor_SMD:L_7.3x7.3_H4.5",  # placeholder — update for chosen inductor
+    "TPS546D24A": "Package_DFN_QFN:QFN-40-1EP_5x5mm_P0.4mm_EP3.6x3.6mm",  # placeholder — needs custom 7x5mm LQFN-CLIP
 }
 
 # DSBGA pin number to BGA ball name mapping.

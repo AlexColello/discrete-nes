@@ -24,7 +24,7 @@ from kiutils.items.common import (
     Position, Property, Effects, Font, PageSettings,
 )
 
-from .common import KICAD_CLI, SYMBOL_LIB_MAP, uid, snap
+from .common import KICAD_CLI, SYMBOL_LIB_MAP, CUSTOM_SYMBOL_LIBS, uid, snap
 
 
 # ==============================================================
@@ -115,10 +115,11 @@ def load_lib_symbols():
             "74LVC1G11", "74LVC1G79", "74LVC1G125",
             "74LVC2G00",
         ],
-        "Device.kicad_sym": ["R_Small", "LED_Small", "C_Small"],
+        "Device.kicad_sym": ["R_Small", "LED_Small", "C_Small", "L_Small"],
         "power.kicad_sym": ["VCC", "GND", "PWR_FLAG"],
         "Connector_Generic.kicad_sym": [
             "Conn_01x04", "Conn_01x12", "Conn_01x14", "Conn_01x16", "Conn_01x24",
+            "Conn_02x04_Odd_Even",
         ],
     }
     for lib_file, wanted in stock_libs.items():
@@ -152,6 +153,42 @@ def load_lib_symbols():
                 )
                 raw_texts[sn] = fixed
 
+        lib = SymbolLib.from_file(lib_path)
+        for sym in lib.symbols:
+            if sym.libId in wanted:
+                hn, hname = hide_flags.get(sym.libId, (False, False))
+                if hn:
+                    sym.hidePinNumbers = True
+                if hname:
+                    sym.pinNamesHide = True
+                symbols[sym.libId] = sym
+
+    # Load custom symbol libraries (project-local)
+    custom_sym_dir = os.path.normpath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "..",
+        "shared", "kicad-lib", "symbols"))
+    for lib_file, wanted in CUSTOM_SYMBOL_LIBS.items():
+        lib_path = os.path.join(custom_sym_dir, lib_file)
+        if not os.path.exists(lib_path):
+            raise FileNotFoundError(
+                f"Custom symbol library not found: {lib_path}")
+        lib_text = open(lib_path, "r", encoding="utf-8").read()
+        lib_prefix = ""
+        for sn in wanted:
+            if sn in SYMBOL_LIB_MAP:
+                lib_prefix = SYMBOL_LIB_MAP[sn]
+                break
+        hide_flags = _parse_pin_hide_flags(lib_path, wanted)
+        for sn in wanted:
+            raw = _extract_raw_symbol(lib_text, sn)
+            if raw:
+                qualified = f"{lib_prefix}:{sn}" if lib_prefix else sn
+                fixed = raw.replace(
+                    f'(symbol "{sn}"',
+                    f'(symbol "{qualified}"',
+                    1,
+                )
+                raw_texts[sn] = fixed
         lib = SymbolLib.from_file(lib_path)
         for sym in lib.symbols:
             if sym.libId in wanted:

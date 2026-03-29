@@ -979,6 +979,9 @@ def _is_standalone_artifact(violation):
     if vtype == "power_pin_not_driven":
         return True
 
+    if vtype == "lib_symbol_issues":
+        return True
+
     return False
 
 
