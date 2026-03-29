@@ -486,34 +486,20 @@ def _build_net_pad_index(pcb):
 
 
 def preroute_power_vias(pcb, netlist_data):
-    """Drop vias from every IC GND/VCC pad and R GND pad to inner planes.
+    """Drop vias from every IC GND/VCC pad to inner planes.
 
-    DFF/BUF power vias use cardinal L-escape: straight outward from the
-    IC body, then a small perpendicular nudge.  This creates a channel
-    between the VCC and GND vias for routing the center signal trace.
+    All DSBGA ICs use diagonal escape (radially away from IC center,
+    snapped to 45°).  DSBGA-5 and DSBGA-8 both have VCC and GND on
+    diagonally opposite balls, so the escape directions naturally
+    diverge without conflict.
 
-    DSBGA-5 has VCC and GND diagonally opposite.  For DFF at 90°:
-      - Left column: VCC (top), D (bottom)
-      - Right column: Q (top), GND (bottom)
-    Escaping vertically within a column is blocked by the other pad.
-    Escape outward (VCC UP, GND DOWN) then nudge sideways avoids all
-    intra-IC pads:
-      DFF  (90°): VCC UP + nudge LEFT,  GND DOWN + nudge RIGHT
-      BUF (180°): GND UP-RIGHT, VCC DOWN-LEFT
-
-    This only applies to 74LVC1G79 (DFF) and 74LVC1G125 (BUF) — other
-    parts have different pin-to-net assignments so the safe escape
-    direction differs.  All other DSBGA ICs use diagonal escape
-    (radially away from center, snapped to 45°).
-
-    LEDs/Rs: escape rightward (+X), no nudge.
+    LEDs: escape rightward (+X).
 
     Returns (via_count, trace_count).
     """
-    # Skip all DSBGA ICs — power via escapes conflict with prerouted
-    # signal traces in the dense layout.  Left to autorouter.
-    SKIP_PARTS = {"74LVC1G04", "74LVC1G08", "74LVC1G11",
-                  "74LVC1G79", "74LVC1G125", "74LVC2G00"}
+    # DFF/BUF/NAND already have dedicated power routing functions
+    # (preroute_dff_buf_gnd, preroute_dff_buf_vcc, preroute_nand_connections)
+    SKIP_PARTS = {"74LVC1G79", "74LVC1G125", "74LVC2G00"}
 
     ref_to_part = _build_ref_to_part(netlist_data)
 
@@ -543,12 +529,6 @@ def preroute_power_vias(pcb, netlist_data):
         if not (is_dsbga or is_led):
             continue
 
-        # Skip DSBGA-8 and DFF/BUF — byte area too dense for prerouted
-        # power vias.  Left to autorouter.
-        if "DSBGA-8" in lib_id:
-            continue
-
-        fp_angle = round(fp.position.angle or 0)
         part = ref_to_part.get(ref, "")
         if part in SKIP_PARTS:
             continue
@@ -569,19 +549,39 @@ def preroute_power_vias(pcb, netlist_data):
                           else ["F.Cu", "In2.Cu"])
 
             if is_dsbga:
-                # Other ICs: diagonal escape away from center, 45° grid
+                fp_angle = round(fp.position.angle or 0)
                 dx = abs_x - fp_x
                 dy = abs_y - fp_y
-                dist = math.sqrt(dx * dx + dy * dy)
-                if dist > 0.01:
-                    raw = math.degrees(math.atan2(dy, dx))
-                    escape_angle = round(raw / 45) * 45
+
+                if fp_angle == 180:
+                    # ICs at 180°: IC→LED route goes UP from output pin
+                    # (horizontal segment at ic_y-0.95), LED anode pad
+                    # (0.64mm wide) at (ic_x+1.5, ic_y-0.485).
+                    # GND pad upper-right → escape 30° DOWN-RIGHT, d=0.55:
+                    #   - clears IC→LED horizontal (0.38mm gap)
+                    #   - clears pin 2 (0.162mm via-pad clearance)
+                    #   - clears LED pad (0.20mm via-pad clearance)
+                    # VCC pad lower-left → escape 135° DOWN-LEFT
+                    if net_name == "GND":
+                        escape_angle = 30   # down-right
+                        escape_dist = 0.55  # shorter to clear LED pad
+                    else:
+                        escape_angle = 135  # down-left
+                        escape_dist = VIA_OFFSET
                 else:
-                    escape_angle = 90
+                    # Other angles: diagonal away from center, 45° grid
+                    escape_dist = VIA_OFFSET
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    if dist > 0.01:
+                        raw = math.degrees(math.atan2(dy, dx))
+                        escape_angle = round(raw / 45) * 45
+                    else:
+                        escape_angle = 90
+
                 pcb.pin_to_via(
                     (abs_x, abs_y), net_num,
                     angle=escape_angle,
-                    distance=VIA_OFFSET,
+                    distance=escape_dist,
                     trace_width=POWER_TRACE_W,
                     via_size=VIA_SIZE, via_drill=VIA_DRILL,
                     via_layers=via_layers,
