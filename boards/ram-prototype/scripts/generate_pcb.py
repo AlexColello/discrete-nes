@@ -1257,10 +1257,10 @@ def preroute_dff_buf_data(pcb, netlist_data):
                        SIGNAL_TRACE_W, "F.Cu")
         traces += 1
 
-        # Via
+        # Via (F.Cu for local DFF-BUF, In1.Cu for column trunk)
         pcb.add_via((via_x, via_y), dbus_net,
                      size=VIA_SIZE, drill=VIA_DRILL,
-                     remove_unused_layers=True)
+                     layers=["F.Cu", "In1.Cu"])
         vias += 1
 
         # Segment 2: 45° diagonal from via to BUF Y X
@@ -2189,6 +2189,93 @@ def preroute_data_bus(pcb, netlist_data, col_boundary_x):
     return vias, traces
 
 
+def preroute_column_dbus(pcb, netlist_data):
+    """Route D0-D7 vertical trunks on In1.Cu connecting bytes in each column.
+
+    preroute_dff_buf_data connects DFF pin 1 (D) to BUF pin 4 (Y) within
+    each byte via a via at (dff_pin1_x, dff_pin1_y + 0.50).  This function
+    routes In1.Cu vertical trunks connecting those vias across the 4 bytes
+    in each byte column.
+
+    Geometry:
+      - Via X = ic_x - 0.50 (DFF pin 1 X at 90°)
+      - Via Y = dff_pin1_y + 0.50 (midpoint between DFF D and BUF Y)
+      - Trunk X = ic_x + 0.05 (0.55mm right of via, clears VCC via hole)
+      - Horizontal stubs from each via to trunk on In1.Cu
+      - Vertical trunk segments between adjacent bytes on In1.Cu
+
+    Clearance from VCC via at (ic_x - 0.50, dff_y + 2.00):
+      Trunk at ic_x + 0.05 is 0.55mm away horizontally.  With 0.3mm drill
+      (0.15mm radius) and 0.2mm trace (0.10mm half-width), edge-to-edge
+      clearance = 0.55 - 0.15 - 0.10 = 0.30mm > 0.254mm PCBWay/Elecrow.
+
+    Returns trace_count (int).
+    """
+    ref_to_part = _build_ref_to_part(netlist_data)
+    net_to_pads = _build_net_pad_index(pcb)
+    traces = 0
+
+    # Find D* nets: nets connecting both a DFF pin 1 and a BUF pin 4
+    dbus_nets = set()
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if ref_to_part.get(ref) != "74LVC1G79":
+            continue
+        d_net = pcb.get_pad_net(ref, "1")
+        if not d_net or d_net == 0:
+            continue
+        pads_on_net = net_to_pads.get(d_net, [])
+        if any(ref_to_part.get(pr) == "74LVC1G125" and pn == "4"
+               for pr, pn, *_ in pads_on_net if pr.startswith("U")):
+            dbus_nets.add(d_net)
+
+    for net_num in sorted(dbus_nets):
+        pads_on_net = net_to_pads.get(net_num, [])
+
+        # Collect via positions from DFF pin 1 positions.
+        # DFF@90° pin 1 at (ic_x - 0.50, dff_y + 0.25).
+        # Data bus via at (pin1_x, pin1_y + 0.50).
+        # Trunk at pin1_x + 0.55 = ic_x + 0.05 (clears VCC via hole).
+        via_info = []  # (via_x, via_y, trunk_x)
+        for pad_ref, pad_num, px, py, _pnet in pads_on_net:
+            if (pad_ref.startswith("U") and pad_num == "1"
+                    and ref_to_part.get(pad_ref) == "74LVC1G79"):
+                via_x = round(px, 2)
+                via_y = round(py + 0.50, 2)
+                trunk_x = round(px + 0.55, 2)
+                via_info.append((via_x, via_y, trunk_x))
+
+        if len(via_info) < 2:
+            continue
+
+        # Group by trunk X (same bit position in same byte column)
+        by_trunk = defaultdict(list)
+        for vx, vy, tx in via_info:
+            by_trunk[tx].append((vx, vy))
+
+        for trunk_x, positions in by_trunk.items():
+            if len(positions) < 2:
+                continue
+            positions.sort(key=lambda p: p[1])  # sort by Y
+
+            # Horizontal stubs from each via to trunk
+            for vx, vy in positions:
+                if abs(vx - trunk_x) > 0.01:
+                    pcb.add_trace((vx, vy), (trunk_x, vy),
+                                  net_num, SIGNAL_TRACE_W, "In1.Cu")
+                    traces += 1
+
+            # Vertical trunk segments between adjacent bytes
+            for i in range(len(positions) - 1):
+                _, y1 = positions[i]
+                _, y2 = positions[i + 1]
+                pcb.add_trace((trunk_x, y1), (trunk_x, y2),
+                              net_num, SIGNAL_TRACE_W, "In1.Cu")
+                traces += 1
+
+    return traces
+
+
 # --------------------------------------------------------------
 # Layer visibility test grid (for clear PCB fabrication)
 # --------------------------------------------------------------
@@ -2977,12 +3064,11 @@ def main():
     conn_traces = preroute_connector_leds(pcb, netlist_data)
     print(f"  Connector->LED + fanout stubs: {conn_traces} trace segments")
 
-    # Data bus prerouting skipped — BUF@180° pin layout differs from
-    # original geometry assumptions.  Left to autorouter.
-    dbus_vias, dbus_traces = 0, 0
-    print(f"  D* data bus: skipped (GND pad collision at ic_cx-0.50)")
+    # D* data bus column trunks on In1.Cu (connects bytes vertically)
+    dbus_traces = preroute_column_dbus(pcb, netlist_data)
+    print(f"  D* column trunks (In1.Cu): {dbus_traces} trace segments")
 
-    total_vias = (pwr_vias + dbus_vias + cs_vias + nand_vias
+    total_vias = (pwr_vias + cs_vias + nand_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
                   + r_gnd_vias)
     total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
