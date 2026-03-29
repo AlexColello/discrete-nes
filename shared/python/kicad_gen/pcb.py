@@ -76,6 +76,10 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str, str]:
     _fix_footprint_file(dsbga5_path, stock5_path)
     # Chip 0.8875x1.3875mm -> half 0.44375x0.69375 -> +0.3 -> ±0.75 x ±1.0
     _customize_dsbga_footprint(dsbga5_path, crtyd_x=0.75, crtyd_y=1.0)
+    # Stock KiCad has no 3D model for DSBGA-5; use our custom model
+    _replace_3d_model_path(dsbga5_path,
+        '${KICAD9_3DMODEL_DIR}/Package_BGA.3dshapes/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.step',
+        '${KIPRJMOD}/../../shared/kicad-lib/3d-models/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.step')
 
     # --- DSBGA-6 ---
     stock6_path = os.path.join(KICAD_FP_DIR, STOCK_DSBGA6_FP)
@@ -97,6 +101,10 @@ def create_dsbga_footprints(output_dir: str) -> Tuple[str, str, str]:
     _fix_footprint_file(dsbga6_path, stock6_path)
     # Chip 0.94x1.4mm -> half 0.47x0.7 -> +0.3 -> ±0.8 x ±1.0
     _customize_dsbga_footprint(dsbga6_path, crtyd_x=0.8, crtyd_y=1.0)
+    # Stock KiCad has no 3D model for DSBGA-6 (0.9x1.4mm); use our custom model
+    _replace_3d_model_path(dsbga6_path,
+        '${KICAD9_3DMODEL_DIR}/Package_BGA.3dshapes/Texas_DSBGA-6_0.9x1.4mm_Layout2x3_P0.5mm.step',
+        '${KIPRJMOD}/../../shared/kicad-lib/3d-models/Texas_DSBGA-6_0.9x1.4mm_Layout2x3_P0.5mm.step')
 
     # --- DSBGA-8 ---
     stock8_path = os.path.join(KICAD_FP_DIR, STOCK_DSBGA8_FP)
@@ -1796,6 +1804,13 @@ def _customize_dsbga_footprint(fp_path: str, crtyd_x: float, crtyd_y: float):
         result.append(line)
 
     open(fp_path, "w", encoding="utf-8").write('\n'.join(result))
+
+
+def _replace_3d_model_path(fp_path: str, old_model: str, new_model: str):
+    """Replace a 3D model path in a footprint file."""
+    text = open(fp_path, "r", encoding="utf-8").read()
+    text = text.replace(old_model, new_model)
+    open(fp_path, "w", encoding="utf-8").write(text)
 
 
 def _fix_footprint_file(fp_path: str, stock_path: str):
