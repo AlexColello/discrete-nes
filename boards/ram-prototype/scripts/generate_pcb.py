@@ -1581,7 +1581,7 @@ def preroute_r_gnd(pcb, netlist_data):
             elif fp_angle == 0:
                 escape_angle = 90  # DOWN (pad 2 at right)
             elif fp_angle == 180:
-                escape_angle = 180  # LEFT (pad 2 at left, into inter-cell gap)
+                escape_angle = 270  # UP (pad 2 at left, away from LED below)
             else:
                 escape_angle = 0
 
@@ -3116,7 +3116,7 @@ def main():
                 for comp in others:
                     if comp["ref"] == "J1":
                         j1 = comp
-                    else:
+                    elif comp["part"].startswith("Conn_01x"):
                         extra_root_connectors.append(comp)
                 if j1 is None:
                     print("  WARNING: J1 not found in root group")
