@@ -1026,6 +1026,207 @@ class PCBBuilder:
         return segs
 
     # ----------------------------------------------------------
+    # Bus routing
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def compute_bus_lanes(
+        n: int,
+        spacing: float,
+        center: float,
+    ) -> List[float]:
+        """Compute perpendicular lane positions for a bus.
+
+        Args:
+            n: Number of lanes.
+            spacing: Center-to-center distance between adjacent lanes (mm).
+            center: Center position of the bus corridor (mm).
+
+        Returns:
+            List of *n* lane positions, centered around *center*.
+        """
+        return [round(center + (i - (n - 1) / 2) * spacing, 2) for i in range(n)]
+
+    def add_bus_traces(
+        self,
+        entries: List[Tuple[float, float]],
+        exits: List[Tuple[float, float]],
+        nets: List[int],
+        spacing: float = 0.4,
+        width: float = 0.2,
+        layer: str = "F.Cu",
+        bus_center: Optional[float] = None,
+        bus_start: Optional[float] = None,
+        bus_end: Optional[float] = None,
+        direction: Optional[str] = None,
+        margin: float = 0.0,
+    ) -> Tuple[List[List[Segment]], List[float]]:
+        """Route multiple traces as a parallel bus with 45-degree fan-in/fan-out.
+
+        Creates a group of traces that run in parallel through a bus
+        corridor, with 45-degree diagonal transitions at each end to
+        reach entry/exit points.
+
+        Signals are routed in lane order: signal 0 gets the first lane
+        (topmost for horizontal bus, leftmost for vertical bus).
+
+        Each trace has up to 3 sections::
+
+            entry ── stub ──╲ 45° diagonal ╲── bus ──╱ 45° diagonal ╱── stub ── exit
+
+        1. Fan-out: entry → along-axis stub → 45° diagonal → bus lane
+        2. Bus: parallel straight run at the bus lane position
+        3. Fan-in: bus lane → 45° diagonal → along-axis stub → exit
+
+        **Clearance note:** In the fan sections the perpendicular distance
+        between adjacent 45° diagonals is ``spacing * cos(45°)`` ≈
+        ``0.707 * spacing``.  Ensure *spacing* accounts for trace width
+        plus clearance in the diagonal region.  For 0.2 mm traces with
+        0.15 mm clearance the minimum safe spacing is ~0.50 mm.
+
+        If the auto-computed bus corridor has no room for a parallel
+        section (fan regions overlap), each signal falls back to an
+        individual chamfered L-trace.
+
+        Args:
+            entries: Start point ``(x, y)`` for each signal.
+            exits: End point ``(x, y)`` for each signal.
+            nets: Net number for each signal.
+            spacing: Center-to-center distance between adjacent bus
+                lanes (mm).
+            width: Trace width (mm).
+            layer: Copper layer name.
+            bus_center: Perpendicular center of the bus corridor — Y for
+                a horizontal bus, X for a vertical bus.  Auto-calculated
+                from the midpoint of all entry/exit perpendicular
+                positions if *None*.
+            bus_start: Along-axis coordinate where the parallel section
+                begins (near entries).  Auto-calculated to fit all
+                fan-out diagonals plus *margin* if *None*.
+            bus_end: Along-axis coordinate where the parallel section
+                ends (near exits).  Auto-calculated to fit all fan-in
+                diagonals plus *margin* if *None*.
+            direction: ``"horizontal"`` or ``"vertical"``.  Auto-detected
+                from entry/exit centroids if *None*.
+            margin: Extra along-axis distance added beyond the fan
+                diagonals when auto-computing *bus_start* / *bus_end*.
+                Guarantees at least *margin* mm of straight stub for the
+                most-constrained signal (mm).
+
+        Returns:
+            ``(segments, lanes)`` — *segments* is a list of ``Segment``
+            lists (one per signal) and *lanes* is the list of
+            perpendicular lane positions (Y values for a horizontal bus,
+            X values for a vertical bus).
+        """
+        n = len(entries)
+        if n != len(exits) or n != len(nets):
+            raise ValueError("entries, exits, and nets must have the same length")
+        if n == 0:
+            return [], []
+
+        # ── Determine bus direction ──────────────────────────────
+        if direction is None:
+            ecx = sum(e[0] for e in entries) / n
+            ecy = sum(e[1] for e in entries) / n
+            xcx = sum(e[0] for e in exits) / n
+            xcy = sum(e[1] for e in exits) / n
+            direction = (
+                "horizontal" if abs(xcx - ecx) >= abs(xcy - ecy) else "vertical"
+            )
+
+        horiz = direction == "horizontal"
+        a = 0 if horiz else 1          # along-axis index  (X or Y)
+        p = 1 if horiz else 0          # perpendicular-axis index
+
+        # ── Flow direction (entries → exits) ─────────────────────
+        ea_avg = sum(entries[i][a] for i in range(n)) / n
+        xa_avg = sum(exits[i][a] for i in range(n)) / n
+        sign = 1 if xa_avg >= ea_avg else -1
+
+        # ── Bus lane perpendicular positions ─────────────────────
+        if bus_center is None:
+            all_perp = (
+                [entries[i][p] for i in range(n)]
+                + [exits[i][p] for i in range(n)]
+            )
+            bus_center = sum(all_perp) / len(all_perp)
+        lanes = self.compute_bus_lanes(n, spacing, bus_center)
+
+        # ── Perpendicular displacements for fan sections ─────────
+        e_disp = [abs(entries[i][p] - lanes[i]) for i in range(n)]
+        x_disp = [abs(exits[i][p] - lanes[i]) for i in range(n)]
+
+        # ── Auto-compute bus corridor extent ─────────────────────
+        if bus_start is None:
+            pick = max if sign > 0 else min
+            bus_start = round(
+                pick(entries[i][a] + e_disp[i] * sign for i in range(n))
+                + margin * sign,
+                2,
+            )
+        if bus_end is None:
+            pick = min if sign > 0 else max
+            bus_end = round(
+                pick(exits[i][a] - x_disp[i] * sign for i in range(n))
+                - margin * sign,
+                2,
+            )
+
+        has_bus = (bus_end - bus_start) * sign > 0.01
+
+        # ── Helper: (along, perp) → (x, y) ──────────────────────
+        def pt(along_v: float, perp_v: float) -> Tuple[float, float]:
+            av, pv = round(along_v, 2), round(perp_v, 2)
+            return (av, pv) if horiz else (pv, av)
+
+        # ── Route each signal ────────────────────────────────────
+        all_segs: List[List[Segment]] = []
+        for i in range(n):
+            segs: List[Segment] = []
+            ea = round(entries[i][a], 2)
+            ep = round(entries[i][p], 2)
+            xa = round(exits[i][a], 2)
+            xp = round(exits[i][p], 2)
+            lp = lanes[i]
+
+            if has_bus:
+                # Fan-out: entry stub → 45° diagonal → bus lane
+                diag_s = round(bus_start - e_disp[i] * sign, 2)
+                if abs(ea - diag_s) > 0.01:
+                    segs.append(self.add_trace(
+                        pt(ea, ep), pt(diag_s, ep), nets[i], width, layer))
+                if e_disp[i] > 0.01:
+                    segs.append(self.add_trace(
+                        pt(diag_s, ep), pt(bus_start, lp),
+                        nets[i], width, layer))
+
+                # Parallel bus section
+                segs.append(self.add_trace(
+                    pt(bus_start, lp), pt(bus_end, lp),
+                    nets[i], width, layer))
+
+                # Fan-in: bus lane → 45° diagonal → exit stub
+                diag_e = round(bus_end + x_disp[i] * sign, 2)
+                if x_disp[i] > 0.01:
+                    segs.append(self.add_trace(
+                        pt(bus_end, lp), pt(diag_e, xp),
+                        nets[i], width, layer))
+                if abs(diag_e - xa) > 0.01:
+                    segs.append(self.add_trace(
+                        pt(diag_e, xp), pt(xa, xp), nets[i], width, layer))
+            else:
+                # No room for parallel section — chamfered L-traces
+                segs.extend(self.add_l_trace(
+                    pt(ea, ep), pt(xa, xp),
+                    nets[i], width, layer, horizontal_first=horiz,
+                ))
+
+            all_segs.append(segs)
+
+        return all_segs, lanes
+
+    # ----------------------------------------------------------
     # Silkscreen helpers
     # ----------------------------------------------------------
 

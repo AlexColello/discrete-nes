@@ -258,6 +258,19 @@ python scripts/parse_pdf.py datasheet.pdf --info         # metadata
 - Route as: horizontal/vertical → 45° diagonal → horizontal/vertical (chamfered L-shape)
 - This improves signal integrity and is standard PCB design practice
 
+**Bus routing with `add_bus_traces()` (in `pcb.py`):**
+
+- Routes N traces as a parallel group with 45° fan-in/fan-out at each end
+- Pattern: `entry ── stub ──╲ 45° ╲── parallel bus ──╱ 45° ╱── stub ── exit`
+- Auto-detects direction (horizontal/vertical) and flow direction from entry/exit centroids
+- Auto-computes bus corridor (center, start, end) or accepts explicit overrides
+- Signals are in lane order: signal 0 → first lane (topmost for H-bus, leftmost for V-bus)
+- Returns `(segments_by_signal, lane_positions)` — use lanes to chain further routing
+- **Clearance in fan sections:** perpendicular distance between adjacent 45° diagonals is `spacing × cos(45°) ≈ 0.707 × spacing`. For 0.2mm traces + 0.15mm clearance, minimum safe spacing is ~0.50mm
+- `margin` parameter guarantees minimum stub length for the most-constrained signal
+- Falls back to chamfered L-traces when fan regions overlap (no room for parallel section)
+- Helper: `PCBBuilder.compute_bus_lanes(n, spacing, center)` returns lane positions independently
+
 **KiCad pad position rotation (Y-down coordinate system):**
 
 - KiCad uses **counterclockwise** rotation on screen (positive angle = CCW when viewed in the GUI)
