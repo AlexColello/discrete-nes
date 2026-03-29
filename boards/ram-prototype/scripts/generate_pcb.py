@@ -3030,8 +3030,9 @@ def main():
         group_sizes[name] = compute_group_size(placements, cell_w=cw, cell_h=ch)
 
     # --- Compute absolute positions ---
-    # Layout: Connector | addr_decoder(5 cols) | row_ctrl(x4) | RAM | layer_test
-    #         Below: column_select (under RAM), control_logic (below addr_dec)
+    # Layout: Connector | addr_decoder(5 cols) | row_ctrl(x4) | RAM
+    #         Above RAM: J2/J3/J4 connectors + layer_test grid
+    #         Below RAM: column_select; Below addr_dec: control_logic
     total_placed = 0
 
     root_w, root_h = group_sizes.get("root", (0, 0))
@@ -3076,6 +3077,17 @@ def main():
     # Col 3: RAM bytes (2×4 grid, vertically centered with addr_decoder)
     ram_x = col2_x + rc_w + GROUP_GAP_X
     ram_y = round(dec_abs_y + (dec_h - ram_total_h) / 2, 2)
+
+    # Ensure room above RAM for test grid + connectors (must fit within sheet)
+    _tg_h = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
+    _needed_above = _tg_h + 3.0 + 5.0 + 3.0  # test grid + gap + connectors + margin
+    _available_above = ram_y - (SHEET_BORDER + BOARD_MARGIN)
+    if _available_above < _needed_above:
+        _y_shift = round(_needed_above - _available_above, 2)
+        col1_y += _y_shift
+        dec_abs_y += _y_shift
+        col2_y += _y_shift
+        ram_y += _y_shift
 
     # Control logic below addr_decoder
     ctrl_abs_x = col1_x
@@ -3229,9 +3241,13 @@ def main():
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
     # Place column_select below RAM block, centered horizontally under it
-    # Pre-compute test grid position (depends only on ram_x/ram_total_w)
-    test_x = ram_x + ram_total_w + GROUP_GAP_X + 3.0
-    test_y = ram_y
+    # Pre-compute test grid position (centered above RAM)
+    test_grid_w_est = TEST_LABEL_W + 5 * (TEST_CELL_W + TEST_CELL_GAP)
+    test_grid_h_est = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
+    test_x = round(ram_x + (ram_total_w - test_grid_w_est) / 2, 2)
+    test_y = round(ram_y - test_grid_h_est - 3.0, 2)
+    # Y for extra connectors (J2/J3/J4) — above the test grid
+    conn_above_y = round(test_y - 5.0, 2)
     ram_center_x = ram_x + ram_total_w / 2
     colsel_x = round(ram_center_x - colsel_w / 2, 2)
     colsel_y = round(ram_y + ram_total_h + GROUP_GAP_Y * 3 + 20.0, 2)
@@ -3250,30 +3266,28 @@ def main():
         n_pins = int(comp["part"].replace("Conn_01x", ""))
         pin_span = (n_pins - 1) * CONN_PIN_PITCH
         if ref == "J2":
-            # DEC3 unused header above RAM, horizontal (90°), right of DEC4
-            # DEC4 (J4) is 16-pin at ram_x; DEC3 starts after DEC4's span + gap
+            # DEC3 unused header above test grid, horizontal (90°), right of DEC4
             dec4_span = 15 * CONN_PIN_PITCH  # 16-pin connector span
             j2_x = round(ram_x + dec4_span + 5.0, 2)
-            j2_y = round(ram_y - GROUP_GAP_Y * 3 - 9.0, 2)  # same Y as DEC4
+            j2_y = conn_above_y
             _place_component(pcb, comp, j2_x, j2_y, netlist_data,
                              angle_override=90, layer_override="F.Cu")
             total_placed += 1
             pcb.add_silkscreen_text("DEC3", round(j2_x + pin_span / 2, 2),
                                     round(j2_y - 3.0, 2), size=1.0)
         elif ref == "J3":
-            # Unused column header below test grid, horizontal (90°)
-            test_grid_h_est = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
-            j3_x = round(test_x, 2)
-            j3_y = round(test_y + test_grid_h_est + GROUP_GAP_Y * 3 + 3.0, 2)
+            # COL_SEL unused header right of RAM, vertical (0°), pin 1 at top
+            j3_x = round(ram_x + ram_total_w + GROUP_GAP_X + 3.0, 2)
+            j3_y = round(ram_y, 2)
             _place_component(pcb, comp, j3_x, j3_y, netlist_data,
-                             angle_override=90, layer_override="F.Cu")
+                             angle_override=0, layer_override="F.Cu")
             total_placed += 1
-            pcb.add_silkscreen_text("COL_SEL", round(j3_x + pin_span / 2, 2),
-                                    round(j3_y - 3.0, 2), size=1.0)
+            pcb.add_silkscreen_text("COL_SEL", round(j3_x + 3.5, 2),
+                                    round(j3_y + pin_span / 2, 2), size=1.0)
         elif ref == "J4":
-            # DEC4 unused header above RAM, horizontal (90°), right of J2
+            # DEC4 unused header above test grid, horizontal (90°), leftmost
             j4_x = round(ram_x, 2)
-            j4_y = round(ram_y - GROUP_GAP_Y * 3 - 9.0, 2)
+            j4_y = conn_above_y
             _place_component(pcb, comp, j4_x, j4_y, netlist_data,
                              angle_override=90, layer_override="F.Cu")
             total_placed += 1
@@ -3363,8 +3377,7 @@ def main():
                     + dbus_fan_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
-    # Layer visibility test grid (for clear PCB) — right of RAM
-    # (test_x, test_y already computed above for column_select positioning)
+    # Layer visibility test grid (for clear PCB) — centered above RAM
     test_grid_w, test_grid_h = add_layer_test_grid(pcb, test_x, test_y)
     print(f"\n  Layer test grid: {test_grid_w:.0f} x {test_grid_h:.0f} mm "
           f"at ({test_x:.1f}, {test_y:.1f})")
@@ -3410,7 +3423,9 @@ def main():
                     comp_max_y = max(comp_max_y, abs_y)
 
         # Extend board bounds for test grid (GrText, not footprints)
+        comp_min_x = min(comp_min_x, test_x)
         comp_max_x = max(comp_max_x, test_x + test_grid_w)
+        comp_min_y = min(comp_min_y, test_y)
         comp_max_y = max(comp_max_y, test_y + test_grid_h)
 
         # Extend board bounds for connector pin name labels (right-justified,
