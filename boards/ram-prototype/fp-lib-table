@@ -5,4 +5,5 @@
   (lib (name "Inductor_SMD")(type "KiCad")(uri "${KICAD9_FOOTPRINT_DIR}/Inductor_SMD.pretty")(options "")(descr "SMD inductors"))
   (lib (name "Capacitor_SMD")(type "KiCad")(uri "${KICAD9_FOOTPRINT_DIR}/Capacitor_SMD.pretty")(options "")(descr "SMD capacitors"))
   (lib (name "Package_DFN_QFN")(type "KiCad")(uri "${KICAD9_FOOTPRINT_DIR}/Package_DFN_QFN.pretty")(options "")(descr "DFN and QFN packages"))
+  (lib (name "Power_Discrete")(type "KiCad")(uri "${KIPRJMOD}/../../shared/kicad-lib/footprints/Power_Discrete.pretty")(options "")(descr "Custom power supply footprints"))
 )

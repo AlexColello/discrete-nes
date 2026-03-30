@@ -51,6 +51,9 @@ from kicad_gen.pcb import (
     export_netlist, parse_netlist, get_footprint_for_part,
     fix_pcb_drc,
 )
+from kicad_gen.power_footprints import (
+    create_tps546d24a_footprint, create_smd_power_connector_footprint,
+)
 from kicad_gen.common import FOOTPRINT_MAP
 
 # --------------------------------------------------------------
@@ -121,6 +124,8 @@ def group_components(netlist_data):
                 if f"Row Control {i}" in sheetpath:
                     groups[f"row_ctrl_{i}"].append(comp)
                     break
+        elif "Power Supply" in sheetpath:
+            groups["power_supply"].append(comp)
         else:
             # Byte sheets: /Byte 0/, /Byte 1/, etc.
             for i in range(8):
@@ -2892,12 +2897,19 @@ def main():
     print("Discrete NES - RAM Prototype PCB Generator")
     print("=" * 60)
 
-    # Step 1: Create custom DSBGA footprints
-    print("\n[1/7] Creating custom DSBGA footprints...")
+    # Step 1: Create custom footprints
+    print("\n[1/7] Creating custom footprints...")
     fp5_path, fp6_path, fp8_path = create_dsbga_footprints(SHARED_FP_DIR)
     print(f"  Created: {os.path.basename(fp5_path)}")
     print(f"  Created: {os.path.basename(fp6_path)}")
     print(f"  Created: {os.path.basename(fp8_path)}")
+
+    # Power supply footprints
+    POWER_FP_DIR = os.path.join(SHARED_FP_DIR, "..", "Power_Discrete.pretty")
+    tps_fp = create_tps546d24a_footprint(POWER_FP_DIR)
+    print(f"  Created: {os.path.basename(tps_fp)}")
+    smd_conn_fp = create_smd_power_connector_footprint(POWER_FP_DIR)
+    print(f"  Created: {os.path.basename(smd_conn_fp)}")
 
     # Step 2: Export netlist from schematic
     print("\n[2/7] Exporting netlist from schematic...")
@@ -2918,6 +2930,7 @@ def main():
     print("\n[4/7] Initializing PCB...")
     pcb = PCBBuilder(title="8-Byte Discrete RAM Prototype")
     pcb.add_fp_lib_path("DSBGA_Packages", SHARED_FP_DIR)
+    pcb.add_fp_lib_path("Power_Discrete", POWER_FP_DIR)
 
     # Register all nets
     pcb.add_nets_from_netlist(netlist_data)
@@ -2980,6 +2993,9 @@ def main():
                     placements.append((r_tagged, x + LED_OFFSET_X + R_HORIZ_OFFSET, y))
 
     for name, comps in groups.items():
+        # Power supply has its own placement logic (after the main layout loop)
+        if name == "power_supply":
+            continue
         # Determine max columns and cell dimensions based on group type
         is_ram = name.startswith("byte")
         is_ctrl = name in ("addr_decoder", "control_logic", "column_select") or \
@@ -3207,7 +3223,9 @@ def main():
 
     # Col 1: addr_decoder (vertical columns, full height)
     col1_x = PLACEMENT_ORIGIN + root_w + GROUP_GAP_X * 3  # extra spacing between connector and logic
-    col1_y = PLACEMENT_ORIGIN
+    # Shift all logic groups down to make room for power supply section at top
+    PWR_SECTION_H = 28.0  # power supply section height (connector + caps + bypass)
+    col1_y = PLACEMENT_ORIGIN + PWR_SECTION_H
     dec_abs_y = col1_y  # addr_decoder at top of col 1
 
     # Col 2: row_ctrl, Y-aligned with addr_decoder final ANDs
@@ -3439,6 +3457,141 @@ def main():
                              netlist_data, angle_override=0)
             total_placed += 1
 
+    # Place power supply section (top-left corner, above connector)
+    # Molex Mini-Fit Jr 2x4: ~17mm wide × 12mm tall courtyard
+    # QFN-40 placeholder: ~6mm × 6mm
+    # 0805 cap: ~2.8mm × 1.8mm courtyard
+    # Inductor 7.3x7.3: ~8.5mm × 8.5mm courtyard
+    if "power_supply" in groups:
+        pwr_comps = groups["power_supply"]
+        pwr_by_ref = {c["ref"]: c for c in pwr_comps if not c["ref"].startswith("#")}
+
+        px = PLACEMENT_ORIGIN  # left edge
+        py = PLACEMENT_ORIGIN  # top edge
+        FP_0805 = "Capacitor_SMD:C_0805_2012Metric"
+
+        def _is_bulk_cap(comp):
+            v = comp.get("value", "")
+            return "uF" in v and "100nF" not in v and "1uF" not in v
+
+        # ---- J5: PCIe 8-pin connector (Molex 2x4, ~17mm wide) ----
+        j5 = pwr_by_ref.get("J5")
+        if j5:
+            j5_x = round(px + 8.0, 2)  # center of connector
+            j5_y = round(py + 10.0, 2)  # extra margin from board edge corner
+            _place_component(pcb, j5, j5_x, j5_y, netlist_data,
+                             angle_override=90, layer_override="F.Cu")
+            total_placed += 1
+
+        # ---- U226 position (defined first so nearby caps can reference it) ----
+        reg_x = round(px + 42.0, 2)
+        reg_y = round(py + 5.0, 2)
+
+        # ---- Input filter caps ----
+        # C1, C2 (22µF bulk): between connector and IC
+        cin_x = round(px + 26.0, 2)  # clear of Molex courtyard (~24mm right edge)
+        cin_y = round(py + 4.0, 2)
+        for i, ref in enumerate(["C1", "C2"]):
+            comp = pwr_by_ref.get(ref)
+            if comp:
+                _place_component(pcb, comp, round(cin_x + i * 4.0, 2), cin_y,
+                                 netlist_data, angle_override=90,
+                                 fp_override=FP_0805)
+                total_placed += 1
+        # C3 (100nF PVIN HF): adjacent to IC left side (PVIN pins)
+        comp = pwr_by_ref.get("C3")
+        if comp:
+            _place_component(pcb, comp,
+                             round(reg_x - 4.0, 2), round(reg_y, 2),
+                             netlist_data, angle_override=90)
+            total_placed += 1
+
+        # ---- U226: TPS546D24A ----
+        u_reg = pwr_by_ref.get("U226")
+        if u_reg:
+            _place_component(pcb, u_reg, reg_x, reg_y, netlist_data,
+                             angle_override=0)
+            total_placed += 1
+
+        # ---- L1: inductor (right of IC) ----
+        l1 = pwr_by_ref.get("L1")
+        if l1:
+            _place_component(pcb, l1, round(px + 56.0, 2), round(py + 4.0, 2),
+                             netlist_data, angle_override=0)
+            total_placed += 1
+
+        # ---- Output filter caps: 2 rows (right of inductor) ----
+        # L1 is at px+56; output side is ~px+60. Place caps starting there.
+        cout_x = round(px + 64.0, 2)
+        # C7-C9 (47µF bulk): top row
+        for i, ref in enumerate(["C7", "C8", "C9"]):
+            comp = pwr_by_ref.get(ref)
+            if comp:
+                _place_component(pcb, comp, round(cout_x + i * 4.0, 2),
+                                 round(py + 2.0, 2), netlist_data,
+                                 angle_override=90, fp_override=FP_0805)
+                total_placed += 1
+        # C10 (47µF bulk) + C11 (100nF HF): bottom row, C11 closest to inductor output
+        comp = pwr_by_ref.get("C10")
+        if comp:
+            _place_component(pcb, comp, round(cout_x, 2),
+                             round(py + 8.0, 2), netlist_data,
+                             angle_override=90, fp_override=FP_0805)
+            total_placed += 1
+        comp = pwr_by_ref.get("C11")
+        if comp:
+            # C11 (HF decouple) near inductor output, clear of L1 courtyard
+            _place_component(pcb, comp, round(cout_x + 4.0, 2),
+                             round(py + 8.0, 2), netlist_data,
+                             angle_override=90)
+            total_placed += 1
+
+        # ---- IC bypass caps (adjacent to QFN, within 3mm of pins) ----
+        # C4 (BOOT): right side of IC, near BOOT/SW pins
+        comp = pwr_by_ref.get("C4")
+        if comp:
+            _place_component(pcb, comp,
+                             round(reg_x + 4.0, 2), round(reg_y - 1.5, 2),
+                             netlist_data, angle_override=90)
+            total_placed += 1
+        # C5 (VDD5 4.7µF): right side of IC, near VDD5 pin
+        comp = pwr_by_ref.get("C5")
+        if comp:
+            _place_component(pcb, comp,
+                             round(reg_x + 4.0, 2), round(reg_y + 2.0, 2),
+                             netlist_data, angle_override=90,
+                             fp_override=FP_0805 if _is_bulk_cap(comp) else None)
+            total_placed += 1
+        # C6 (BP1V5): below IC, near ground pad area
+        comp = pwr_by_ref.get("C6")
+        if comp:
+            _place_component(pcb, comp,
+                             round(reg_x, 2), round(reg_y + 5.0, 2),
+                             netlist_data, angle_override=0)
+            total_placed += 1
+
+        # ---- EN divider resistors (left of IC) ----
+        for i, ref in enumerate(["R192", "R193"]):
+            comp = pwr_by_ref.get(ref)
+            if comp:
+                _place_component(pcb, comp,
+                                 round(reg_x - 8.0, 2),
+                                 round(reg_y + 2.0 + i * 4.0, 2),
+                                 netlist_data, angle_override=0)
+                total_placed += 1
+
+        # ---- PGOOD pull-up + LED indicator (below bypass caps) ----
+        pgood_x = round(reg_x - 8.0, 2)
+        pgood_y = round(reg_y + 16.0, 2)
+        for i, ref in enumerate(["R194", "D192", "R195"]):
+            comp = pwr_by_ref.get(ref)
+            if comp:
+                _place_component(pcb, comp, round(pgood_x + i * 4.0, 2),
+                                 pgood_y, netlist_data, angle_override=90)
+                total_placed += 1
+
+        print(f"  Power supply: {len(pwr_by_ref)} components placed")
+
     print(f"  Total components placed: {total_placed}")
 
     # Step 6: Pre-route local connections
@@ -3659,12 +3812,13 @@ def main():
 
 
 def _place_component(pcb, comp, x, y, netlist_data, angle_override=None,
-                     layer_override=None):
+                     layer_override=None, fp_override=None):
     """Place a single component on the PCB.
 
     Determines the correct footprint from the part name and assigns nets.
     angle_override: if not None, overrides the default angle for this part type.
     layer_override: if not None, overrides the default layer for this part type.
+    fp_override: if not None, overrides the footprint for this specific component.
     """
     ref = comp["ref"]
     part = comp["part"]
@@ -3675,7 +3829,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None,
     tstamp = comp["tstamp"]
 
     # Determine footprint
-    fp_ref = get_footprint_for_part(part)
+    fp_ref = fp_override if fp_override else get_footprint_for_part(part)
     if fp_ref is None:
         # Skip power symbols and flags
         if ref.startswith("#"):
@@ -3692,7 +3846,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None,
     # Determine layer (independent of angle)
     if layer_override is not None:
         layer = layer_override
-    elif part.startswith("Conn_01x"):
+    elif part.startswith("Conn_01x") or part.startswith("Conn_02x"):
         layer = "B.Cu"  # Default: soldered on back side
     else:
         layer = "F.Cu"
@@ -3714,7 +3868,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None,
             angle = 270  # Dual NAND: rotated 180° from 90°, VCC/GND down (+Y)
         elif "74LVC" in part:
             angle = 180  # Other logic (INV, AND, NAND) unchanged
-        elif part.startswith("Conn_01x"):
+        elif part.startswith("Conn_01x") or part.startswith("Conn_02x"):
             angle = 180  # Pins face left toward board edge
 
     pcb.place_component(
@@ -3730,7 +3884,7 @@ def _place_component(pcb, comp, x, y, netlist_data, angle_override=None,
 
     # Connector on B.Cu: keep silkscreen on F.SilkS (visible from front)
     # and fix 3D model rotation (B.Cu mirror causes 180° visual flip)
-    if part.startswith("Conn_01x") and layer == "B.Cu":
+    if (part.startswith("Conn_01x") or part.startswith("Conn_02x")) and layer == "B.Cu":
         fp = pcb.board.footprints[-1]  # just placed
         for gi in fp.graphicItems:
             if hasattr(gi, 'layer') and gi.layer == "B.SilkS":
