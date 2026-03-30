@@ -1128,10 +1128,10 @@ def preroute_enable_buses(pcb, netlist_data):
 
     WRITE_EN buses run above the CLK bus (top of byte row).
     READ_EN buses run below the OE bus (bottom of byte row).
-    These Y positions are clear of CLK/OE vertical stubs.
 
-    Buses span from the row_ctrl LED area across both byte columns.
-    Does NOT connect to NAND (DSBGA-8) pins — autorouter handles that.
+    Connection from row_ctrl: 45° diagonal from the ic-to-led junction
+    near the LED, then vertical if needed, then horizontal bus across
+    both byte columns.
 
     Returns trace count.
     """
@@ -1145,6 +1145,9 @@ def preroute_enable_buses(pcb, netlist_data):
 
     CLK_BUS_Y_OFFSET = -1.25  # from preroute_clk_fanout
     OE_BUS_Y_OFFSET = 1.4     # from preroute_oe_fanout (relative to BUF Y)
+    IC_TO_LED_UP = 0.95       # ic_to_led vertical offset above IC center (180° ICs)
+    CORRIDOR_SHIFT = 0.13  # Y shift from junc into corridor between R pads
+    HORIZ_PAST_R = R_HORIZ_OFFSET + 1.10  # horiz extension past R + GND via
 
     for row in range(4):
         for signal, pin_num in [("WRITE_EN", "2"), ("READ_EN", "6")]:
@@ -1153,9 +1156,9 @@ def preroute_enable_buses(pcb, netlist_data):
             if net_num is None:
                 continue
 
-            # Find NAND pads and row_ctrl LED pads on this net
+            # Find NAND pads and row_ctrl LED center on this net
             nand_pads = []
-            led_pads = []
+            led_center = None  # (x, y) of row_ctrl indicator LED
             dff_y = None
             buf_y = None
             for fp in pcb.board.footprints:
@@ -1169,30 +1172,61 @@ def preroute_enable_buses(pcb, netlist_data):
                     pos = pcb.get_pad_position(ref, pad.number)
                     if part == "74LVC2G00":
                         nand_pads.append(pos)
-                        # Derive DFF/BUF Y from NAND position
-                        # NAND at byte_y - 0.25, so byte_y = nand_y + 0.25
                         if dff_y is None:
                             byte_y = fp.position.Y + 0.25
                             dff_y = byte_y
                             buf_y = byte_y + BUF_ROW_Y
-                    elif part == "LED_Small":
-                        led_pads.append(pos)
+                    elif part == "LED_Small" and led_center is None:
+                        led_center = (fp.position.X, fp.position.Y)
 
-            if len(nand_pads) < 2 or dff_y is None:
+            if len(nand_pads) < 2 or dff_y is None or led_center is None:
                 continue
 
             # Bus Y: above CLK bus for WRITE_EN, below OE bus for READ_EN
             if signal == "WRITE_EN":
-                clk_bus_y = dff_y + CLK_BUS_Y_OFFSET
-                bus_y = round(clk_bus_y + WRITE_EN_OFFSET, 2)
+                bus_y = round(dff_y + CLK_BUS_Y_OFFSET + WRITE_EN_OFFSET, 2)
             else:
-                oe_bus_y = buf_y + OE_BUS_Y_OFFSET
-                bus_y = round(oe_bus_y + READ_EN_OFFSET, 2)
+                bus_y = round(buf_y + OE_BUS_Y_OFFSET + READ_EN_OFFSET, 2)
 
-            # Bus X: from left of RAM block (past row_ctrl) to past rightmost NAND
-            x_start = round(min(p[0] for p in nand_pads) - 2.0, 2)
+            # ic-to-led junction: where the horizontal segment meets the
+            # vertical drop to the LED anode (same net, T-branch here)
+            led_x, led_y = led_center
+            junc_x = round(led_x, 2)
+            junc_y = round(led_y - IC_TO_LED_UP, 2)
+            delta_y = abs(bus_y - junc_y)
+
+            if bus_y < junc_y:
+                # WRITE_EN: bus above — pure 45° diagonal up-right to bus_y.
+                # Goes away from LED-to-R trace (which is below), no crossing.
+                diag_end = (round(junc_x + delta_y, 2), round(bus_y, 2))
+                pcb.add_trace((junc_x, junc_y), diag_end, net_num,
+                              ENABLE_TRACE_W, "F.Cu")
+                traces += 1
+                x_start = diag_end[0]
+            else:
+                # READ_EN: bus below — route through the narrow corridor
+                # between the write AND's R pad 1 (above) and read AND's
+                # R pad 2 (below).  Short 45° up-right into corridor,
+                # horizontal right past R + GND via, then 45° down-right.
+                corr_y = round(junc_y - CORRIDOR_SHIFT, 2)
+                p1 = (round(junc_x + CORRIDOR_SHIFT, 2), corr_y)
+                pcb.add_trace((junc_x, junc_y), p1, net_num,
+                              ENABLE_TRACE_W, "F.Cu")
+                traces += 1
+                # Horizontal past R area
+                p2 = (round(p1[0] + HORIZ_PAST_R, 2), corr_y)
+                pcb.add_trace(p1, p2, net_num, ENABLE_TRACE_W, "F.Cu")
+                traces += 1
+                # 45° diagonal down-right to bus_y
+                corr_delta = round(bus_y - corr_y, 2)
+                diag_end = (round(p2[0] + corr_delta, 2), round(bus_y, 2))
+                pcb.add_trace(p2, diag_end, net_num,
+                              ENABLE_TRACE_W, "F.Cu")
+                traces += 1
+                x_start = diag_end[0]
+
+            # Horizontal bus from diagonal endpoint across byte area
             x_end = round(max(p[0] for p in nand_pads) + 1.0, 2)
-
             pcb.add_trace((x_start, bus_y), (x_end, bus_y), net_num,
                           ENABLE_TRACE_W, "F.Cu")
             traces += 1
@@ -3007,7 +3041,7 @@ def main():
         elif name == "addr_decoder":
             max_cols = 2  # INVs in top row, ANDs below (custom layout below)
         elif name.startswith("row_ctrl_"):
-            max_cols = 2  # Horizontal: write + read gates side by side
+            max_cols = 1  # Vertical: write on top, read below (custom layout)
         else:
             max_cols = 3
 
@@ -3113,6 +3147,24 @@ def main():
             placements = rotated
 
             group_cell_dims[name] = (cell_h, col_sp)  # swapped after rotation
+
+        # Custom row_ctrl layout: stack write + read AND gates vertically
+        # (on top of each other) so they align with the enable buses
+        # that cross the byte area horizontally.
+        elif name.startswith("row_ctrl_"):
+            RC_GATE_SPACING = 2.3  # mm between write and read AND centers
+            placements = []
+            for idx, (ic, r, led) in enumerate(ic_cells):
+                y = round(idx * RC_GATE_SPACING, 2)
+                if ic is not None:
+                    placements.append((ic, 0, y))
+                if led:
+                    placements.append((led, LED_OFFSET_X, y))
+                if r:
+                    r_tagged = dict(r, angle_override=90)
+                    placements.append((r_tagged,
+                                       LED_OFFSET_X + R_HORIZ_OFFSET, y))
+            group_cell_dims[name] = (CTRL_CELL_W, RC_GATE_SPACING)
 
         else:
             placements = compute_group_layout(ic_cells, standalone, max_cols,
@@ -3233,7 +3285,8 @@ def main():
     col2_y = dec_abs_y  # same Y start
 
     # Col 3: RAM bytes (2×4 grid, vertically centered with addr_decoder)
-    ram_x = col2_x + rc_w + GROUP_GAP_X
+    RC_TO_RAM_GAP = 1.0  # tight gap — enable bus traces bridge the distance
+    ram_x = col2_x + rc_w + RC_TO_RAM_GAP
     ram_y = round(dec_abs_y + (dec_h - ram_total_h) / 2, 2)
 
     # Ensure room above RAM for test grid + connectors (must fit within sheet)
