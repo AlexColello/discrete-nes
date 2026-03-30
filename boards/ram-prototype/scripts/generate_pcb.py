@@ -3457,11 +3457,21 @@ def main():
                              netlist_data, angle_override=0)
             total_placed += 1
 
-    # Place power supply section (top-left corner, above connector)
-    # Molex Mini-Fit Jr 2x4: ~17mm wide × 12mm tall courtyard
-    # QFN-40 placeholder: ~6mm × 6mm
-    # 0805 cap: ~2.8mm × 1.8mm courtyard
-    # Inductor 7.3x7.3: ~8.5mm × 8.5mm courtyard
+    # ================================================================
+    # Power supply section (top-left corner)
+    #
+    # TPS546D24A datasheet layout (Figure 10-1):
+    #   Input caps → PVIN pins → IC → SW pins → inductor → output caps
+    #
+    # IC at 180° rotation so:
+    #   PVIN (pins 19-25) faces LEFT → toward input caps
+    #   SW (pins 8-11) faces RIGHT → toward inductor
+    #   PGND (pins 12-18) at TOP → thermal vias to inner GND plane
+    #   VDD5 (pin 28) at LEFT → bypass cap nearby
+    #
+    # Copper pours: PVIN (F.Cu left), PGND (F.Cu center/top), VOUT (F.Cu right)
+    # SW area: MINIMAL copper, with keepout zone around it
+    # ================================================================
     if "power_supply" in groups:
         pwr_comps = groups["power_supply"]
         pwr_by_ref = {c["ref"]: c for c in pwr_comps if not c["ref"].startswith("#")}
@@ -3474,123 +3484,183 @@ def main():
             v = comp.get("value", "")
             return "uF" in v and "100nF" not in v and "1uF" not in v
 
-        # ---- J5: PCIe 8-pin connector (Molex 2x4, ~17mm wide) ----
+        # ---- U226 center position ----
+        reg_x = round(px + 42.0, 2)
+        reg_y = round(py + 10.0, 2)
+
+        # ---- J5: PCIe 8-pin connector (left edge, vertical) ----
         j5 = pwr_by_ref.get("J5")
         if j5:
-            j5_x = round(px + 8.0, 2)  # center of connector
-            j5_y = round(py + 10.0, 2)  # extra margin from board edge corner
-            _place_component(pcb, j5, j5_x, j5_y, netlist_data,
-                             angle_override=90, layer_override="F.Cu")
+            _place_component(pcb, j5, round(px + 8.0, 2), round(py + 12.0, 2),
+                             netlist_data, angle_override=90, layer_override="F.Cu")
             total_placed += 1
 
-        # ---- U226 position (defined first so nearby caps can reference it) ----
-        reg_x = round(px + 42.0, 2)
-        reg_y = round(py + 5.0, 2)
+        # ---- U226: TPS546D24A at 180° (PVIN left, SW right) ----
+        u_reg = pwr_by_ref.get("U226")
+        if u_reg:
+            _place_component(pcb, u_reg, reg_x, reg_y, netlist_data,
+                             angle_override=180)
+            total_placed += 1
 
-        # ---- Input filter caps ----
-        # C1, C2 (22µF bulk): between connector and IC
-        cin_x = round(px + 26.0, 2)  # clear of Molex courtyard (~24mm right edge)
-        cin_y = round(py + 4.0, 2)
+        # At 180° rotation, pin positions flip:
+        #   PVIN (was bottom-right) → now at LEFT (x≈59.6) and TOP (y≈21.6)
+        #   SW (was left) → now at RIGHT (x≈64.4)
+        #   PGND (was left+bottom) → now at RIGHT + TOP
+        #   VDD5 (was right) → now at LEFT
+        #   BOOT (was left) → now at RIGHT (near SW)
+
+        # ---- Input filter caps (left of IC, near PVIN pins) ----
+        cin_x = round(px + 26.0, 2)
+        cin_y = round(reg_y, 2)
         for i, ref in enumerate(["C1", "C2"]):
             comp = pwr_by_ref.get(ref)
             if comp:
                 _place_component(pcb, comp, round(cin_x + i * 4.0, 2), cin_y,
-                                 netlist_data, angle_override=90,
-                                 fp_override=FP_0805)
+                                 netlist_data, angle_override=90, fp_override=FP_0805)
                 total_placed += 1
-        # C3 (100nF PVIN HF): adjacent to IC left side (PVIN pins)
+        # C3 (100nF PVIN HF): tight against IC left side
         comp = pwr_by_ref.get("C3")
         if comp:
-            _place_component(pcb, comp,
-                             round(reg_x - 4.0, 2), round(reg_y, 2),
+            _place_component(pcb, comp, round(reg_x - 4.5, 2), round(reg_y - 1.0, 2),
                              netlist_data, angle_override=90)
             total_placed += 1
 
-        # ---- U226: TPS546D24A ----
-        u_reg = pwr_by_ref.get("U226")
-        if u_reg:
-            _place_component(pcb, u_reg, reg_x, reg_y, netlist_data,
-                             angle_override=0)
-            total_placed += 1
-
-        # ---- L1: inductor (right of IC) ----
+        # ---- L1: inductor (right of IC, connecting to SW pins) ----
+        l1_x = round(reg_x + 14.0, 2)
+        l1_y = round(reg_y, 2)
         l1 = pwr_by_ref.get("L1")
         if l1:
-            _place_component(pcb, l1, round(px + 56.0, 2), round(py + 4.0, 2),
-                             netlist_data, angle_override=0)
+            _place_component(pcb, l1, l1_x, l1_y, netlist_data, angle_override=0)
             total_placed += 1
 
-        # ---- Output filter caps: 2 rows (right of inductor) ----
-        # L1 is at px+56; output side is ~px+60. Place caps starting there.
-        cout_x = round(px + 64.0, 2)
+        # ---- Output filter caps (right of inductor) ----
+        cout_x = round(l1_x + 12.0, 2)
         # C7-C9 (47µF bulk): top row
         for i, ref in enumerate(["C7", "C8", "C9"]):
             comp = pwr_by_ref.get(ref)
             if comp:
                 _place_component(pcb, comp, round(cout_x + i * 4.0, 2),
-                                 round(py + 2.0, 2), netlist_data,
+                                 round(reg_y - 3.0, 2), netlist_data,
                                  angle_override=90, fp_override=FP_0805)
                 total_placed += 1
-        # C10 (47µF bulk) + C11 (100nF HF): bottom row, C11 closest to inductor output
-        comp = pwr_by_ref.get("C10")
-        if comp:
-            _place_component(pcb, comp, round(cout_x, 2),
-                             round(py + 8.0, 2), netlist_data,
-                             angle_override=90, fp_override=FP_0805)
-            total_placed += 1
-        comp = pwr_by_ref.get("C11")
-        if comp:
-            # C11 (HF decouple) near inductor output, clear of L1 courtyard
-            _place_component(pcb, comp, round(cout_x + 4.0, 2),
-                             round(py + 8.0, 2), netlist_data,
-                             angle_override=90)
-            total_placed += 1
+        # C10 (47µF) + C11 (100nF HF): bottom row
+        for i, ref in enumerate(["C10", "C11"]):
+            comp = pwr_by_ref.get(ref)
+            if comp:
+                _place_component(pcb, comp, round(cout_x + i * 4.0, 2),
+                                 round(reg_y + 3.0, 2), netlist_data,
+                                 angle_override=90,
+                                 fp_override=FP_0805 if _is_bulk_cap(comp) else None)
+                total_placed += 1
 
-        # ---- IC bypass caps (adjacent to QFN, within 3mm of pins) ----
-        # C4 (BOOT): right side of IC, near BOOT/SW pins
+        # ---- IC bypass caps (tight against QFN) ----
+        # C4 (BOOT 100nF): RIGHT side near BOOT/SW pins (after 180° rotation)
         comp = pwr_by_ref.get("C4")
         if comp:
-            _place_component(pcb, comp,
-                             round(reg_x + 4.0, 2), round(reg_y - 1.5, 2),
+            _place_component(pcb, comp, round(reg_x + 4.5, 2), round(reg_y - 1.0, 2),
                              netlist_data, angle_override=90)
             total_placed += 1
-        # C5 (VDD5 4.7µF): right side of IC, near VDD5 pin
+        # C5 (VDD5 4.7µF): LEFT side near VDD5 pin (after 180° rotation)
         comp = pwr_by_ref.get("C5")
         if comp:
-            _place_component(pcb, comp,
-                             round(reg_x + 4.0, 2), round(reg_y + 2.0, 2),
+            _place_component(pcb, comp, round(reg_x - 4.5, 2), round(reg_y + 2.0, 2),
                              netlist_data, angle_override=90,
                              fp_override=FP_0805 if _is_bulk_cap(comp) else None)
             total_placed += 1
-        # C6 (BP1V5): below IC, near ground pad area
+        # C6 (BP1V5 1µF): RIGHT side near BP1V5 pin (after 180° rotation)
         comp = pwr_by_ref.get("C6")
         if comp:
-            _place_component(pcb, comp,
-                             round(reg_x, 2), round(reg_y + 5.0, 2),
-                             netlist_data, angle_override=0)
+            _place_component(pcb, comp, round(reg_x + 4.5, 2), round(reg_y + 2.0, 2),
+                             netlist_data, angle_override=90)
             total_placed += 1
 
-        # ---- EN divider resistors (left of IC) ----
+        # ---- EN divider resistors (left of IC, near AVIN/EN pins) ----
         for i, ref in enumerate(["R192", "R193"]):
             comp = pwr_by_ref.get(ref)
             if comp:
-                _place_component(pcb, comp,
-                                 round(reg_x - 8.0, 2),
-                                 round(reg_y + 2.0 + i * 4.0, 2),
+                _place_component(pcb, comp, round(reg_x - 8.0, 2),
+                                 round(reg_y + 4.0 + i * 4.0, 2),
                                  netlist_data, angle_override=0)
                 total_placed += 1
 
-        # ---- PGOOD pull-up + LED indicator (below bypass caps) ----
-        pgood_x = round(reg_x - 8.0, 2)
-        pgood_y = round(reg_y + 16.0, 2)
+        # ---- PGOOD pull-up + LED indicator (below IC) ----
+        pgood_y = round(reg_y + 14.0, 2)
         for i, ref in enumerate(["R194", "D192", "R195"]):
             comp = pwr_by_ref.get(ref)
             if comp:
-                _place_component(pcb, comp, round(pgood_x + i * 4.0, 2),
+                _place_component(pcb, comp, round(reg_x - 4.0 + i * 4.0, 2),
                                  pgood_y, netlist_data, angle_override=90)
                 total_placed += 1
 
         print(f"  Power supply: {len(pwr_by_ref)} components placed")
+
+        # ---- Thermal vias under exposed pad (pin 41) ----
+        # 2x3 grid within the 3.3mm x 5.3mm thermal pad
+        gnd_net = pcb.get_net_number("GND")
+        if gnd_net is not None:
+            via_spacing_x = 1.28  # from datasheet stencil pattern
+            via_spacing_y = 1.40
+            pwr_thermal_vias = 0
+            for row in range(-1, 2):      # -1, 0, 1 → 3 rows
+                for col in range(-1, 1):   # -1, 0 → 2 columns
+                    vx = round(reg_x + col * via_spacing_x + via_spacing_x / 2, 2)
+                    vy = round(reg_y + row * via_spacing_y, 2)
+                    pcb.add_via((vx, vy), gnd_net, size=0.6, drill=0.3,
+                                layers=["F.Cu", "B.Cu"])
+                    pwr_thermal_vias += 1
+            print(f"  Power thermal vias: {pwr_thermal_vias}")
+
+        # ---- Copper pour zones ----
+        # PVIN pour: left of IC covering input caps to PVIN pins
+        pvin_net_num = pcb.get_net_number("/Power Supply/+12V")
+        if pvin_net_num is not None:
+            pvin_outline = [
+                (cin_x - 3.0, reg_y - 5.5),
+                (reg_x - 2.0, reg_y - 5.5),
+                (reg_x - 2.0, reg_y + 5.5),
+                (cin_x - 3.0, reg_y + 5.5),
+            ]
+            pcb.add_zone("/Power Supply/+12V", "F.Cu", pvin_outline,
+                         clearance=0.3, pad_connection="yes", priority=1)
+            print("  Added PVIN copper pour (F.Cu)")
+
+        # VOUT pour: right of inductor through output caps
+        vcc_net_num = pcb.get_net_number("VCC")
+        if vcc_net_num is not None:
+            vout_outline = [
+                (l1_x + 3.0, reg_y - 6.0),
+                (cout_x + 12.0, reg_y - 6.0),
+                (cout_x + 12.0, reg_y + 6.0),
+                (l1_x + 3.0, reg_y + 6.0),
+            ]
+            pcb.add_zone("VCC", "F.Cu", vout_outline,
+                         clearance=0.3, pad_connection="yes", priority=1)
+            print("  Added VOUT copper pour (F.Cu)")
+
+        # PGND pour: around thermal pad area, connecting PGND pins to vias
+        if gnd_net is not None:
+            pgnd_outline = [
+                (reg_x - 3.0, reg_y - 4.0),
+                (reg_x + 3.0, reg_y - 4.0),
+                (reg_x + 3.0, reg_y + 4.0),
+                (reg_x - 3.0, reg_y + 4.0),
+            ]
+            pcb.add_zone("GND", "F.Cu", pgnd_outline,
+                         clearance=0.3, pad_connection="yes", priority=2)
+            print("  Added PGND copper pour (F.Cu)")
+
+        # SW keepout: prevent copper fill near SW node (minimize area)
+        sw_keepout = [
+            (reg_x + 2.5, reg_y - 3.0),
+            (l1_x - 3.0, reg_y - 3.0),
+            (l1_x - 3.0, reg_y + 3.0),
+            (reg_x + 2.5, reg_y + 3.0),
+        ]
+        pcb.add_keepout_zone("F.Cu", sw_keepout)
+        # Allow footprints in SW keepout (only block copper pour)
+        sw_kz = pcb.board.zones[-1]
+        sw_kz.keepoutSettings.footprints = 'allowed'
+        print("  Added SW keepout zone (F.Cu)")
 
     print(f"  Total components placed: {total_placed}")
 
