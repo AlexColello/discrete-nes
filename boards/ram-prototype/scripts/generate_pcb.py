@@ -2875,6 +2875,111 @@ def preroute_dbus_to_connector(pcb, netlist_data):
     return traces
 
 
+def preroute_coladdr_to_colsel(pcb, netlist_data):
+    """Route column address A7-A10 from connector stubs to column_select INVs.
+
+    Bridges the gap between the connector LED fanout stubs (x~30, y~135-143)
+    and the column_select inverter inputs (x~117-129, y~130) on F.Cu.
+
+    Routes a horizontal parallel bus RIGHT from the connector stubs.  The
+    signal-to-INV mapping is reversed (A7=bottom connector→leftmost INV,
+    A10=top→rightmost) so diagonals to the INV pins would cross on a
+    single layer.  The bus stops before the crossing region and the
+    autorouter handles the final fan to each INV input.
+
+    Returns trace_count (int).
+    """
+    traces = 0
+
+    # --- Find column address nets from J1 connector ---
+    coladdr_nets = {}  # net_num -> net_name
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if ref != "J1":
+            continue
+        angle_rad = math.radians(fp.position.angle or 0)
+        cos_a, sin_a = math.cos(angle_rad), math.sin(angle_rad)
+        for pad in fp.pads:
+            if not (pad.net and pad.net.name):
+                continue
+            name = pad.net.name
+            if any(f"A{n}" in name for n in [7, 8, 9, 10]):
+                coladdr_nets[pad.net.number] = name
+        break
+
+    if not coladdr_nets:
+        print("  WARNING: No A7-A10 nets found on J1")
+        return 0
+
+    # --- Find connector stub endpoints ---
+    stub_ends = {}  # net_num -> (x, y)
+    for seg in pcb.board.traceItems:
+        if not hasattr(seg, 'start') or not hasattr(seg, 'net'):
+            continue
+        if seg.net not in coladdr_nets or getattr(seg, 'layer', '') != 'F.Cu':
+            continue
+        x1, y1, x2, y2 = seg.start.X, seg.start.Y, seg.end.X, seg.end.Y
+        if abs(y1 - y2) < 0.01 and max(x1, x2) < 40:
+            right_x = max(x1, x2)
+            if seg.net not in stub_ends or right_x > stub_ends[seg.net][0]:
+                stub_ends[seg.net] = (round(right_x, 2), round(y1, 2))
+
+    # --- Find inverter input pin positions (pin 2 of 74LVC1G04) ---
+    ref_to_part = _build_ref_to_part(netlist_data)
+    inv_inputs = {}  # net_num -> (x, y)
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if ref_to_part.get(ref) != "74LVC1G04":
+            continue
+        pin2_net = pcb.get_pad_net(ref, "2")
+        if pin2_net not in coladdr_nets:
+            continue
+        pin2_pos = pcb.get_pad_position(ref, "2")
+        if pin2_pos is None:
+            continue
+        if pin2_net not in inv_inputs or pin2_pos[0] < inv_inputs[pin2_net][0]:
+            inv_inputs[pin2_net] = (round(pin2_pos[0], 2), round(pin2_pos[1], 2))
+
+    # --- Match stubs with inverter inputs ---
+    matched = []  # [(net_num, stub_x, stub_y, inv_x, inv_y)]
+    for net_num in coladdr_nets:
+        if net_num in stub_ends and net_num in inv_inputs:
+            sx, sy = stub_ends[net_num]
+            ix, iy = inv_inputs[net_num]
+            matched.append((net_num, sx, sy, ix, iy))
+
+    if not matched:
+        print("  WARNING: No A7-A10 stubs matched to inverter inputs")
+        return 0
+
+    matched.sort(key=lambda m: m[2])  # sort by stub Y ascending
+    n = len(matched)
+
+    # --- Compute peel-off points (where 45° diagonal would start) ---
+    peel_xs = []
+    for i in range(n):
+        _, sx, sy, ix, iy = matched[i]
+        abs_dy = abs(sy - iy)
+        peel_x = round(ix - abs_dy, 2)
+        peel_xs.append(peel_x)
+
+    stub_x = matched[0][1]
+    min_peel_x = min(peel_xs)
+
+    print(f"  A7-A10->colsel: bus x={stub_x}..{min_peel_x:.1f}, "
+          f"peel x={min(peel_xs):.1f}..{max(peel_xs):.1f}")
+
+    # --- Route: horizontal bus from stubs to earliest peel-off ---
+    for i in range(n):
+        net_num, sx, sy, ix, iy = matched[i]
+        if abs(min_peel_x - sx) > 0.01:
+            pcb.add_trace((sx, sy), (min_peel_x, sy),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+    return traces
+
+
 def preroute_colsel_fanout(pcb, netlist_data):
     """Extend COL_SEL In1.Cu trunks down below the D* bus and add vias.
 
@@ -4014,6 +4119,10 @@ def main():
     dbus_conn_traces = preroute_dbus_to_connector(pcb, netlist_data)
     print(f"  D* bus->connector (F.Cu): {dbus_conn_traces} trace segments")
 
+    # Column address A7-A10 from connector to column_select inverters (F.Cu)
+    coladdr_traces = preroute_coladdr_to_colsel(pcb, netlist_data)
+    print(f"  A7-A10->colsel (F.Cu): {coladdr_traces} trace segments")
+
     total_vias = (pwr_vias + cs_vias + nand_vias + nand_led_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
                   + r_gnd_vias + dbus_fan_vias + cs_fan_vias)
@@ -4022,7 +4131,8 @@ def main():
                     + dff_buf_gnd_traces
                     + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces
-                    + dbus_fan_traces + dbus_conn_traces + cs_fan_traces)
+                    + dbus_fan_traces + dbus_conn_traces
+                    + coladdr_traces + cs_fan_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
     # Layer visibility test grid (for clear PCB) — centered above RAM
