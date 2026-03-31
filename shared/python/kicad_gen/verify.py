@@ -13,6 +13,7 @@ Provides general-purpose checks that apply to any board:
 9. Content on sheet blocks
 10. Page boundary
 11. Power symbol orientation
+12. Text overlap (text vs wires, component bodies, and other text)
 
 Also provides:
 - parse_schematic() -- full schematic parser
@@ -211,6 +212,79 @@ def _bboxes_overlap(a, b):
             a[1] < b[3] - TOLERANCE and a[3] > b[1] + TOLERANCE)
 
 
+# KiCad stroke font: approximate character width ≈ 0.6 × font_width.
+# This ratio was measured from KiCad's default stroke font glyphs.
+_CHAR_WIDTH_RATIO = 0.6
+
+# Extra width for global/hierarchical label shape indicators (arrow/diamond).
+_LABEL_SHAPE_EXTRA = 1.5  # mm
+
+
+def _compute_text_bbox(text, x, y, angle, font_w, font_h,
+                       h_justify="left", v_justify=None,
+                       label_shape=None):
+    """Estimate the axis-aligned bounding box of a text string.
+
+    Args:
+        text: The string content.
+        x, y: Anchor position in schematic space.
+        angle: Rotation angle in degrees (0=right, 90=up, 180=left, 270=down).
+        font_w, font_h: Font width and height in mm.
+        h_justify: Horizontal justification ("left", "center", "right").
+        v_justify: Vertical justification ("top", "bottom", or None/center).
+        label_shape: If set (e.g. "input", "output"), adds extra width for
+                     global/hierarchical label shape indicator.
+
+    Returns:
+        (min_x, min_y, max_x, max_y) axis-aligned bounding box, or None
+        if text is empty.
+    """
+    if not text:
+        return None
+
+    char_w = font_w * _CHAR_WIDTH_RATIO
+    text_w = len(text) * char_w
+    text_h = font_h
+
+    if label_shape:
+        text_w += _LABEL_SHAPE_EXTRA
+
+    # Compute unrotated bbox relative to anchor based on justification.
+    # Default: anchor at left-center of text.
+    if h_justify == "right":
+        x0 = -text_w
+        x1 = 0
+    elif h_justify == "center":
+        x0 = -text_w / 2
+        x1 = text_w / 2
+    else:  # left (default)
+        x0 = 0
+        x1 = text_w
+
+    if v_justify == "top":
+        y0 = 0
+        y1 = text_h
+    elif v_justify == "bottom":
+        y0 = -text_h
+        y1 = 0
+    else:  # center (default)
+        y0 = -text_h / 2
+        y1 = text_h / 2
+
+    # Rotate corners and compute AABB.
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    rad = math.radians(angle)
+    cos_a = round(math.cos(rad), 10)
+    sin_a = round(math.sin(rad), 10)
+
+    rx_list, ry_list = [], []
+    for cx, cy in corners:
+        rx_list.append(x + cos_a * cx - sin_a * cy)
+        ry_list.append(y + sin_a * cx + cos_a * cy)
+
+    return (min(rx_list), min(ry_list), max(rx_list), max(ry_list))
+
+
 def _wire_segment_intersects_bbox(x1, y1, x2, y2, bbox):
     """Check if an orthogonal wire segment intersects a bounding box.
 
@@ -374,6 +448,105 @@ def parse_schematic(filepath):
         if size_str in _page_sizes:
             page_w, page_h = _page_sizes[size_str]
 
+    # -- Text items with bounding boxes --
+    # Collect all visible text: labels, component properties, freestanding text.
+    # Each item: (description, bbox, anchor_or_None, owner_ref_or_None)
+    #   anchor: connection point for labels (to exclude label-on-wire overlaps)
+    #   owner_ref: component reference for property text (to group same-component)
+    text_items = []
+
+    def _effects_font(eff):
+        """Extract (font_w, font_h, h_justify, v_justify, hidden) from Effects."""
+        fw, fh = 1.27, 1.27  # KiCad defaults
+        h_just, v_just = "left", None
+        hidden = False
+        if eff:
+            hidden = getattr(eff, 'hide', False) or False
+            font = getattr(eff, 'font', None)
+            if font:
+                fw = getattr(font, 'width', 1.27) or 1.27
+                fh = getattr(font, 'height', 1.27) or 1.27
+            just = getattr(eff, 'justify', None)
+            if just:
+                h_just = getattr(just, 'horizontally', None) or "left"
+                v_just = getattr(just, 'vertically', None)
+        return fw, fh, h_just, v_just, hidden
+
+    # Labels (local, global, hierarchical)
+    for lbl in getattr(sch, 'labels', []):
+        fw, fh, hj, vj, hid = _effects_font(lbl.effects)
+        if hid:
+            continue
+        lx, ly = snap(lbl.position.X), snap(lbl.position.Y)
+        la = lbl.position.angle or 0
+        bbox = _compute_text_bbox(lbl.text, lx, ly, la, fw, fh, hj, vj)
+        if bbox:
+            text_items.append((f"Label '{lbl.text}'", bbox, (lx, ly), None))
+
+    for lbl in getattr(sch, 'globalLabels', []):
+        fw, fh, hj, vj, hid = _effects_font(lbl.effects)
+        if hid:
+            continue
+        lx, ly = snap(lbl.position.X), snap(lbl.position.Y)
+        la = lbl.position.angle or 0
+        shape = getattr(lbl, 'shape', None)
+        bbox = _compute_text_bbox(lbl.text, lx, ly, la, fw, fh, hj, vj,
+                                  label_shape=shape)
+        if bbox:
+            text_items.append(
+                (f"Global label '{lbl.text}'", bbox, (lx, ly), None))
+
+    for lbl in getattr(sch, 'hierarchicalLabels', []):
+        fw, fh, hj, vj, hid = _effects_font(lbl.effects)
+        if hid:
+            continue
+        lx, ly = snap(lbl.position.X), snap(lbl.position.Y)
+        la = lbl.position.angle or 0
+        shape = getattr(lbl, 'shape', None)
+        bbox = _compute_text_bbox(lbl.text, lx, ly, la, fw, fh, hj, vj,
+                                  label_shape=shape)
+        if bbox:
+            text_items.append(
+                (f"Hier label '{lbl.text}'", bbox, (lx, ly), None))
+
+    # Component properties (Reference, Value -- visible ones only)
+    for comp in sch.schematicSymbols:
+        ref = "?"
+        for prop in comp.properties:
+            if prop.key == "Reference":
+                ref = prop.value
+                break
+
+        if ref.startswith("#"):
+            continue
+
+        for prop in comp.properties:
+            if prop.key not in ("Reference", "Value"):
+                continue
+            fw, fh, hj, vj, hid = _effects_font(prop.effects)
+            if hid:
+                continue
+            if not prop.position:
+                continue
+            px = snap(prop.position.X)
+            py = snap(prop.position.Y)
+            pa = prop.position.angle or 0
+            bbox = _compute_text_bbox(prop.value, px, py, pa, fw, fh, hj, vj)
+            if bbox:
+                text_items.append(
+                    (f"{ref} {prop.key} '{prop.value}'", bbox, None, ref))
+
+    # Freestanding text annotations
+    for txt in getattr(sch, 'texts', []):
+        fw, fh, hj, vj, hid = _effects_font(txt.effects)
+        if hid:
+            continue
+        tx, ty = snap(txt.position.X), snap(txt.position.Y)
+        ta = txt.position.angle or 0
+        bbox = _compute_text_bbox(txt.text, tx, ty, ta, fw, fh, hj, vj)
+        if bbox:
+            text_items.append((f"Text '{txt.text}'", bbox, None, None))
+
     return {
         'wires': wires,
         'pins': pins,
@@ -388,6 +561,7 @@ def parse_schematic(filepath):
         'components': components,
         'lib_bboxes': lib_bboxes,
         'lib_body_bboxes': lib_body_bboxes,
+        'text_items': text_items,
     }
 
 
@@ -885,12 +1059,120 @@ def check_power_orientation(data):
     return issues
 
 
+def _wire_intersects_bbox(x1, y1, x2, y2, bbox):
+    """Check if any part of a wire segment (including endpoints) overlaps a bbox."""
+    bmin_x, bmin_y, bmax_x, bmax_y = bbox
+
+    if abs(y1 - y2) < TOLERANCE:
+        # Horizontal wire
+        wy = y1
+        if wy < bmin_y + TOLERANCE or wy > bmax_y - TOLERANCE:
+            return False
+        wxmin, wxmax = min(x1, x2), max(x1, x2)
+        return wxmin < bmax_x - TOLERANCE and wxmax > bmin_x + TOLERANCE
+    elif abs(x1 - x2) < TOLERANCE:
+        # Vertical wire
+        wx = x1
+        if wx < bmin_x + TOLERANCE or wx > bmax_x - TOLERANCE:
+            return False
+        wymin, wymax = min(y1, y2), max(y1, y2)
+        return wymin < bmax_y - TOLERANCE and wymax > bmin_y + TOLERANCE
+
+    return False
+
+
+def check_text_overlap(data):
+    """Check for text overlapping wires, component bodies, or other text.
+
+    Checks all visible text items (labels, component Reference/Value properties,
+    freestanding text) against:
+    - Wire segments (excluding label-on-its-own-wire, which is normal KiCad)
+    - Component graphical bodies (excluding a component's own properties)
+    - Other text items (excluding same-component Reference/Value pairs)
+    """
+    text_items = data.get('text_items', [])
+    if not text_items:
+        return []
+
+    wires = data['wires']
+    comps = data['components']
+    lib_body_bboxes = data.get('lib_body_bboxes', {})
+    issues = []
+
+    # Build set of wire endpoints for label-wire exclusion
+    wire_endpoints = set()
+    for (x1, y1), (x2, y2) in wires:
+        wire_endpoints.add((x1, y1))
+        wire_endpoints.add((x2, y2))
+
+    # Pre-compute component body bboxes
+    comp_body_bboxes = []
+    for ref, lib_name, cx, cy, angle in comps:
+        if ref.startswith("#"):
+            comp_body_bboxes.append((None, ref, lib_name))
+            continue
+        body_bbox = lib_body_bboxes.get(lib_name)
+        if body_bbox:
+            comp_body_bboxes.append((
+                _lib_bbox_to_schematic(body_bbox, cx, cy, angle),
+                ref, lib_name))
+        else:
+            comp_body_bboxes.append((None, ref, lib_name))
+
+    for desc, bbox, anchor, owner_ref in text_items:
+        # Text vs wires
+        for w_idx, ((x1, y1), (x2, y2)) in enumerate(wires):
+            # Skip if this is a label connected to this wire endpoint
+            # (labels naturally extend along their connection wire)
+            if anchor is not None:
+                if pts_close(anchor, (x1, y1)) or pts_close(anchor, (x2, y2)):
+                    continue
+
+            if _wire_intersects_bbox(x1, y1, x2, y2, bbox):
+                issues.append(
+                    f"  {desc} bbox [{bbox[0]:.2f},{bbox[1]:.2f}]-"
+                    f"[{bbox[2]:.2f},{bbox[3]:.2f}] overlaps "
+                    f"wire ({x1},{y1})->({x2},{y2})"
+                )
+                break  # one wire overlap per text is enough
+
+        # Text vs component bodies
+        for comp_bbox, ref, lib_name in comp_body_bboxes:
+            if comp_bbox is None:
+                continue
+            # Skip overlap between a component's own property text and its body
+            if owner_ref == ref:
+                continue
+            if _bboxes_overlap(bbox, comp_bbox):
+                issues.append(
+                    f"  {desc} bbox [{bbox[0]:.2f},{bbox[1]:.2f}]-"
+                    f"[{bbox[2]:.2f},{bbox[3]:.2f}] overlaps "
+                    f"{ref} ({lib_name}) body"
+                )
+                break  # one component overlap per text is enough
+
+    # Text vs other text
+    for i in range(len(text_items)):
+        desc_a, bbox_a, anchor_a, owner_a = text_items[i]
+        for j in range(i + 1, len(text_items)):
+            desc_b, bbox_b, anchor_b, owner_b = text_items[j]
+            # Skip same-component property pairs (e.g. R1 Reference + R1 Value)
+            if owner_a and owner_b and owner_a == owner_b:
+                continue
+            if _bboxes_overlap(bbox_a, bbox_b):
+                issues.append(
+                    f"  {desc_a} overlaps {desc_b}"
+                )
+
+    return issues
+
+
 # ==============================================================
 # Convenience: run all general checks
 # ==============================================================
 
 def run_all_checks(filepath, data=None):
-    """Run all 11 general-purpose checks on a schematic file.
+    """Run all 12 general-purpose checks on a schematic file.
 
     Args:
         filepath: Path to .kicad_sch file (used only if data is None)
@@ -948,6 +1230,10 @@ def run_all_checks(filepath, data=None):
     power_orient = check_power_orientation(data)
     if power_orient:
         results.append(("Power Orientation", power_orient, True))
+
+    text_overlap = check_text_overlap(data)
+    if text_overlap:
+        results.append(("Text Overlap", text_overlap, True))
 
     return results
 

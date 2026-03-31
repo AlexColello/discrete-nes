@@ -1052,6 +1052,7 @@ def generate_power_supply():
     bx, by = 30.48, 30.48
     G = GRID  # shorthand
 
+
     # ================================================================
     # 8-pin PCIe connector (Molex Mini-Fit Jr 2x4)
     # Conn_02x04_Odd_Even: odd pins (1,3,5,7) on left, even (2,4,6,8) on right
@@ -1201,52 +1202,75 @@ def generate_power_supply():
         b.add_wire(p[0], p[1], sw_bus_x, p[1])
     b.add_segmented_trunk(sw_bus_x, sw_ys)
 
-    # -- Bypass caps: directly wired to IC pins (staggered X to avoid overlap) --
+    # -- Bypass caps: vertical (angle=0) with L-routes from IC pins --
+    # angle=0 puts pin 1 at top, pin 2 at bottom, value text to the right.
+    # GND wire from pin 2 goes straight down at cap X, clear of value text.
+    # Boot cap stays angle=90 (horizontal) since pin 2 routes to SW bus.
     boot = reg_pins["7"]
     vdd5 = reg_pins["28"]
     bp1v5 = reg_pins["4"]
+    cap_drop = 4 * G  # vertical offset from IC pin to cap center
 
     # C_BOOT: 100nF bootstrap between BOOT and SW node (horizontal)
+    # Value hidden: at angle=90, value text sits on pin 2 and any wire from
+    # pin 2 overlaps it. Reference "C4" remains visible for identification.
     cboot_x = snap(boot[0] + 7 * G)
     _, cboot_pins = b.place_symbol("C_Small", cboot_x, boot[1],
                                    ref_prefix="C", value="100nF", angle=90)
+    # Hide value text (pin 2 wire unavoidably crosses it at angle=90)
+    sym = b.sch.schematicSymbols[-1]
+    for prop in sym.properties:
+        if prop.key == "Value":
+            prop.effects.hide = True
+            break
     b.add_wire(boot[0], boot[1], cboot_pins["1"][0], cboot_pins["1"][1])
-    # Pin 2 → L-route up to SW bus bottom
+    # Pin 2 → straight up to SW bus bottom
     cboot_p2 = cboot_pins["2"]
     b.add_wire(cboot_p2[0], cboot_p2[1], cboot_p2[0], sw_ys[-1])
     b.add_wire(cboot_p2[0], sw_ys[-1], sw_bus_x, sw_ys[-1])
     b.add_junction(sw_bus_x, sw_ys[-1])
 
-    # C_VDD5: 4.7uF bypass for internal 5V LDO (horizontal, staggered right)
-    cvdd5_x = snap(vdd5[0] + 12 * G)
-    _, cvdd5_pins = b.place_symbol("C_Small", cvdd5_x, vdd5[1],
-                                   ref_prefix="C", value="4.7uF", angle=90)
-    b.add_wire(vdd5[0], vdd5[1], cvdd5_pins["1"][0], cvdd5_pins["1"][1])
+    # C_VDD5: 4.7uF bypass for internal 5V LDO (vertical, angle=0)
+    cvdd5_x = snap(vdd5[0] + 10 * G)
+    cvdd5_y = snap(vdd5[1] + cap_drop)
+    _, cvdd5_pins = b.place_symbol("C_Small", cvdd5_x, cvdd5_y,
+                                   ref_prefix="C", value="4.7uF")
+    # L-route: horizontal from pin at pin_Y to cap_X, vertical down to pin 1
+    b.add_wire(vdd5[0], vdd5[1], cvdd5_x, vdd5[1])
+    b.add_wire(cvdd5_x, vdd5[1], cvdd5_pins["1"][0], cvdd5_pins["1"][1])
     b.wire_power("GND", cvdd5_pins["2"], offset_y=2 * G)
 
-    # C_BP: 1uF bypass for internal 1.5V regulator (horizontal, staggered further)
-    cbp_x = snap(bp1v5[0] + 15 * G)
-    _, cbp_pins = b.place_symbol("C_Small", cbp_x, bp1v5[1],
-                                 ref_prefix="C", value="1uF", angle=90)
-    b.add_wire(bp1v5[0], bp1v5[1], cbp_pins["1"][0], cbp_pins["1"][1])
+    # C_BP: 1uF bypass for internal 1.5V regulator (vertical, angle=0)
+    cbp_x = snap(bp1v5[0] + 14 * G)
+    cbp_y = snap(bp1v5[1] + cap_drop)
+    _, cbp_pins = b.place_symbol("C_Small", cbp_x, cbp_y,
+                                 ref_prefix="C", value="1uF")
+    b.add_wire(bp1v5[0], bp1v5[1], cbp_x, bp1v5[1])
+    b.add_wire(cbp_x, bp1v5[1], cbp_pins["1"][0], cbp_pins["1"][1])
     b.wire_power("GND", cbp_pins["2"], offset_y=2 * G)
 
-    # -- PGD: power-good pull-up + LED indicator (directly wired) --
+    # -- PGD: power-good pull-up + LED indicator --
+    # L-route vertical at pgd_turn_x, then horizontal to pgd_junc_x
+    # so the vertical wire doesn't pass through the pull-up resistor body.
     pgd = reg_pins["1"]
-    pgd_junc_x = snap(pgd[0] + 4 * G)
-    b.add_wire(pgd[0], pgd[1], pgd_junc_x, pgd[1])
-    # Pull-up resistor (vertical, above PGD junction — half-grid Y to avoid
-    # pin 2 landing on the boot cap L-route horizontal wire at sw_ys[-1])
-    rpg_y = snap(pgd[1] - 5 * G - G / 2)
+    pgd_y = snap(max(cvdd5_y, cbp_y) + 6 * G)  # well below caps
+    pgd_turn_x = snap(pgd[0] + 3 * G)
+    pgd_junc_x = snap(pgd_turn_x + 4 * G)
+    # L-route from PGD pin down to pgd_y
+    b.add_wire(pgd[0], pgd[1], pgd_turn_x, pgd[1])
+    b.add_wire(pgd_turn_x, pgd[1], pgd_turn_x, pgd_y)
+    b.add_wire(pgd_turn_x, pgd_y, pgd_junc_x, pgd_y)
+    # Pull-up resistor (vertical, above PGD junction)
+    rpg_y = snap(pgd_y - 5 * G)
     _, rpg_pins = b.place_symbol("R_Small", pgd_junc_x, rpg_y,
                                  ref_prefix="R", value="10K")
-    b.add_wire(pgd_junc_x, pgd[1], rpg_pins["2"][0], rpg_pins["2"][1])
+    b.add_wire(pgd_junc_x, pgd_y, rpg_pins["2"][0], rpg_pins["2"][1])
     b.place_power("VCC", rpg_pins["1"][0], rpg_pins["1"][1])
     # LED indicator chain (right of junction)
     led_entry_x = snap(pgd_junc_x + 3 * G)
-    b.add_wire(pgd_junc_x, pgd[1], led_entry_x, pgd[1])
-    b.add_junction(pgd_junc_x, pgd[1])
-    b.place_led_indicator(led_entry_x, pgd[1])
+    b.add_wire(pgd_junc_x, pgd_y, led_entry_x, pgd_y)
+    b.add_junction(pgd_junc_x, pgd_y)
+    b.place_led_indicator(led_entry_x, pgd_y)
 
     # -- SW: inductor wired directly to SW bus at top (sw_ys[0]) --
     ind_x = snap(sw_bus_x + 10 * G)
@@ -1633,7 +1657,7 @@ def generate_root_sheet():
     # ================================================================
     # Route: Col1 RIGHT → Col2 LEFT (ROW_SEL_0-3 via trunks)
     # ================================================================
-    sel_trunk_base_x = snap(col2_x - 3 * GRID)
+    sel_trunk_base_x = snap(col2_x - 7 * GRID)
     sel_trunk_x = [snap(sel_trunk_base_x - i * GRID) for i in range(4)]
 
     for i in range(4):
