@@ -880,6 +880,7 @@ class PCBBuilder:
         trace_width: float = 0.2,
         layer: str = "F.Cu",
         via_layers: Optional[List[str]] = None,
+        remove_unused_layers: bool = False,
     ) -> Tuple[Via, Tuple[float, float]]:
         """Route a trace from a pad to a via.
 
@@ -914,6 +915,8 @@ class PCBBuilder:
             trace_width: Copper trace width (mm).
             layer: Copper layer for the escape trace.
             via_layers: Via layer pair (default ``["F.Cu", "B.Cu"]``).
+            remove_unused_layers: If True, remove annular rings from
+                layers not in the via layer pair.
 
         Returns:
             ``(Via, (via_x, via_y))`` — the created via and its position.
@@ -945,6 +948,7 @@ class PCBBuilder:
 
         via = self.add_via(
             (via_x, via_y), net, via_size, via_drill, via_layers,
+            remove_unused_layers=remove_unused_layers,
         )
         return via, (via_x, via_y)
 

@@ -662,6 +662,7 @@ def preroute_power_vias(pcb, netlist_data):
                     trace_width=POWER_TRACE_W,
                     via_size=VIA_SIZE, via_drill=VIA_DRILL,
                     via_layers=via_layers,
+                    remove_unused_layers=True,
                 )
             else:
                 # LEDs and Rs: escape rightward
@@ -672,6 +673,7 @@ def preroute_power_vias(pcb, netlist_data):
                     trace_width=POWER_TRACE_W,
                     via_size=VIA_SIZE, via_drill=VIA_DRILL,
                     via_layers=via_layers,
+                    remove_unused_layers=True,
                 )
             vias += 1
 
@@ -1182,6 +1184,92 @@ def preroute_oe_fanout(pcb, netlist_data):
             traces += 1
 
     return traces
+
+
+def preroute_ctrl_enable_trunks(pcb, netlist_data):
+    """Route vertical In1.Cu trunk for WRITE_ACTIVE signal.
+
+    WRITE_ACTIVE fans out from control_logic to pin 1 of the 4 row_ctrl
+    write AND gates.  Escape DOWN from pin 1 on F.Cu, via to In1.Cu,
+    then short jog LEFT to trunk at ic_center_x.  Trunk connects all 4
+    vias vertically.
+
+    The trunk at ic_center_x (86.16) sits midway between VCC drill
+    (85.41) and GND drill (86.89), clearing the 0.254mm hole-clearance
+    requirement from both.
+
+    READ_EN uses the same IC column but two trunks can't fit in the
+    0.47mm corridor between drill exclusion zones — left to autorouter.
+
+    Returns (via_count, trace_count).
+    """
+    ref_to_part = _build_ref_to_part(netlist_data)
+    name_to_net = {n.name: n.number for n in pcb.board.nets}
+    vias = 0
+    traces = 0
+
+    ESCAPE_DOWN = 0.70   # F.Cu vertical escape from pin 1
+    TRUNK_W = 0.16       # thinner trace for tight corridor
+
+    net_num = name_to_net.get("/WRITE_ACTIVE")
+    if net_num is None:
+        return 0, 0
+
+    # Collect row_ctrl write AND gates with WRITE_ACTIVE on pin 1
+    pin1_positions = []  # (ref, pin1_x, pin1_y, ic_x, ic_y)
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if not ref.startswith("U"):
+            continue
+        if ref_to_part.get(ref) != "74LVC1G08":
+            continue
+        pin1_net = pcb.get_pad_net(ref, "1")
+        if pin1_net != net_num:
+            continue
+        pin1_pos = pcb.get_pad_position(ref, "1")
+        if pin1_pos is None:
+            continue
+        pin1_positions.append((ref, pin1_pos[0], pin1_pos[1],
+                               fp.position.X, fp.position.Y))
+
+    if len(pin1_positions) < 2:
+        return 0, 0
+
+    pin1_positions.sort(key=lambda p: p[2])  # top to bottom
+
+    # Trunk X = IC center (equidistant from VCC and GND drills)
+    trunk_x = round(pin1_positions[0][3], 2)  # ic_x
+
+    via_positions = []
+    for ref, px, py, icx, icy in pin1_positions:
+        # F.Cu: pin 1 straight DOWN to via
+        vx = round(px, 2)
+        vy = round(py + ESCAPE_DOWN, 2)
+        pcb.add_trace((px, py), (vx, vy), net_num,
+                      SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Via to In1.Cu
+        pcb.add_via((vx, vy), net_num,
+                    VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"],
+                    remove_unused_layers=True)
+        vias += 1
+
+        # In1.Cu jog from via to trunk X
+        if abs(vx - trunk_x) > 0.01:
+            pcb.add_trace((vx, vy), (trunk_x, vy), net_num,
+                          TRUNK_W, "In1.Cu")
+            traces += 1
+
+        via_positions.append((trunk_x, vy))
+
+    # Vertical In1.Cu trunk connecting all jog endpoints
+    for i in range(len(via_positions) - 1):
+        pcb.add_trace(via_positions[i], via_positions[i + 1],
+                      net_num, TRUNK_W, "In1.Cu")
+        traces += 1
+
+    return vias, traces
 
 
 def preroute_enable_buses(pcb, netlist_data):
@@ -4225,6 +4313,9 @@ def main():
     oe_traces = preroute_oe_fanout(pcb, netlist_data)
     print(f"  OE fanout: {oe_traces} trace segments")
 
+    ctrl_en_vias, ctrl_en_traces = preroute_ctrl_enable_trunks(pcb, netlist_data)
+    print(f"  WRITE_ACTIVE/READ_EN trunks (In1.Cu): {ctrl_en_vias} vias, {ctrl_en_traces} traces")
+
     enable_traces = preroute_enable_buses(pcb, netlist_data)
     print(f"  Enable buses (F.Cu): {enable_traces} trace segments")
 
@@ -4286,11 +4377,12 @@ def main():
 
     total_vias = (pwr_vias + cs_vias + nand_vias + nand_led_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
-                  + r_gnd_vias + dbus_fan_vias + cs_fan_vias)
+                  + r_gnd_vias + dbus_fan_vias + cs_fan_vias
+                  + ctrl_en_vias)
     total_traces = (pwr_traces + ic_led_traces + escape_traces
                     + led_r_traces + clk_traces
-                    + oe_traces + nand_traces + nand_led_traces
-                    + dff_buf_gnd_traces
+                    + oe_traces + ctrl_en_traces + nand_traces
+                    + nand_led_traces + dff_buf_gnd_traces
                     + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces
                     + dbus_fan_traces + dbus_conn_traces
