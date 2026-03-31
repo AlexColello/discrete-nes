@@ -837,31 +837,62 @@ def check_tjunctions_without_dots(data):
 
 
 def check_component_overlap(data):
-    """Check for non-power components whose bounding boxes overlap."""
+    """Check for components whose bounding boxes overlap.
+
+    Includes power symbols (VCC, GND, PWR_FLAG). Skips:
+    - Connectors (large bbox, pins overlap by design)
+    - Units of the same multi-unit symbol (share a reference)
+    - Power symbol placed at a pin of the same net (intentional placement)
+    """
     comps = data['components']
     lib_bboxes = data.get('lib_bboxes', {})
+    pins = data['pins']
     issues = []
 
-    non_power = [
+    # Build pin lookup: ref -> set of pin positions
+    ref_pin_positions = defaultdict(set)
+    for (px, py), (ref, _pnum, _lib) in pins.items():
+        ref_pin_positions[ref].add((px, py))
+
+    candidates = [
         (ref, lib, cx, cy, angle)
         for ref, lib, cx, cy, angle in comps
-        if not ref.startswith("#") and not lib.startswith("Conn")
+        if not lib.startswith("Conn")
     ]
 
     sch_bboxes = []
-    for ref, lib, cx, cy, angle in non_power:
+    for ref, lib, cx, cy, angle in candidates:
         sch_bboxes.append(_get_schematic_bbox(ref, lib, cx, cy, angle, lib_bboxes))
+
+    # Max distance for a power symbol to be considered "connected" to a pin
+    _POWER_PIN_DIST = 3.0 * 2.54  # 3 grid units
 
     MIN_DIST = 1.5
 
-    for i in range(len(non_power)):
-        ref_a, lib_a, ax, ay, _aa = non_power[i]
+    for i in range(len(candidates)):
+        ref_a, lib_a, ax, ay, _aa = candidates[i]
         bbox_a = sch_bboxes[i]
-        for j in range(i + 1, len(non_power)):
-            ref_b, lib_b, bx, by, _ab = non_power[j]
+        for j in range(i + 1, len(candidates)):
+            ref_b, lib_b, bx, by, _ab = candidates[j]
             # Skip units of the same multi-unit symbol (they share a reference)
             if ref_a == ref_b:
                 continue
+
+            # Skip power-vs-power (two GND symbols near each other is fine)
+            if ref_a.startswith("#") and ref_b.startswith("#"):
+                continue
+
+            # Skip power symbol near a pin of the other component
+            # (VCC/GND placed via wire_power at an offset from IC pins)
+            if ref_a.startswith("#"):
+                if any(math.sqrt((ax - px)**2 + (ay - py)**2) < _POWER_PIN_DIST
+                       for px, py in ref_pin_positions.get(ref_b, ())):
+                    continue
+            if ref_b.startswith("#"):
+                if any(math.sqrt((bx - px)**2 + (by - py)**2) < _POWER_PIN_DIST
+                       for px, py in ref_pin_positions.get(ref_a, ())):
+                    continue
+
             bbox_b = sch_bboxes[j]
 
             if bbox_a and bbox_b:
