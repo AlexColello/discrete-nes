@@ -54,7 +54,7 @@ from kicad_gen.pcb import (
 from kicad_gen.power_footprints import (
     create_tps546d24a_footprint, create_smd_power_connector_footprint,
 )
-from kicad_gen.common import FOOTPRINT_MAP
+from kicad_gen.common import FOOTPRINT_MAP, uid
 
 # --------------------------------------------------------------
 # Configuration
@@ -3339,12 +3339,10 @@ def main():
     print(f"  Created: {os.path.basename(fp6_path)}")
     print(f"  Created: {os.path.basename(fp8_path)}")
 
-    # Power supply footprints
+    # Power supply footprints (disabled for now)
     POWER_FP_DIR = os.path.join(SHARED_FP_DIR, "..", "Power_Discrete.pretty")
-    tps_fp = create_tps546d24a_footprint(POWER_FP_DIR)
-    print(f"  Created: {os.path.basename(tps_fp)}")
-    smd_conn_fp = create_smd_power_connector_footprint(POWER_FP_DIR)
-    print(f"  Created: {os.path.basename(smd_conn_fp)}")
+    # tps_fp = create_tps546d24a_footprint(POWER_FP_DIR)
+    # smd_conn_fp = create_smd_power_connector_footprint(POWER_FP_DIR)
 
     # Step 2: Export netlist from schematic
     print("\n[2/7] Exporting netlist from schematic...")
@@ -3365,7 +3363,7 @@ def main():
     print("\n[4/7] Initializing PCB...")
     pcb = PCBBuilder(title="8-Byte Discrete RAM Prototype")
     pcb.add_fp_lib_path("DSBGA_Packages", SHARED_FP_DIR)
-    pcb.add_fp_lib_path("Power_Discrete", POWER_FP_DIR)
+    # pcb.add_fp_lib_path("Power_Discrete", POWER_FP_DIR)  # disabled
 
     # Register all nets
     pcb.add_nets_from_netlist(netlist_data)
@@ -3427,10 +3425,10 @@ def main():
                     r_tagged = dict(r, angle_override=90)
                     placements.append((r_tagged, x + LED_OFFSET_X + R_HORIZ_OFFSET, y))
 
+    # Remove power_supply from groups (disabled for now)
+    groups.pop("power_supply", None)
+
     for name, comps in groups.items():
-        # Power supply has its own placement logic (after the main layout loop)
-        if name == "power_supply":
-            continue
         # Determine max columns and cell dimensions based on group type
         is_ram = name.startswith("byte")
         is_ctrl = name in ("addr_decoder", "control_logic", "column_select") or \
@@ -3677,9 +3675,7 @@ def main():
 
     # Col 1: addr_decoder (vertical columns, full height)
     col1_x = PLACEMENT_ORIGIN + root_w + GROUP_GAP_X * 3  # extra spacing between connector and logic
-    # Shift all logic groups down to make room for power supply section at top
-    PWR_SECTION_H = 28.0  # power supply section height (connector + caps + bypass)
-    col1_y = PLACEMENT_ORIGIN + PWR_SECTION_H
+    col1_y = PLACEMENT_ORIGIN
     dec_abs_y = col1_y  # addr_decoder at top of col 1
 
     # Col 2: row_ctrl, Y-aligned with addr_decoder final ANDs
@@ -3702,8 +3698,8 @@ def main():
         col2_y += _y_shift
         ram_y += _y_shift
 
-    # Control logic below addr_decoder
-    ctrl_abs_x = col1_x
+    # Control logic below addr_decoder (shifted right to clear D-bus diagonal)
+    ctrl_abs_x = col1_x + 3.0
     ctrl_abs_y = round(dec_abs_y + dec_h + GROUP_GAP_Y * 3, 2)
 
     # Compute total board content height
@@ -3713,7 +3709,7 @@ def main():
     # Col 0: connector bottom-justified with the board bottom edge.
     # Pre-compute the bottom extent from known group positions.
     COLSEL_BOTTOM_PAD = 10.0  # routing buffer below column_select
-    _colsel_bottom = ram_y + ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h + COLSEL_BOTTOM_PAD
+    _colsel_bottom = ram_y + ram_total_h + GROUP_GAP_Y * 3 + 12.0 + colsel_h + COLSEL_BOTTOM_PAD
     board_bottom_y = max(
         ctrl_abs_y + ctrl_h,                                          # control_logic
         _colsel_bottom,                                               # column_select
@@ -3854,16 +3850,22 @@ def main():
     print(f"  Silkscreen: unified 2x4 grid with address labels")
 
     # Place column_select below RAM block, centered horizontally under it
-    # Pre-compute test grid position (centered above RAM)
+    # J3 (COL_SEL connector) position — right of RAM with routing buffer
+    COLSEL_CONN_BUFFER = 20.0  # routing buffer between RAM right edge and J3
+    j3_base_x = round(ram_x + ram_total_w + COLSEL_CONN_BUFFER, 2)
+
+    # Test grid above J3 connector (further right on board)
     test_grid_w_est = TEST_LABEL_W + 5 * (TEST_CELL_W + TEST_CELL_GAP)
     test_grid_h_est = TEST_TITLE_H + TEST_HEADER_H + 6 * (TEST_CELL_H + TEST_CELL_GAP)
-    test_x = round(ram_x + (ram_total_w - test_grid_w_est) / 2, 2)
+    # Right-align test grid with J3 connector right edge (pad radius ~1.27mm)
+    test_x = round(j3_base_x + 1.27 - test_grid_w_est, 2)
     test_y = round(ram_y - test_grid_h_est - 3.0, 2)
     # Y for extra connectors (J2/J3/J4) — above the test grid
     conn_above_y = round(test_y - 5.0, 2)
     ram_center_x = ram_x + ram_total_w / 2
-    colsel_x = round(ram_center_x - colsel_w / 2, 2)
-    colsel_y = round(ram_y + ram_total_h + GROUP_GAP_Y * 3 + 20.0, 2)
+    COLSEL_DEC_RIGHT_SHIFT = 10.0  # shift column decoder right toward RAM center
+    colsel_x = round(ram_center_x - colsel_w / 2 + COLSEL_DEC_RIGHT_SHIFT, 2)
+    colsel_y = round(ram_y + ram_total_h + GROUP_GAP_Y * 3 + 12.0, 2)
     if "column_select" in group_layouts:
         for comp, rel_x, rel_y in group_layouts["column_select"]:
             _place_component(pcb, comp, colsel_x + rel_x, colsel_y + rel_y,
@@ -3879,9 +3881,8 @@ def main():
         n_pins = int(comp["part"].replace("Conn_01x", ""))
         pin_span = (n_pins - 1) * CONN_PIN_PITCH
         if ref == "J2":
-            # DEC3 unused header above test grid, horizontal (90°), right of DEC4
-            dec4_span = 15 * CONN_PIN_PITCH  # 16-pin connector span
-            j2_x = round(ram_x + dec4_span + 5.0, 2)
+            # DEC3 unused header above RAM, horizontal (90°), leftmost
+            j2_x = round(ram_x, 2)
             j2_y = conn_above_y
             _place_component(pcb, comp, j2_x, j2_y, netlist_data,
                              angle_override=90, layer_override="F.Cu")
@@ -3889,17 +3890,34 @@ def main():
             pcb.add_silkscreen_text("DEC3", round(j2_x + pin_span / 2, 2),
                                     round(j2_y - 3.0, 2), size=1.0)
         elif ref == "J3":
-            # COL_SEL unused header right of RAM, vertical (0°), pin 1 at top
-            j3_x = round(ram_x + ram_total_w + GROUP_GAP_X + 3.0, 2)
-            j3_y = round(ram_y, 2)
+            # COL_SEL unused header right of RAM, vertical (0°), below test grid
+            j3_x = j3_base_x
+            j3_y = round(test_y + test_grid_h_est + 3.0, 2)
             _place_component(pcb, comp, j3_x, j3_y, netlist_data,
                              angle_override=0, layer_override="F.Cu")
             total_placed += 1
-            pcb.add_silkscreen_text("COL_SEL", round(j3_x + 3.5, 2),
-                                    round(j3_y + pin_span / 2, 2), size=1.0)
+            # Rotated label to match vertical connector
+            from kiutils.items.gritems import GrText
+            from kiutils.items.common import Effects
+            from kiutils.items.common import Position
+            _cs_effects = Effects()
+            _cs_effects.font.height = 1.0
+            _cs_effects.font.width = 1.0
+            _cs_effects.font.thickness = 0.15
+            _cs_text = GrText(
+                text="COL_SEL",
+                position=Position(X=round(j3_x + 3.5, 2),
+                                  Y=round(j3_y + pin_span / 2, 2),
+                                  angle=90),
+                layer="F.SilkS",
+                effects=_cs_effects,
+                tstamp=uid(),
+            )
+            pcb.board.graphicItems.append(_cs_text)
         elif ref == "J4":
-            # DEC4 unused header above test grid, horizontal (90°), leftmost
-            j4_x = round(ram_x, 2)
+            # DEC4 unused header above RAM, horizontal (90°), right of DEC3
+            dec3_span = 3 * CONN_PIN_PITCH  # 4-pin connector span
+            j4_x = round(ram_x + dec3_span + 5.0, 2)
             j4_y = conn_above_y
             _place_component(pcb, comp, j4_x, j4_y, netlist_data,
                              angle_override=90, layer_override="F.Cu")
