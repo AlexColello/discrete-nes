@@ -516,6 +516,11 @@ def preroute_center_escape(pcb, netlist_data):
     SKIP_PARTS = {"74LVC1G79", "74LVC1G125", "74LVC2G00"}
 
     ref_to_part = _build_ref_to_part(netlist_data)
+    # Skip control_logic and row_ctrl ICs — D* bus F.Cu traces pass
+    # through those areas; row_ctrl gets dedicated trunk routing
+    skip_refs = {c["ref"] for c in netlist_data["components"]
+                 if "Control Logic" in c.get("sheetpath", "")
+                 or "Row Control" in c.get("sheetpath", "")}
     traces = 0
 
     for fp in pcb.board.footprints:
@@ -529,6 +534,8 @@ def preroute_center_escape(pcb, netlist_data):
 
         part = ref_to_part.get(ref, "")
         if part in SKIP_PARTS:
+            continue
+        if ref in skip_refs:
             continue
 
         pin2_net = pcb.get_pad_net(ref, "2")
@@ -662,7 +669,6 @@ def preroute_power_vias(pcb, netlist_data):
                     trace_width=POWER_TRACE_W,
                     via_size=VIA_SIZE, via_drill=VIA_DRILL,
                     via_layers=via_layers,
-                    remove_unused_layers=True,
                 )
             else:
                 # LEDs and Rs: escape rightward
@@ -673,7 +679,6 @@ def preroute_power_vias(pcb, netlist_data):
                     trace_width=POWER_TRACE_W,
                     via_size=VIA_SIZE, via_drill=VIA_DRILL,
                     via_layers=via_layers,
-                    remove_unused_layers=True,
                 )
             vias += 1
 
@@ -1187,19 +1192,16 @@ def preroute_oe_fanout(pcb, netlist_data):
 
 
 def preroute_ctrl_enable_trunks(pcb, netlist_data):
-    """Route vertical In1.Cu trunk for WRITE_ACTIVE signal.
+    """Route vertical In1.Cu trunks for WRITE_ACTIVE and READ_EN signals.
 
-    WRITE_ACTIVE fans out from control_logic to pin 1 of the 4 row_ctrl
-    write AND gates.  Escape DOWN from pin 1 on F.Cu, via to In1.Cu,
-    then short jog LEFT to trunk at ic_center_x.  Trunk connects all 4
-    vias vertically.
+    Both signals fan out from control_logic to pin 1 of the 4 row_ctrl
+    AND gates.  Two separate trunks with interleaved via Y positions:
 
-    The trunk at ic_center_x (86.16) sits midway between VCC drill
-    (85.41) and GND drill (86.89), clearing the 0.254mm hole-clearance
-    requirement from both.
+      WRITE_ACTIVE (left): trunk at ic_center_x, jog LEFT from via.
+      READ_EN (right): trunk at ic_x+1.24 (under LED+R), jog RIGHT.
 
-    READ_EN uses the same IC column but two trunks can't fit in the
-    0.47mm corridor between drill exclusion zones — left to autorouter.
+    The WRITE_ACTIVE trunk has gaps at each READ_EN jog Y so the
+    horizontal READ_EN jogs can cross without DRC violations.
 
     Returns (via_count, trace_count).
     """
@@ -1208,66 +1210,106 @@ def preroute_ctrl_enable_trunks(pcb, netlist_data):
     vias = 0
     traces = 0
 
-    ESCAPE_DOWN = 0.70   # F.Cu vertical escape from pin 1
-    TRUNK_W = 0.16       # thinner trace for tight corridor
+    ESCAPE_DOWN = 0.34
+    TRUNK_W = 0.16
+    # Gap half-width: via radius (0.25) + trace half-width (0.08) + clearance (0.16)
+    GAP_HALF = 0.49
 
-    net_num = name_to_net.get("/WRITE_ACTIVE")
-    if net_num is None:
-        return 0, 0
-
-    # Collect row_ctrl write AND gates with WRITE_ACTIVE on pin 1
-    pin1_positions = []  # (ref, pin1_x, pin1_y, ic_x, ic_y)
-    for fp in pcb.board.footprints:
-        ref = fp.properties.get("Reference", "")
-        if not ref.startswith("U"):
+    # --- Pass 1: collect via positions for both signals ---
+    signal_data = {}  # signal -> (net_num, trunk_x, via_positions)
+    for signal, net_name in [("WRITE_ACTIVE", "/WRITE_ACTIVE"),
+                             ("READ_EN", "/READ_EN")]:
+        net_num = name_to_net.get(net_name)
+        if net_num is None:
             continue
-        if ref_to_part.get(ref) != "74LVC1G08":
+
+        pin1_positions = []
+        for fp in pcb.board.footprints:
+            ref = fp.properties.get("Reference", "")
+            if not ref.startswith("U"):
+                continue
+            if ref_to_part.get(ref) != "74LVC1G08":
+                continue
+            pin1_net = pcb.get_pad_net(ref, "1")
+            if pin1_net != net_num:
+                continue
+            pin1_pos = pcb.get_pad_position(ref, "1")
+            if pin1_pos is None:
+                continue
+            pin1_positions.append((ref, pin1_pos[0], pin1_pos[1],
+                                   fp.position.X, fp.position.Y))
+
+        if len(pin1_positions) < 2:
             continue
-        pin1_net = pcb.get_pad_net(ref, "1")
-        if pin1_net != net_num:
-            continue
-        pin1_pos = pcb.get_pad_position(ref, "1")
-        if pin1_pos is None:
-            continue
-        pin1_positions.append((ref, pin1_pos[0], pin1_pos[1],
-                               fp.position.X, fp.position.Y))
 
-    if len(pin1_positions) < 2:
-        return 0, 0
+        pin1_positions.sort(key=lambda p: p[2])
+        icx0 = pin1_positions[0][3]
+        if signal == "WRITE_ACTIVE":
+            trunk_x = round(icx0, 2)
+        else:
+            trunk_x = round(icx0 + 1.24, 2)
 
-    pin1_positions.sort(key=lambda p: p[2])  # top to bottom
+        via_pos_list = []
+        for ref, px, py, icx, icy in pin1_positions:
+            vx = round(px, 2)
+            vy = round(py + ESCAPE_DOWN, 2)
 
-    # Trunk X = IC center (equidistant from VCC and GND drills)
-    trunk_x = round(pin1_positions[0][3], 2)  # ic_x
+            pcb.add_trace((px, py), (vx, vy), net_num,
+                          SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
 
-    via_positions = []
-    for ref, px, py, icx, icy in pin1_positions:
-        # F.Cu: pin 1 straight DOWN to via
-        vx = round(px, 2)
-        vy = round(py + ESCAPE_DOWN, 2)
-        pcb.add_trace((px, py), (vx, vy), net_num,
-                      SIGNAL_TRACE_W, "F.Cu")
-        traces += 1
+            pcb.add_via((vx, vy), net_num,
+                        VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"],
+                        remove_unused_layers=True)
+            vias += 1
 
-        # Via to In1.Cu
-        pcb.add_via((vx, vy), net_num,
-                    VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"],
-                    remove_unused_layers=True)
-        vias += 1
-
-        # In1.Cu jog from via to trunk X
-        if abs(vx - trunk_x) > 0.01:
             pcb.add_trace((vx, vy), (trunk_x, vy), net_num,
                           TRUNK_W, "In1.Cu")
             traces += 1
+            via_pos_list.append((trunk_x, vy))
 
-        via_positions.append((trunk_x, vy))
+        signal_data[signal] = (net_num, trunk_x, via_pos_list)
 
-    # Vertical In1.Cu trunk connecting all jog endpoints
-    for i in range(len(via_positions) - 1):
-        pcb.add_trace(via_positions[i], via_positions[i + 1],
-                      net_num, TRUNK_W, "In1.Cu")
-        traces += 1
+    # --- Pass 2: route trunks ---
+    # READ_EN jog Ys that cross the WRITE_ACTIVE trunk
+    re_jog_ys = []
+    if "READ_EN" in signal_data:
+        _, _, re_vias = signal_data["READ_EN"]
+        re_jog_ys = [vy for _, vy in re_vias]
+
+    for signal in ["WRITE_ACTIVE", "READ_EN"]:
+        if signal not in signal_data:
+            continue
+        net_num, trunk_x, via_pos_list = signal_data[signal]
+
+        for i in range(len(via_pos_list) - 1):
+            y_top = via_pos_list[i][1]
+            y_bot = via_pos_list[i + 1][1]
+
+            if signal == "WRITE_ACTIVE":
+                # Split trunk segment around READ_EN jog crossings
+                segments = [(y_top, y_bot)]
+                for jy in re_jog_ys:
+                    new_segs = []
+                    for s_top, s_bot in segments:
+                        gap_top = round(jy - GAP_HALF, 2)
+                        gap_bot = round(jy + GAP_HALF, 2)
+                        if gap_top > s_top + 0.01:
+                            new_segs.append((s_top, min(gap_top, s_bot)))
+                        if gap_bot < s_bot - 0.01:
+                            new_segs.append((max(gap_bot, s_top), s_bot))
+                    segments = new_segs if new_segs else segments
+
+                for s_top, s_bot in segments:
+                    if s_bot - s_top > 0.02:
+                        pcb.add_trace((trunk_x, s_top), (trunk_x, s_bot),
+                                      net_num, TRUNK_W, "In1.Cu")
+                        traces += 1
+            else:
+                # READ_EN trunk: continuous (no crossings)
+                pcb.add_trace(via_pos_list[i], via_pos_list[i + 1],
+                              net_num, TRUNK_W, "In1.Cu")
+                traces += 1
 
     return vias, traces
 
