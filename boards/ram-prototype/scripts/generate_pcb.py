@@ -2871,17 +2871,20 @@ def preroute_dbus_fanout(pcb, netlist_data):
     return vias, traces
 
 
-def preroute_dbus_to_connector(pcb, netlist_data):
+def preroute_dbus_to_connector(pcb, netlist_data, obs_y_max=None):
     """Route D0-D7 from byte grid fanout to connector LED fanout stubs.
 
     Bridges the gap between the D* bus horizontal fanout (below byte grid)
-    and the connector LED stubs (right of J1), routing around the address
-    decoder and control logic groups entirely on F.Cu.
+    and the connector LED stubs (right of J1), routing through the gap
+    between the address decoder and control logic on F.Cu.
+
+    obs_y_max: if set, footprints with center Y > obs_y_max are excluded
+    from obstacle scanning, allowing the bus to route above ctrl_logic.
 
     Route geometry per signal:
       0. Staggered horizontal extension (spreads traces for diagonal)
       1. 45-deg diagonal DOWN-LEFT from staggered start to bus corridor
-      2. Horizontal LEFT through bus corridor (below control logic)
+      2. Horizontal LEFT through bus corridor (above control logic)
       3. 45-deg diagonal from corridor to connector stub endpoint
 
     Diagonal perpendicular spacing matches horizontal spacing:
@@ -2960,17 +2963,27 @@ def preroute_dbus_to_connector(pcb, netlist_data):
     matched.sort(key=lambda m: m[2])
     n = len(matched)
 
-    # --- Compute bus corridor Y (below all obstacles in the path) ---
+    # --- Compute bus corridor Y (below decoder, above ctrl_logic) ---
     COURTYARD_HALF = 1.5  # conservative: DSBGA-5 is ±1.45mm
     BUS_GAP = 1.0         # clearance from courtyard bottom to first bus lane
 
+    # Scan obstacles in the decoder/diagonal area only.
+    # The bus corridor must clear components in its path (decoder, etc.)
+    # but NOT connector LEDs (which are at low X) — the chamfer section
+    # handles connector-area clearance separately.
     fanout_x = matched[0][1]  # all fanout left ends at same X
+    stub_x_max = max(m[3] for m in matched)  # rightmost connector stub
     max_obs_bottom = 0
     for fp in pcb.board.footprints:
         x = fp.position.X
-        if 30 < x < fanout_x:
-            obs_bottom = fp.position.Y + COURTYARD_HALF
-            max_obs_bottom = max(max_obs_bottom, obs_bottom)
+        # Only consider decoder-area footprints (x > 35 avoids connector LEDs)
+        if x < 35 or x > fanout_x:
+            continue
+        # Skip footprints at or below ctrl_logic (bus routes above them)
+        if obs_y_max is not None and fp.position.Y >= obs_y_max - 1.0:
+            continue
+        obs_bottom = fp.position.Y + COURTYARD_HALF
+        max_obs_bottom = max(max_obs_bottom, obs_bottom)
 
     bus_top_y = round(max_obs_bottom + BUS_GAP, 2)
 
@@ -3844,12 +3857,13 @@ def main():
         col2_y += _y_shift
         ram_y += _y_shift
 
-    # Control logic below addr_decoder (shifted left to clear D-bus diagonal)
-    ctrl_abs_x = col1_x - 2.0
-    ctrl_abs_y = round(dec_abs_y + dec_h + GROUP_GAP_Y * 3, 2)
+    # Control logic below addr_decoder with gap for D* bus corridor above it
+    CTRL_DBUS_GAP = 7.0  # gap for D* bus corridor (~6mm) + margin
+    ctrl_abs_x = col1_x + 3.0
+    ctrl_abs_y = round(dec_abs_y + dec_h + CTRL_DBUS_GAP, 2)
 
     # Compute total board content height
-    total_content_h = max(dec_h + GROUP_GAP_Y * 3 + ctrl_h,
+    total_content_h = max(dec_h + CTRL_DBUS_GAP + ctrl_h,
                           ram_total_h + GROUP_GAP_Y * 3 + 20.0 + colsel_h + 10.0)
 
     # Col 0: connector bottom-justified with the board bottom edge.
@@ -4366,11 +4380,11 @@ def main():
     cs_fan_vias, cs_fan_traces = preroute_colsel_fanout(pcb, netlist_data)
     print(f"  COL_SEL fanout: {cs_fan_vias} vias, {cs_fan_traces} traces")
 
-    # D* data bus from fanout to connector — left for autorouter.
-    # The diagonal routing from byte grid to connector crosses the ctrl_logic
-    # and A7-A10 areas; autorouter handles multi-layer routing better.
-    dbus_conn_traces = 0
-    print(f"  D* bus->connector: deferred to autorouter")
+    # D* data bus from fanout to connector (F.Cu above ctrl_logic)
+    # Must run AFTER colsel_fanout so via avoidance can see COL_SEL vias
+    dbus_conn_traces = preroute_dbus_to_connector(pcb, netlist_data,
+                                                   obs_y_max=ctrl_abs_y)
+    print(f"  D* bus->connector (F.Cu): {dbus_conn_traces} trace segments")
 
     # Column address A7-A10 from connector to column_select inverters (F.Cu)
     coladdr_traces = preroute_coladdr_to_colsel(pcb, netlist_data)
