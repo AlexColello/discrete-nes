@@ -3844,8 +3844,8 @@ def main():
         col2_y += _y_shift
         ram_y += _y_shift
 
-    # Control logic below addr_decoder (shifted right to clear D-bus diagonal)
-    ctrl_abs_x = col1_x + 3.0
+    # Control logic below addr_decoder (shifted left to clear D-bus diagonal)
+    ctrl_abs_x = col1_x - 2.0
     ctrl_abs_y = round(dec_abs_y + dec_h + GROUP_GAP_Y * 3, 2)
 
     # Compute total board content height
@@ -3881,9 +3881,9 @@ def main():
     conn_pin_names = {
         1: "GND",
         2: "A7", 3: "A8", 4: "A9", 5: "A10",
-        6: "D0", 7: "D1", 8: "D2", 9: "D3",
-        10: "D4", 11: "D5", 12: "D6", 13: "D7",
-        14: "nCE", 15: "nWE", 16: "nOE",
+        6: "nCE", 7: "nWE", 8: "nOE",
+        9: "D0", 10: "D1", 11: "D2", 12: "D3",
+        13: "D4", 14: "D5", 15: "D6", 16: "D7",
         17: "A0", 18: "A1", 19: "A2", 20: "A3",
         21: "A4", 22: "A5", 23: "A6",
         24: "VCC",
@@ -4366,10 +4366,11 @@ def main():
     cs_fan_vias, cs_fan_traces = preroute_colsel_fanout(pcb, netlist_data)
     print(f"  COL_SEL fanout: {cs_fan_vias} vias, {cs_fan_traces} traces")
 
-    # D* data bus from fanout to connector (F.Cu around decoder/ctrl)
-    # Must run AFTER colsel_fanout so via avoidance can see COL_SEL vias
-    dbus_conn_traces = preroute_dbus_to_connector(pcb, netlist_data)
-    print(f"  D* bus->connector (F.Cu): {dbus_conn_traces} trace segments")
+    # D* data bus from fanout to connector — left for autorouter.
+    # The diagonal routing from byte grid to connector crosses the ctrl_logic
+    # and A7-A10 areas; autorouter handles multi-layer routing better.
+    dbus_conn_traces = 0
+    print(f"  D* bus->connector: deferred to autorouter")
 
     # Column address A7-A10 from connector to column_select inverters (F.Cu)
     coladdr_traces = preroute_coladdr_to_colsel(pcb, netlist_data)
