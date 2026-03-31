@@ -2652,6 +2652,229 @@ def preroute_dbus_fanout(pcb, netlist_data):
     return vias, traces
 
 
+def preroute_dbus_to_connector(pcb, netlist_data):
+    """Route D0-D7 from byte grid fanout to connector LED fanout stubs.
+
+    Bridges the gap between the D* bus horizontal fanout (below byte grid)
+    and the connector LED stubs (right of J1), routing around the address
+    decoder and control logic groups entirely on F.Cu.
+
+    Route geometry per signal:
+      0. Staggered horizontal extension (spreads traces for diagonal)
+      1. 45-deg diagonal DOWN-LEFT from staggered start to bus corridor
+      2. Horizontal LEFT through bus corridor (below control logic)
+      3. 45-deg diagonal from corridor to connector stub endpoint
+
+    Diagonal perpendicular spacing matches horizontal spacing:
+      - Fanout Y-spacing = 0.61mm (from preroute_dbus_fanout)
+      - Diagonal Δc = 0.61 * √2 = 0.863mm  →  perp = 0.863/√2 = 0.61mm
+      - Bus lane Y-spacing = 0.863mm (matches diagonal Δc)
+      - Stagger per trace = 0.863 - 0.61 = 0.253mm in X
+      This keeps all diagonals parallel at true 45°, ending at the same X.
+
+    Returns trace_count (int).
+    """
+    traces = 0
+    SQRT2 = math.sqrt(2)
+    FANOUT_SPACING = 0.61     # Y-spacing from preroute_dbus_fanout
+    DIAG_PERP = FANOUT_SPACING  # desired perpendicular gap on diagonals
+    DIAG_LANE_SPACING = round(DIAG_PERP * SQRT2, 4)  # bus lane Y-spacing (0.863mm)
+    STAGGER = round(DIAG_LANE_SPACING - FANOUT_SPACING, 4)  # X-stagger per trace (0.253mm)
+
+    # --- Find D* signal nets from J1 connector ---
+    dbus_nets = {}  # net_num -> net_name (e.g., 64 -> '/D0')
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if ref == "J1":
+            for pad in fp.pads:
+                if (pad.net and pad.net.name
+                        and pad.net.name.startswith("/D")
+                        and pad.net.name[2:].isdigit()):
+                    dbus_nets[pad.net.number] = pad.net.name
+            break
+
+    if not dbus_nets:
+        print("  WARNING: No D* nets found on J1")
+        return 0
+
+    # --- Find fanout left endpoints ---
+    # Leftmost point of horizontal F.Cu traces per D net (x > 50, i.e. byte area)
+    fanout_ends = {}  # net_num -> (x, y)
+    for seg in pcb.board.traceItems:
+        if not hasattr(seg, 'start') or not hasattr(seg, 'net'):
+            continue
+        if seg.net not in dbus_nets or getattr(seg, 'layer', '') != 'F.Cu':
+            continue
+        x1, y1, x2, y2 = seg.start.X, seg.start.Y, seg.end.X, seg.end.Y
+        if abs(y1 - y2) < 0.01 and min(x1, x2) > 50:
+            left_x = min(x1, x2)
+            if seg.net not in fanout_ends or left_x < fanout_ends[seg.net][0]:
+                fanout_ends[seg.net] = (round(left_x, 2), round(y1, 2))
+
+    # --- Find connector stub endpoints ---
+    # Rightmost point of horizontal F.Cu traces per D net (x < 40, connector area)
+    stub_ends = {}  # net_num -> (x, y)
+    for seg in pcb.board.traceItems:
+        if not hasattr(seg, 'start') or not hasattr(seg, 'net'):
+            continue
+        if seg.net not in dbus_nets or getattr(seg, 'layer', '') != 'F.Cu':
+            continue
+        x1, y1, x2, y2 = seg.start.X, seg.start.Y, seg.end.X, seg.end.Y
+        if abs(y1 - y2) < 0.01 and max(x1, x2) < 40:
+            right_x = max(x1, x2)
+            if seg.net not in stub_ends or right_x > stub_ends[seg.net][0]:
+                stub_ends[seg.net] = (round(right_x, 2), round(y1, 2))
+
+    # --- Match fanout ends with stub ends ---
+    matched = []  # [(net_num, fanout_x, fanout_y, stub_x, stub_y)]
+    for net_num in dbus_nets:
+        if net_num in fanout_ends and net_num in stub_ends:
+            fx, fy = fanout_ends[net_num]
+            sx, sy = stub_ends[net_num]
+            matched.append((net_num, fx, fy, sx, sy))
+
+    if not matched:
+        print("  WARNING: No D* bus traces to connect to connector")
+        return 0
+
+    # Sort by fanout Y ascending (D7 at top / lowest Y first, D0 at bottom last)
+    matched.sort(key=lambda m: m[2])
+    n = len(matched)
+
+    # --- Compute bus corridor Y (below all obstacles in the path) ---
+    COURTYARD_HALF = 1.5  # conservative: DSBGA-5 is ±1.45mm
+    BUS_GAP = 1.0         # clearance from courtyard bottom to first bus lane
+
+    fanout_x = matched[0][1]  # all fanout left ends at same X
+    max_obs_bottom = 0
+    for fp in pcb.board.footprints:
+        x = fp.position.X
+        if 30 < x < fanout_x:
+            obs_bottom = fp.position.Y + COURTYARD_HALF
+            max_obs_bottom = max(max_obs_bottom, obs_bottom)
+
+    bus_top_y = round(max_obs_bottom + BUS_GAP, 2)
+
+    # Bus lanes: wider spacing to match diagonal perpendicular gap
+    bus_lanes = [round(bus_top_y + i * DIAG_LANE_SPACING, 2)
+                 for i in range(n)]
+
+    # --- Check via clearance and compute horizontal pad ---
+    # Each trace i starts its diagonal at x_i = fanout_x - h_pad - (n-1-i)*STAGGER.
+    # The 45° line constant is c_i = x_i + fanout_y_i.
+    # Δc between adjacent lines = STAGGER + FANOUT_SPACING = DIAG_LANE_SPACING.
+    # Check all vias against all diagonal lines and find the worst-case pad.
+    VIA_CLEARANCE = 0.50  # via radius + half trace + clearance
+
+    # Estimate diagonal end X for bounding-box filter
+    total_stagger = round((n - 1) * STAGGER, 2)
+    diag_end_x_est = round(
+        fanout_x - total_stagger - (bus_lanes[0] - matched[0][2]), 2)
+
+    worst_pad = 0.0
+    for item in pcb.board.traceItems:
+        if not hasattr(item, 'position'):
+            continue
+        vx, vy = item.position.X, item.position.Y
+        if vx < diag_end_x_est - 2 or vx > fanout_x + 1:
+            continue
+        if vy < matched[0][2] - 1 or vy > bus_lanes[-1] + 1:
+            continue
+        for i in range(n):
+            # c with h_pad=0: fanout_x - (n-1-i)*STAGGER + fanout_y_i
+            c0 = fanout_x - (n - 1 - i) * STAGGER + matched[i][2]
+            perp = abs(vx + vy - c0) / SQRT2
+            if perp < VIA_CLEARANCE:
+                needed = (VIA_CLEARANCE - perp) * SQRT2
+                worst_pad = max(worst_pad, needed)
+
+    h_pad = round(math.ceil(worst_pad * 10) / 10, 2)  # round up to 0.1mm
+    if h_pad > 0:
+        print(f"  D*->connector: via avoidance pad = {h_pad:.1f}mm")
+
+    # --- Compute per-trace diagonal start X ---
+    # Trace 0 (D7, top) gets the most extension; trace n-1 (D0, bottom) the least.
+    diag_starts = [round(fanout_x - h_pad - (n - 1 - i) * STAGGER, 2)
+                   for i in range(n)]
+    # All diagonals end at the same X (mathematically guaranteed)
+    diag_end_x = round(diag_starts[0] - (bus_lanes[0] - matched[0][2]), 2)
+
+    # --- Bus lanes at FANOUT_SPACING (0.61mm) ---
+    # Each staggered diagonal ends at a different X when it reaches its
+    # bus lane Y.  This creates a natural "peel-off" transition: the
+    # outermost trace (most stagger) reaches its lane first (furthest
+    # right), while the innermost trace runs furthest left.  No separate
+    # compression zone needed.
+    bus_lanes = [round(bus_top_y + i * FANOUT_SPACING, 2)
+                 for i in range(n)]
+
+    # Per-trace diagonal end X (each different due to stagger)
+    diag_ends = [round(diag_starts[i] - (bus_lanes[i] - matched[i][2]), 2)
+                 for i in range(n)]
+
+    # --- Fan corridor geometry ---
+    stub_x = matched[0][3]  # all stubs at same X
+    max_delta_y = max(abs(bus_lanes[i] - matched[i][4]) for i in range(n))
+    CORRIDOR_PAD = 1.5
+    corridor_x = round(stub_x + max_delta_y + CORRIDOR_PAD, 2)
+    horiz_available = round(corridor_x - stub_x, 2)
+
+    print(f"  D*->connector: bus y={bus_top_y}..{bus_lanes[-1]:.2f}, "
+          f"diag x={diag_ends[0]:.1f}..{diag_ends[-1]:.1f}, "
+          f"corridor_x={corridor_x:.1f}, perp={DIAG_PERP:.2f}mm")
+
+    # --- Route each trace ---
+    for i in range(n):
+        net_num, fx, fy, sx, sy = matched[i]
+        bus_y = bus_lanes[i]
+        ds_x = diag_starts[i]
+        de_x = diag_ends[i]
+
+        # Segment 0: horizontal extension (stagger + via pad)
+        if abs(fx - ds_x) > 0.01:
+            pcb.add_trace((fx, fy), (ds_x, fy),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+        # Segment 1: 45° diagonal to bus lane
+        pcb.add_trace((ds_x, fy), (de_x, bus_y),
+                      net_num, SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+        # Segment 2+3: horizontal bus + 45° fan to connector stub
+        delta_y = sy - bus_y
+        abs_dy = abs(delta_y)
+
+        if abs_dy < 0.01:
+            pcb.add_trace((de_x, bus_y), (sx, sy),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+        elif abs_dy <= horiz_available:
+            chamfer_start_x = round(sx + abs_dy, 2)
+            if abs(de_x - chamfer_start_x) > 0.01:
+                pcb.add_trace((de_x, bus_y),
+                              (chamfer_start_x, bus_y),
+                              net_num, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+            pcb.add_trace((chamfer_start_x, bus_y), (sx, sy),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+        else:
+            vert_dir = 1 if delta_y > 0 else -1
+            diag_y = round(bus_y + vert_dir * horiz_available, 2)
+            pcb.add_trace((de_x, bus_y), (corridor_x, bus_y),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_trace((corridor_x, bus_y), (sx, diag_y),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_trace((sx, diag_y), (sx, sy),
+                          net_num, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+    return traces
+
+
 def preroute_colsel_fanout(pcb, netlist_data):
     """Extend COL_SEL In1.Cu trunks down below the D* bus and add vias.
 
@@ -3786,6 +4009,11 @@ def main():
     cs_fan_vias, cs_fan_traces = preroute_colsel_fanout(pcb, netlist_data)
     print(f"  COL_SEL fanout: {cs_fan_vias} vias, {cs_fan_traces} traces")
 
+    # D* data bus from fanout to connector (F.Cu around decoder/ctrl)
+    # Must run AFTER colsel_fanout so via avoidance can see COL_SEL vias
+    dbus_conn_traces = preroute_dbus_to_connector(pcb, netlist_data)
+    print(f"  D* bus->connector (F.Cu): {dbus_conn_traces} trace segments")
+
     total_vias = (pwr_vias + cs_vias + nand_vias + nand_led_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
                   + r_gnd_vias + dbus_fan_vias + cs_fan_vias)
@@ -3794,7 +4022,7 @@ def main():
                     + dff_buf_gnd_traces
                     + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
                     + colsel_traces + cs_traces + conn_traces + dbus_traces
-                    + dbus_fan_traces + cs_fan_traces)
+                    + dbus_fan_traces + dbus_conn_traces + cs_fan_traces)
     print(f"  Total pre-routed: {total_vias} vias + {total_traces} traces")
 
     # Layer visibility test grid (for clear PCB) — centered above RAM
