@@ -21,6 +21,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -43,6 +44,8 @@ PCB_INPUT = os.path.join(BOARD_DIR, "ram.kicad_pcb")
 PCB_ROUTED = os.path.join(BOARD_DIR, "ram_routed.kicad_pcb")
 DSN_PATH = os.path.join(BOARD_DIR, "ram.dsn")
 SES_PATH = os.path.join(BOARD_DIR, "ram.ses")
+
+KEEPOUT_JSON = os.path.join(BOARD_DIR, "routing_keepouts.json")
 
 FREEROUTING_URL = (
     "https://github.com/freerouting/freerouting/releases/download/"
@@ -112,6 +115,72 @@ def export_dsn(pcb_path, dsn_path):
 
     size_kb = os.path.getsize(dsn_path) / 1024
     print(f"  DSN exported: {size_kb:.0f} KB")
+
+
+# --------------------------------------------------------------
+# Step 2b: Inject routing keepouts into DSN
+# --------------------------------------------------------------
+
+def inject_dsn_keepouts(dsn_path, keepout_json_path):
+    """Inject routing keepout regions into the Specctra DSN file.
+
+    Reads keepout rectangles from a JSON sidecar (written by generate_pcb.py)
+    and inserts them as (keepout ...) entries in the DSN (structure ...) section.
+    FreeRouting respects these as no-route areas.
+
+    This approach avoids KiCad DRC violations from keepout zones conflicting
+    with pre-routed traces.
+    """
+    if not os.path.isfile(keepout_json_path):
+        print("  No routing_keepouts.json found, skipping")
+        return 0
+
+    with open(keepout_json_path) as f:
+        keepouts = json.load(f)
+
+    if not keepouts:
+        print("  No keepout regions defined, skipping")
+        return 0
+
+    # Build keepout DSN entries.
+    # DSN coords: µm, Y negated from KiCad (Y-down → Y-up).
+    # Each keepout is per-layer: (keepout "" (polygon LAYER 0  x1 y1  x2 y1  x2 y2  x1 y2  x1 y1))
+    entries = []
+    for name, k in keepouts.items():
+        x1 = round(k["x1"] * 1000)
+        y1 = round(-k["y1"] * 1000)
+        x2 = round(k["x2"] * 1000)
+        y2 = round(-k["y2"] * 1000)
+        for layer in k["layers"]:
+            entry = (f'    (keepout "" (polygon {layer} 0  {x1} {y1}  {x2} {y1}'
+                     f'  {x2} {y2}  {x1} {y2}\n            {x1} {y1}))')
+            entries.append(entry)
+
+    # Insert keepout entries before the first (via ...) line in the structure section.
+    # The structure section has: layers, boundary, planes, existing keepouts, via, rule.
+    with open(dsn_path, "r") as f:
+        content = f.read()
+
+    # Find insertion point: just before the first (via ...) in the structure section
+    via_idx = content.find("    (via ")
+    if via_idx < 0:
+        print("  WARNING: Could not find (via ...) in DSN, inserting before (rule ...")
+        via_idx = content.find("    (rule")
+    if via_idx < 0:
+        print("  ERROR: Could not find insertion point in DSN")
+        return 0
+
+    keepout_block = "\n".join(entries) + "\n"
+    content = content[:via_idx] + keepout_block + content[via_idx:]
+
+    with open(dsn_path, "w") as f:
+        f.write(content)
+
+    print(f"  Injected {len(entries)} keepout region(s) into DSN:")
+    for name, k in keepouts.items():
+        print(f"    {name}: ({k['x1']},{k['y1']}) to ({k['x2']},{k['y2']})"
+              f" on {k['layers']}")
+    return len(entries)
 
 
 # --------------------------------------------------------------
@@ -408,6 +477,10 @@ def main():
     # Step 2: Export DSN
     print(f"\n--- Step 2: Export Specctra DSN ---")
     export_dsn(PCB_INPUT, DSN_PATH)
+
+    # Step 2b: Inject routing keepouts into DSN
+    print(f"\n--- Step 2b: Inject Routing Keepouts ---")
+    inject_dsn_keepouts(DSN_PATH, KEEPOUT_JSON)
 
     if args.dry_run:
         print(f"\n--- Dry run complete ---")

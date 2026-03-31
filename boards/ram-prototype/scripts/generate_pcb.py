@@ -37,6 +37,7 @@ Usage:
     python scripts/generate_pcb.py
 """
 
+import json
 import math
 import os
 import sys
@@ -4231,6 +4232,35 @@ def main():
     test_grid_w, test_grid_h = add_layer_test_grid(pcb, test_x, test_y)
     print(f"\n  Layer test grid: {test_grid_w:.0f} x {test_grid_h:.0f} mm "
           f"at ({test_x:.1f}, {test_y:.1f})")
+
+    # Write routing keepout regions for route_pcb.py to inject into DSN.
+    # These are NOT KiCad keepout zones (which would trigger DRC on pre-routed
+    # traces), but coordinates that route_pcb.py injects into the Specctra DSN
+    # so only FreeRouting sees them.
+    KEEPOUT_PAD = 0.5
+    keepout_data = {
+        "ram_grid": {
+            "x1": round(grid_x1 - KEEPOUT_PAD, 2),
+            "y1": round(grid_y1 - KEEPOUT_PAD, 2),
+            "x2": round(grid_x2 + KEEPOUT_PAD, 2),
+            "y2": round(grid_y2 + KEEPOUT_PAD, 2),
+            "layers": ["F.Cu", "In1.Cu"],
+        },
+        "test_grid": {
+            "x1": round(test_x - KEEPOUT_PAD, 2),
+            "y1": round(test_y - KEEPOUT_PAD, 2),
+            "x2": round(test_x + test_grid_w + KEEPOUT_PAD, 2),
+            "y2": round(test_y + test_grid_h + KEEPOUT_PAD, 2),
+            "layers": ["F.Cu", "In1.Cu"],
+        },
+    }
+    keepout_path = os.path.join(BOARD_DIR, "routing_keepouts.json")
+    with open(keepout_path, "w") as f:
+        json.dump(keepout_data, f, indent=2)
+    print(f"\n  Routing keepouts written to {keepout_path}")
+    for name, k in keepout_data.items():
+        print(f"    {name}: ({k['x1']:.1f},{k['y1']:.1f})"
+              f" to ({k['x2']:.1f},{k['y2']:.1f}) on {k['layers']}")
 
     # Step 7: Board outline and power planes
     print("\n[7/7] Adding board outline and power planes...")

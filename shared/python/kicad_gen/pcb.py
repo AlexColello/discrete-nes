@@ -638,6 +638,45 @@ class PCBBuilder:
 
         self.board.zones.append(zone)
 
+    def add_routing_keepout(
+        self,
+        layers: List[str],
+        outline: List[Tuple[float, float]],
+        *,
+        block_vias: bool = True,
+    ):
+        """Add a keepout zone that blocks trace routing (and optionally vias).
+
+        FreeRouting respects these via the Specctra DSN export.
+
+        Args:
+            layers: Layer names to restrict (e.g., ["F.Cu", "In1.Cu"])
+            outline: List of (x, y) corner points
+            block_vias: Also block vias in this area (default True)
+        """
+        from kiutils.items.zones import KeepoutSettings
+
+        zone = Zone()
+        zone.net = 0
+        zone.netName = ""
+        zone.layers = layers
+        zone.tstamp = uid()
+        zone.hatch = Hatch(style="edge", pitch=0.508)
+        zone.keepoutSettings = KeepoutSettings(
+            tracks='not_allowed',
+            vias='not_allowed' if block_vias else 'allowed',
+            pads='allowed',
+            copperpour='allowed',
+            footprints='allowed',
+        )
+
+        polygon = ZonePolygon()
+        polygon.coordinates = [Position(X=round(x, 2), Y=round(y, 2))
+                               for x, y in outline]
+        zone.polygons = [polygon]
+
+        self.board.zones.append(zone)
+
     # ----------------------------------------------------------
     # Routing helpers
     # ----------------------------------------------------------
