@@ -428,11 +428,15 @@ VIA_OFFSET = 0.7     # mm offset from pad center to via center
 DEFAULT_CLEARANCE = 0.15  # mm netclass clearance (matches Elecrow minimum)
 
 
-def _set_project_clearance(pcb_path, clearance=DEFAULT_CLEARANCE):
+def _set_project_clearance(pcb_path, pcb=None, clearance=DEFAULT_CLEARANCE):
     """Set default netclass and design rule settings in .kicad_pro.
 
     KiCad reads DRC clearance and via sizes from the project file's
     net_settings and design_settings, not from the PCB file.
+
+    If *pcb* (PCBBuilder) is provided, also creates a "Connectors" net class
+    and assigns all nets that touch connector footprints (J1-J5) to it.
+    This lets FreeRouting route short logic nets first via ``-inc Connectors``.
     """
     import json
 
@@ -452,6 +456,45 @@ def _set_project_clearance(pcb_path, clearance=DEFAULT_CLEARANCE):
             nc["via_diameter"] = VIA_SIZE
             nc["via_drill"] = VIA_DRILL
             break
+
+    # Add "Connectors" net class (same electrical rules, just a grouping)
+    conn_class_exists = any(nc.get("name") == "Connectors" for nc in classes)
+    if not conn_class_exists:
+        conn_class = {
+            "name": "Connectors",
+            "clearance": clearance,
+            "track_width": 0.2,
+            "via_diameter": VIA_SIZE,
+            "via_drill": VIA_DRILL,
+            "bus_width": 12,
+            "diff_pair_gap": 0.25,
+            "diff_pair_via_gap": 0.25,
+            "diff_pair_width": 0.2,
+            "line_style": 0,
+            "microvia_diameter": 0.3,
+            "microvia_drill": 0.1,
+            "pcb_color": "rgba(0, 0, 0, 0.000)",
+            "priority": 2147483647,
+            "schematic_color": "rgba(0, 0, 0, 0.000)",
+            "wire_width": 6,
+        }
+        classes.append(conn_class)
+
+    # Assign connector pad nets to the "Connectors" class
+    if pcb is not None:
+        connector_nets = set()
+        for fp in pcb.board.footprints:
+            ref = fp.properties.get("Reference", "")
+            if ref.startswith("J") and ref != "J1":
+                for pad in fp.pads:
+                    if pad.net and pad.net.name and pad.net.name not in ("GND", "VCC", ""):
+                        connector_nets.add(pad.net.name)
+        if connector_nets:
+            assignments = net_settings.get("netclass_assignments", {}) or {}
+            for net_name in sorted(connector_nets):
+                assignments[net_name] = "Connectors"
+            net_settings["netclass_assignments"] = assignments
+            print(f"  Assigned {len(connector_nets)} connector nets to 'Connectors' class")
 
     # Update design rules to match via sizes
     ds = project.setdefault("board", {}).setdefault("design_settings", {})
@@ -516,11 +559,7 @@ def preroute_center_escape(pcb, netlist_data):
     SKIP_PARTS = {"74LVC1G79", "74LVC1G125", "74LVC2G00"}
 
     ref_to_part = _build_ref_to_part(netlist_data)
-    # Skip control_logic and row_ctrl ICs — D* bus F.Cu traces pass
-    # through those areas; row_ctrl gets dedicated trunk routing
-    skip_refs = {c["ref"] for c in netlist_data["components"]
-                 if "Control Logic" in c.get("sheetpath", "")
-                 or "Row Control" in c.get("sheetpath", "")}
+    skip_refs = set()
     traces = 0
 
     for fp in pcb.board.footprints:
@@ -1197,11 +1236,12 @@ def preroute_ctrl_enable_trunks(pcb, netlist_data):
     Both signals fan out from control_logic to pin 1 of the 4 row_ctrl
     AND gates.  Two separate trunks with interleaved via Y positions:
 
-      WRITE_ACTIVE (left): trunk at ic_center_x, jog LEFT from via.
-      READ_EN (right): trunk at ic_x+1.24 (under LED+R), jog RIGHT.
+      WRITE_ACTIVE (left): trunk at ic_center_x, straight vertical.
+      READ_EN (right): trunk at ic_x+1.24 (under LED+R).
 
-    The WRITE_ACTIVE trunk has gaps at each READ_EN jog Y so the
-    horizontal READ_EN jogs can cross without DRC violations.
+    READ_EN vias are offset right of the WRITE_ACTIVE trunk so
+    their horizontal jogs don't cross it, keeping WRITE_ACTIVE
+    as one uninterrupted vertical line.
 
     Returns (via_count, trace_count).
     """
@@ -1212,8 +1252,9 @@ def preroute_ctrl_enable_trunks(pcb, netlist_data):
 
     ESCAPE_DOWN = 0.34
     TRUNK_W = 0.16
-    # Gap half-width: via radius (0.25) + trace half-width (0.08) + clearance (0.16)
-    GAP_HALF = 0.49
+    # READ_EN via offset right of WRITE_ACTIVE trunk: trunk half-width +
+    # via radius + clearance = 0.08 + 0.25 + 0.16 = 0.49mm
+    RE_VIA_OFFSET = 0.50
 
     # --- Pass 1: collect via positions for both signals ---
     signal_data = {}  # signal -> (net_num, trunk_x, via_positions)
@@ -1251,8 +1292,13 @@ def preroute_ctrl_enable_trunks(pcb, netlist_data):
 
         via_pos_list = []
         for ref, px, py, icx, icy in pin1_positions:
-            vx = round(px, 2)
             vy = round(py + ESCAPE_DOWN, 2)
+
+            if signal == "READ_EN":
+                # Place via to the right of WRITE_ACTIVE trunk
+                vx = round(icx0 + RE_VIA_OFFSET, 2)
+            else:
+                vx = round(px, 2)
 
             pcb.add_trace((px, py), (vx, vy), net_num,
                           SIGNAL_TRACE_W, "F.Cu")
@@ -1271,45 +1317,17 @@ def preroute_ctrl_enable_trunks(pcb, netlist_data):
         signal_data[signal] = (net_num, trunk_x, via_pos_list)
 
     # --- Pass 2: route trunks ---
-    # READ_EN jog Ys that cross the WRITE_ACTIVE trunk
-    re_jog_ys = []
-    if "READ_EN" in signal_data:
-        _, _, re_vias = signal_data["READ_EN"]
-        re_jog_ys = [vy for _, vy in re_vias]
-
     for signal in ["WRITE_ACTIVE", "READ_EN"]:
         if signal not in signal_data:
             continue
         net_num, trunk_x, via_pos_list = signal_data[signal]
 
         for i in range(len(via_pos_list) - 1):
-            y_top = via_pos_list[i][1]
-            y_bot = via_pos_list[i + 1][1]
-
-            if signal == "WRITE_ACTIVE":
-                # Split trunk segment around READ_EN jog crossings
-                segments = [(y_top, y_bot)]
-                for jy in re_jog_ys:
-                    new_segs = []
-                    for s_top, s_bot in segments:
-                        gap_top = round(jy - GAP_HALF, 2)
-                        gap_bot = round(jy + GAP_HALF, 2)
-                        if gap_top > s_top + 0.01:
-                            new_segs.append((s_top, min(gap_top, s_bot)))
-                        if gap_bot < s_bot - 0.01:
-                            new_segs.append((max(gap_bot, s_top), s_bot))
-                    segments = new_segs if new_segs else segments
-
-                for s_top, s_bot in segments:
-                    if s_bot - s_top > 0.02:
-                        pcb.add_trace((trunk_x, s_top), (trunk_x, s_bot),
-                                      net_num, TRUNK_W, "In1.Cu")
-                        traces += 1
-            else:
-                # READ_EN trunk: continuous (no crossings)
-                pcb.add_trace(via_pos_list[i], via_pos_list[i + 1],
-                              net_num, TRUNK_W, "In1.Cu")
-                traces += 1
+            # Continuous trunk — no gaps needed since READ_EN vias
+            # are offset right and jogs don't cross WRITE_ACTIVE
+            pcb.add_trace(via_pos_list[i], via_pos_list[i + 1],
+                          net_num, TRUNK_W, "In1.Cu")
+            traces += 1
 
     return vias, traces
 
@@ -4579,7 +4597,7 @@ def main():
     # Save PCB (hide all footprint text to avoid silk_overlap/silk_over_copper)
     pcb_path = os.path.join(BOARD_DIR, "ram.kicad_pcb")
     pcb.save(pcb_path, hide_text=True, fix_led_silk=True)
-    _set_project_clearance(pcb_path)
+    _set_project_clearance(pcb_path, pcb=pcb)
     print(f"\nSaved: {pcb_path}")
 
     # Cleanup netlist

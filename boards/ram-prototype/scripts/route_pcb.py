@@ -118,7 +118,51 @@ def export_dsn(pcb_path, dsn_path):
 
 
 # --------------------------------------------------------------
-# Step 2b: Inject routing keepouts into DSN
+# Step 2b: Fix DSN clearance rules
+# --------------------------------------------------------------
+
+def fix_dsn_clearances(dsn_path):
+    """Fix clearance rules in the Specctra DSN to match KiCad DRC settings.
+
+    KiCad's DSN export sets smd_smd clearance to a tiny value (37.5µm)
+    which lets FreeRouting route traces too close to SMD pads. Also missing
+    are hole-related clearances (hole_clearance, hole_to_hole).
+
+    This post-processes ALL (rule ...) blocks in the DSN to enforce:
+      - smd_smd clearance = 150µm  (match global 0.15mm)
+      - via_via clearance = 250µm  (hole_to_hole = 0.25mm)
+      - via_smd clearance = 250µm  (hole_clearance = 0.25mm)
+      - via_pin clearance = 250µm  (hole_clearance = 0.25mm)
+    """
+    import re
+
+    with open(dsn_path, "r") as f:
+        content = f.read()
+
+    # Replace all smd_smd clearance values (KiCad exports 37.5)
+    content = re.sub(
+        r'\(clearance \d+\.?\d* \(type smd_smd\)\)',
+        '(clearance 150 (type smd_smd))',
+        content)
+
+    # Add hole-related clearances after each (clearance ... (type smd_smd)) line
+    hole_rules = (
+        '\n      (clearance 250 (type via_via))'
+        '\n      (clearance 250 (type via_smd))'
+        '\n      (clearance 250 (type via_pin))'
+    )
+    content = content.replace(
+        '(clearance 150 (type smd_smd))',
+        '(clearance 150 (type smd_smd))' + hole_rules)
+
+    with open(dsn_path, "w") as f:
+        f.write(content)
+
+    print("  Fixed DSN clearances: smd_smd=150µm, via_via/via_smd/via_pin=250µm")
+
+
+# --------------------------------------------------------------
+# Step 2c: Inject routing keepouts into DSN
 # --------------------------------------------------------------
 
 def inject_dsn_keepouts(dsn_path, keepout_json_path):
@@ -209,7 +253,7 @@ def run_freerouting(jar_path, dsn_path, ses_path, max_passes=20):
         "-do", ses_path,       # design output (SES)
         "-mp", str(max_passes),  # max passes
         "-mt", "1",            # single-threaded (multi-threaded optimization is broken)
-        "-da",                 # detail autorouter after global
+        "-da",                 # disable analytics
     ]
 
     print(f"  Command: {' '.join(cmd)}")
@@ -439,7 +483,7 @@ def run_post_route_verify():
     cmd = [sys.executable, VERIFY_SCRIPT, "--post-routing"]
     print(f"  Command: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd, timeout=120)
+    result = subprocess.run(cmd, timeout=600)
     return result.returncode
 
 
@@ -478,8 +522,11 @@ def main():
     print(f"\n--- Step 2: Export Specctra DSN ---")
     export_dsn(PCB_INPUT, DSN_PATH)
 
-    # Step 2b: Inject routing keepouts into DSN
-    print(f"\n--- Step 2b: Inject Routing Keepouts ---")
+    # Step 2b: Fix clearance rules and inject keepouts into DSN
+    print(f"\n--- Step 2b: Fix DSN Clearance Rules ---")
+    fix_dsn_clearances(DSN_PATH)
+
+    print(f"\n--- Step 2c: Inject Routing Keepouts ---")
     inject_dsn_keepouts(DSN_PATH, KEEPOUT_JSON)
 
     if args.dry_run:
@@ -487,7 +534,7 @@ def main():
         print(f"  DSN file: {DSN_PATH}")
         return 0
 
-    # Step 3: FreeRouting
+    # Step 3: Run FreeRouting
     print(f"\n--- Step 3: Run FreeRouting (max {args.passes} passes) ---")
     run_freerouting(jar_path, DSN_PATH, SES_PATH, max_passes=args.passes)
 
