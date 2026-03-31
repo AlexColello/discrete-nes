@@ -1499,14 +1499,6 @@ def generate_root_sheet():
                               right_pins=rc_right_names)
         rc_pp.append(pp)
 
-    # Control Logic below Row Control blocks (in col2)
-    rc_bottom_y = snap(base_y + 3 * (rc_h + sheet_gap) + rc_h)
-    ctrl_sy = snap(rc_bottom_y + sheet_gap)
-    ctrl_pp = _add_sheet_block("Control Logic", "control_logic.kicad_sch",
-                               ctrl_pin_defs, col2_x, ctrl_sy,
-                               col2_w, ctrl_h, orange_fill,
-                               right_pins=ctrl_right_names)
-
     # ================================================================
     # Byte sheet blocks (4 rows x 2 columns)
     # ================================================================
@@ -1527,13 +1519,22 @@ def generate_root_sheet():
 
     # ================================================================
     # Power Supply sheet block (no hierarchy pins — uses global VCC/GND)
+    # Below Row Control blocks in col2
     # ================================================================
+    rc_bottom_y = snap(base_y + 3 * (rc_h + sheet_gap) + rc_h)
     purple_fill = ColorRGBA(R=240, G=225, B=255, A=255, precision=4)
     pwr_w = snap(20 * GRID)
     pwr_h = snap(10 * GRID)
-    pwr_sy = snap(ctrl_sy + ctrl_h + sheet_gap)  # below control logic
+    pwr_sy = snap(rc_bottom_y + sheet_gap)
     _add_sheet_block("Power Supply", "power_supply.kicad_sch",
                      [], col2_x, pwr_sy, pwr_w, pwr_h, purple_fill)
+
+    # Control Logic below Power Supply (in col2) — D* routes above
+    ctrl_sy = snap(pwr_sy + pwr_h + sheet_gap)
+    ctrl_pp = _add_sheet_block("Control Logic", "control_logic.kicad_sch",
+                               ctrl_pin_defs, col2_x, ctrl_sy,
+                               col2_w, ctrl_h, orange_fill,
+                               right_pins=ctrl_right_names)
 
     # ================================================================
     # Pre-compute connector placement
@@ -1549,14 +1550,14 @@ def generate_root_sheet():
 
     # ================================================================
     # Connector pin mapping (24-pin)
-    # Pin 1=GND, 2-5=A7-A10, 6-13=D0-D7, 14-16=nCE/nWE/nOE, 17-23=A0-A6, 24=VCC
+    # Pin 1=GND, 2-5=A7-A10, 6-8=nCE/nWE/nOE, 9-16=D0-D7, 17-23=A0-A6, 24=VCC
     # At 180° orientation: pin 24 (VCC) at top, pin 1 (GND) at bottom
-    # Visual top-to-bottom: VCC, A0-A6, ctrl, D0-D7, A7-A10, GND
+    # Visual top-to-bottom: VCC, A0-A6, D0-D7, ctrl, A7-A10, GND
     # ================================================================
     signal_names = [
         "A7", "A8", "A9", "A10",                           # pins 2-5
-        "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",  # pins 6-13
-        "nCE", "nWE", "nOE",                               # pins 14-16
+        "nCE", "nWE", "nOE",                               # pins 6-8
+        "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",  # pins 9-16
         "A0", "A1", "A2", "A3", "A4", "A5", "A6",         # pins 17-23
     ]
     conn_signal_pos = {}
