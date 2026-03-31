@@ -6,7 +6,7 @@
         "apply_defaults_to_fp_fields": false,
         "apply_defaults_to_fp_shapes": false,
         "apply_defaults_to_fp_text": false,
-        "board_outline_line_width": 0.05,
+        "board_outline_line_width": 0.1,
         "copper_line_width": 0.2,
         "copper_text_italic": false,
         "copper_text_size_h": 1.5,
@@ -30,7 +30,7 @@
         "fab_text_size_v": 1.0,
         "fab_text_thickness": 0.15,
         "fab_text_upright": false,
-        "other_line_width": 0.1,
+        "other_line_width": 0.15,
         "other_text_italic": false,
         "other_text_size_h": 1.0,
         "other_text_size_v": 1.0,
@@ -41,13 +41,16 @@
           "height": 1.27,
           "width": 2.54
         },
-        "silk_line_width": 0.1,
+        "silk_line_width": 0.15,
         "silk_text_italic": false,
         "silk_text_size_h": 1.0,
         "silk_text_size_v": 1.0,
-        "silk_text_thickness": 0.1,
+        "silk_text_thickness": 0.15,
         "silk_text_upright": false,
+        "via_diameter": 0.8,
+        "via_drill": 0.4,
         "zones": {
+          "45_degree_only": false,
           "min_clearance": 0.5
         }
       },
@@ -74,7 +77,8 @@
         "footprint_symbol_mismatch": "warning",
         "footprint_type_mismatch": "ignore",
         "hole_clearance": "error",
-        "hole_to_hole": "warning",
+        "hole_near_hole": "error",
+        "hole_to_hole": "error",
         "holes_co_located": "warning",
         "invalid_outline": "error",
         "isolated_copper": "warning",
@@ -113,11 +117,14 @@
         "unconnected_items": "error",
         "unresolved_variable": "error",
         "via_dangling": "warning",
+        "zone_has_empty_net": "error",
         "zones_intersect": "error"
       },
       "rules": {
+        "allow_blind_buried_vias": false,
+        "allow_microvias": false,
         "max_error": 0.005,
-        "min_clearance": 0.0,
+        "min_clearance": 0.15,
         "min_connection": 0.0,
         "min_copper_edge_clearance": 0.5,
         "min_groove_width": 0.0,
@@ -130,7 +137,7 @@
         "min_text_height": 0.8,
         "min_text_thickness": 0.08,
         "min_through_hole_diameter": 0.3,
-        "min_track_width": 0.0,
+        "min_track_width": 0.15,
         "min_via_annular_width": 0.1,
         "min_via_diameter": 0.5,
         "solder_mask_to_copper_clearance": 0.0,
@@ -207,8 +214,14 @@
           "spacing": 0.6
         }
       },
-      "via_dimensions": [],
-      "zones_allow_external_fillets": false
+      "via_dimensions": [
+        {
+          "diameter": 0.5,
+          "drill": 0.3
+        }
+      ],
+      "zones_allow_external_fillets": false,
+      "zones_use_no_outline": true
     },
     "ipc2581": {
       "dist": "",
@@ -458,7 +471,7 @@
     "classes": [
       {
         "bus_width": 12,
-        "clearance": 0.2,
+        "clearance": 0.15,
         "diff_pair_gap": 0.25,
         "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
@@ -470,7 +483,7 @@
         "priority": 2147483647,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.2,
-        "via_diameter": 0.6,
+        "via_diameter": 0.5,
         "via_drill": 0.3,
         "wire_width": 6
       }
@@ -497,7 +510,7 @@
     "page_layout_descr_file": ""
   },
   "schematic": {
-    "annotate_start_num": 0,
+    "annotate_start_num": 1,
     "bom_export_filename": "${PROJECTNAME}.csv",
     "bom_fmt_presets": [],
     "bom_fmt_settings": {
@@ -609,6 +622,59 @@
     "subpart_first_id": 65,
     "subpart_id_separator": 0
   },
-  "sheets": [],
+  "sheets": [
+    [
+      "97f919b3-9de9-4ecb-9184-607c33af7869",
+      "Root"
+    ],
+    [
+      "d2ec262d-e139-4a7a-933a-989ab0fb48a0",
+      "Address Decoder"
+    ],
+    [
+      "a5b9ad0f-9d20-473d-ba46-b71b56cf2743",
+      "Control Logic"
+    ],
+    [
+      "460e6c39-44e1-47da-aa98-55d4320013b2",
+      "Write Clk Gen"
+    ],
+    [
+      "6e91174e-2007-4ca8-a885-2787d54e3b34",
+      "Read OE Gen"
+    ],
+    [
+      "aeb5786d-1283-4695-8b3f-1d7f625e807b",
+      "Byte 0"
+    ],
+    [
+      "4dd03790-8b13-410e-b42b-afdc22cd850b",
+      "Byte 1"
+    ],
+    [
+      "024762cf-0404-434c-8879-0ca5e02c55fe",
+      "Byte 2"
+    ],
+    [
+      "ae7a3298-10a4-482a-a515-25079403b0ac",
+      "Byte 3"
+    ],
+    [
+      "2ae028be-fd0c-4758-8a8e-19c270f40291",
+      "Byte 4"
+    ],
+    [
+      "c8811799-1fa3-4746-a350-63d7594fd293",
+      "Byte 5"
+    ],
+    [
+      "99be3734-70e8-4afd-8aa1-8d99c876eccd",
+      "Byte 6"
+    ],
+    [
+      "f69b7f21-714a-4096-85d8-fe280db36953",
+      "Byte 7"
+    ]
+  ],
   "text_variables": {}
 }

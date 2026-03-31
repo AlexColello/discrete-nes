@@ -262,14 +262,18 @@ FOOTPRINT_MAP = {
 DSBGA5_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "C1", "4": "C2", "5": "A2"}
 DSBGA6_PIN_TO_BALL = {"1": "A1", "2": "B1", "3": "C1", "4": "C2", "5": "A2", "6": "B2"}
 # DSBGA-8: KiCad and TI pin numbers match (1=1A, 2=1B, 3=2Y, 4=GND,
-# 5=2A, 6=2B, 7=1Y, 8=VCC).  Pins down col1 then up col2.
-#   Top view:  A1=1A(1)  A2=VCC(8)
-#              B1=1B(2)  B2=1Y(7)
-#              C1=2Y(3)  C2=2B(6)
-#              D1=GND(4) D2=2A(5)
+# 5=2A, 6=2B, 7=1Y, 8=VCC).
+# Gate swap (1↔5, 2↔6, 3↔7) for routing: at 270° rotation, CLK output
+# (pin 7) lands on the top row (routes UP to CLK bus) and OE output
+# (pin 3) lands on the bottom row (routes DOWN to OE bus).
+# Gates are identical NANDs so the swap is electrically equivalent.
+#   Top view:  A1=2A(5)  A2=VCC(8)
+#              B1=2B(6)  B2=2Y(3)
+#              C1=1Y(7)  C2=1B(2)
+#              D1=GND(4) D2=1A(1)
 DSBGA8_PIN_TO_BALL = {
-    "1": "A1", "2": "B1", "3": "C1", "4": "D1",
-    "5": "D2", "6": "C2", "7": "B2", "8": "A2",
+    "1": "D2", "2": "C2", "3": "B2", "4": "D1",
+    "5": "A1", "6": "B1", "7": "C1", "8": "A2",
 }
 
 # Reverse: ball name to pin number

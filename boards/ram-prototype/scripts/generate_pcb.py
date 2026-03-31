@@ -370,23 +370,26 @@ def layout_byte_group(comps):
     # R/LED 0402@0/180 courtyard: ±0.93mm X, ±0.475mm Y.
     # LEDs in one row below NAND, Rs in a row below LEDs.
     # Left pair mirrored so R GND pads (pad 2) face inward toward each other.
-    nand_led_pairs = list(reversed(nand_led_pairs))
-    nand_center_x = NAND_X_NUDGE   # 0.5 — match NAND IC X offset
-    led_spacing_x = 1.86            # 0402 courtyard touching (0.93+0.93)
+    # NOT reversed: keeps OE LED (pin 3) on RIGHT (short route from
+    # bottom-row pin), CLK LED (pin 7) on LEFT.
+    nand_center_x = 0.25            # shifted LEFT to center gap on WRITE_EN
+    led_spacing_x = 2.30            # wider for routing channel between pairs
+    r_spacing_x = led_spacing_x     # Rs match LED spacing
     nand_led_y = 1.55               # LED row Y — top (1.075) clears NAND bottom (1.05)
     nand_r_y = 2.55                 # R row Y — top (2.075) clears LED bottom (2.025)
     for i, (r_comp, led_comp) in enumerate(nand_led_pairs):
-        col_x = round(nand_center_x + (i - 0.5) * led_spacing_x, 2)
+        led_x = round(nand_center_x + (i - 0.5) * led_spacing_x, 2)
+        r_x = round(nand_center_x + (i - 0.5) * r_spacing_x, 2)
         # i=0 (left): R@0°/LED@180° — GND(pad2) faces RIGHT (inward)
         # i=1 (right): R@180°/LED@0° — GND(pad2) faces LEFT (inward)
         r_angle = 0 if i == 0 else 180
         led_angle = 180 if i == 0 else 0
         if r_comp:
             r_tagged = dict(r_comp, angle_override=r_angle)
-            placements.append((r_tagged, col_x, nand_r_y))
+            placements.append((r_tagged, r_x, nand_r_y))
         if led_comp:
             led_tagged = dict(led_comp, angle_override=led_angle)
-            placements.append((led_tagged, col_x, nand_led_y))
+            placements.append((led_tagged, led_x, nand_led_y))
 
     return placements
 
@@ -1182,8 +1185,9 @@ def preroute_enable_buses(pcb, netlist_data):
             if len(nand_pads) < 2 or dff_y is None or led_center is None:
                 continue
 
-            # Bus Y: above CLK bus for WRITE_EN, below OE bus for READ_EN
-            if signal == "WRITE_EN":
+            # Swapped: READ_EN above CLK (pin 6 on top row routes UP),
+            # WRITE_EN below OE (pin 2 on bottom row routes DOWN).
+            if signal == "READ_EN":
                 bus_y = round(dff_y + CLK_BUS_Y_OFFSET + WRITE_EN_OFFSET, 2)
             else:
                 bus_y = round(buf_y + OE_BUS_Y_OFFSET + READ_EN_OFFSET, 2)
@@ -1196,28 +1200,25 @@ def preroute_enable_buses(pcb, netlist_data):
             delta_y = abs(bus_y - junc_y)
 
             if bus_y < junc_y:
-                # WRITE_EN: bus above — pure 45° diagonal up-right to bus_y.
-                # Goes away from LED-to-R trace (which is below), no crossing.
+                # Bus above (READ_EN after swap): pure 45° diagonal
+                # up-right to bus_y.  Goes away from LED-to-R trace.
                 diag_end = (round(junc_x + delta_y, 2), round(bus_y, 2))
                 pcb.add_trace((junc_x, junc_y), diag_end, net_num,
                               ENABLE_TRACE_W, "F.Cu")
                 traces += 1
                 x_start = diag_end[0]
             else:
-                # READ_EN: bus below — route through the narrow corridor
-                # between the write AND's R pad 1 (above) and read AND's
-                # R pad 2 (below).  Short 45° up-right into corridor,
-                # horizontal right past R + GND via, then 45° down-right.
+                # Bus below (WRITE_EN after swap): corridor route to
+                # avoid R pads.  45° up-right, horizontal past R,
+                # 45° down-right to bus.
                 corr_y = round(junc_y - CORRIDOR_SHIFT, 2)
                 p1 = (round(junc_x + CORRIDOR_SHIFT, 2), corr_y)
                 pcb.add_trace((junc_x, junc_y), p1, net_num,
                               ENABLE_TRACE_W, "F.Cu")
                 traces += 1
-                # Horizontal past R area
                 p2 = (round(p1[0] + HORIZ_PAST_R, 2), corr_y)
                 pcb.add_trace(p1, p2, net_num, ENABLE_TRACE_W, "F.Cu")
                 traces += 1
-                # 45° diagonal down-right to bus_y
                 corr_delta = round(bus_y - corr_y, 2)
                 diag_end = (round(p2[0] + corr_delta, 2), round(bus_y, 2))
                 pcb.add_trace(p2, diag_end, net_num,
@@ -1643,25 +1644,25 @@ def preroute_r_gnd(pcb, netlist_data):
 def preroute_nand_connections(pcb, netlist_data):
     """Route 74LVC2G00 dual NAND local connections within each byte group.
 
-    NAND is at 270° (90° CW).  Horizontal 4x2 pad grid:
-      Top row (cy-0.25): pin4(GND) pin3(OE_out) pin2(WRITE_EN) pin1(COL_SEL)
-      Bot row (cy+0.25): pin5(COL_SEL) pin6(READ_EN) pin7(CLK_out) pin8(VCC)
+    NAND is at 270° (90° CW).  Gate-swapped footprint puts:
+      Top row (cy-0.25): pin4(GND) pin7(CLK_out) pin6(READ_EN) pin5(COL_SEL)
+      Bot row (cy+0.25): pin1(COL_SEL) pin2(WRITE_EN) pin3(OE_out) pin8(VCC)
 
     NAND center at (byte_x+0.5, byte_y-0.25).  Courtyard cx±1.3, cy±0.8.
-    Gap between NAND right courtyard (byte_x+1.80) and DFF left courtyard
-    (byte_x+2.70) is 0.90mm — one corridor fits.
 
-    Pin 7 (CLK output): F.Cu RIGHT through gap, UP, LEFT to CLK bus.
-      LED connection left to autorouter (separate In1.Cu corridor would
-      collide with OE corridor from adjacent bytes).
-    Pin 3 (OE output): F.Cu UP to courtyard top, via to In1.Cu,
-      L-route through single corridor (X=byte_x+2.00) DOWN to OE bus.
-      LED tap via at LED Y.
-    Pin 2 (WRITE_EN): F.Cu straight UP to WRITE_EN bus.
-    Pin 6 (READ_EN): F.Cu straight DOWN, left to autorouter through
-      LED area (tight clearances).
-    Pin 4 (GND): F.Cu UP-LEFT to via on B.Cu.
-    Pin 8 (VCC): F.Cu DOWN-RIGHT to via on In2.Cu.
+    Pin 7 (CLK output, top row): F.Cu straight UP to CLK bus.
+    Pin 3 (OE output, bottom row): F.Cu stub DOWN to courtyard edge.
+    Pin 2 (WRITE_EN, bottom row): F.Cu stub DOWN (trimmed 0.15mm for
+      COL_SEL via clearance).
+    Pin 6 (READ_EN, top row): F.Cu stub UP (trimmed 0.15mm for
+      COL_SEL via clearance).
+    Pin 4 (GND): F.Cu 45° UP-LEFT to via on B.Cu.
+    Pin 8 (VCC): F.Cu 45° DOWN-RIGHT to via on In2.Cu.
+
+    OE/WRITE_EN/READ_EN full In1.Cu routing is blocked by NAND LED
+    cathode pads (only 0.34mm gap, can't fit via or trace) and VCC
+    via annular on In1.Cu.  Escape stubs provide starting points
+    for manual routing in KiCad.
 
     Returns (via_count, trace_count).
     """
@@ -1670,7 +1671,6 @@ def preroute_nand_connections(pcb, netlist_data):
     vias = 0
     traces = 0
 
-    CORRIDOR_X = 2.00       # single In1.Cu corridor X offset from byte_x
     NAND_X_NUDGE = 0.5      # must match layout_byte_group
 
     for fp in pcb.board.footprints:
@@ -1737,9 +1737,7 @@ def preroute_nand_connections(pcb, netlist_data):
 
         # CLK bus Y: 1.25mm above DFF center
         dff_clk_pads.sort(key=lambda p: p[0])
-        dff_pin2_y = dff_clk_pads[0][1]
-        leftmost_dff_pin_x = dff_clk_pads[0][0]
-        dff_cy = round(dff_pin2_y - 0.25, 2)  # DFF@90°: pin2 at ic_y+0.25
+        dff_cy = round(dff_clk_pads[0][1] - 0.25, 2)
         clk_bus_y = round(dff_cy - 1.25, 2)
 
         # OE bus Y: 1.4mm below BUF center
@@ -1755,55 +1753,123 @@ def preroute_nand_connections(pcb, netlist_data):
         crtyd_top_y = round(byte_y - 1.05, 2)
         crtyd_bot_y = round(byte_y + 0.55, 2)
 
-        # Corridor X (absolute, single corridor for OE only)
-        corr_x = round(byte_x + CORRIDOR_X, 2)
 
-        # Find LED anodes on each output net (nearest to NAND)
+        # Find LED anode pads (pin 3→LEFT, pin 7→RIGHT consistently)
         def find_led_anode(net_num):
             pads = net_to_pads.get(net_num, [])
             best = None
             best_dist = float("inf")
-            for pad_ref, pad_num, px, py, pnet in pads:
-                if pad_ref.startswith("D"):
+            for pr, pn, px, py, pnet in pads:
+                if pr.startswith("D") and pn == "2":
                     dist = math.sqrt((px - nand_x)**2 + (py - nand_y)**2)
                     if dist < 10 and dist < best_dist:
                         best_dist = dist
                         best = (px, py)
             return best
 
-        oe_led = find_led_anode(oe_net)
+        clk_led = find_led_anode(clk_net) if clk_net else None
+        oe_led = find_led_anode(oe_net) if oe_net else None
 
-        # === Pin 7 (CLK) and Pin 3 (OE) outputs ===
-        # Both outputs need to cross the chip body to reach their buses
-        # and LEDs. The gap between NAND and DFF courtyards is only 0.90mm
-        # which is occupied by existing DFF-BUF VCC traces and vias.
-        # Leave output routing to autorouter — it can use In1.Cu freely.
-        # We provide escape stubs from each output pin to courtyard edge.
+        # === Pin 7 (CLK, top row) — UP to bus, LED LEFT, DFFs RIGHT ===
         if clk_pos and clk_net:
-            pcb.add_trace(clk_pos, (clk_pos[0], crtyd_bot_y),
+            pcb.add_trace(clk_pos, (clk_pos[0], clk_bus_y),
                           clk_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-        if oe_pos and oe_net:
-            pcb.add_trace(oe_pos, (oe_pos[0], crtyd_top_y),
+            # CLK→DFF: duck under READ_EN vertical (byte_x+0.75) on In1.Cu.
+            # Uses the CLK LED via at byte_y-1.05 (shared), adds In1.Cu
+            # RIGHT to byte_x+1.25, via back to F.Cu, UP to bus Y.
+            clk_via_y = round(byte_y - 1.15, 2)
+            clk_via_x = round(clk_pos[0] - 0.05, 2)  # 0.05mm LEFT of pin
+            clk_via2_x = round(byte_x + 1.30, 2)
+            # Short 45° jog from CLK vertical to offset via
+            pcb.add_trace((clk_pos[0], round(clk_via_y + 0.05, 2)),
+                          (clk_via_x, clk_via_y),
+                          clk_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_via((clk_via_x, clk_via_y), clk_net,
+                        VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
+            vias += 1
+            pcb.add_trace((clk_via_x, clk_via_y),
+                          (clk_via2_x, clk_via_y),
+                          clk_net, SIGNAL_TRACE_W, "In1.Cu")
+            traces += 1
+            pcb.add_via((clk_via2_x, clk_via_y), clk_net,
+                        VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
+            vias += 1
+            # F.Cu UP from via to CLK bus Y, then RIGHT to first DFF
+            pcb.add_trace((clk_via2_x, clk_via_y),
+                          (clk_via2_x, clk_bus_y),
+                          clk_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            leftmost_dff_x = dff_clk_pads[0][0]
+            pcb.add_trace((clk_via2_x, clk_bus_y),
+                          (leftmost_dff_x, clk_bus_y),
+                          clk_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+
+            if clk_led:
+                # CLK LED on LEFT: bus extends LEFT, DOWN, RIGHT to anode.
+                clk_col_x = round(byte_x - 1.60, 2)
+                pcb.add_trace((clk_via_x, clk_bus_y),
+                              (clk_col_x, clk_bus_y),
+                              clk_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+                pcb.add_trace((clk_col_x, clk_bus_y),
+                              (clk_col_x, clk_led[1]),
+                              clk_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+                pcb.add_trace((clk_col_x, clk_led[1]),
+                              clk_led,
+                              clk_net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 1
+
+        # === Pin 3 (OE) — F.Cu DOWN-RIGHT to right LED + LEFT to bus ===
+        if oe_pos and oe_net and oe_led:
+            p1 = (oe_pos[0], round(oe_pos[1] + 0.35, 2))
+            pcb.add_trace(oe_pos, p1, oe_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_trace(p1, oe_led, oe_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            # OE bus: from anode, 45° DOWN-RIGHT past R, then DOWN
+            # to OE bus, then RIGHT to BUF OE stubs.
+            oe_col_x = round(oe_led[0] + 0.58, 2)  # past R pad1 right edge
+            oe_turn_y = round(oe_led[1] + 0.55, 2)
+            pcb.add_trace(oe_led, (oe_col_x, oe_turn_y),
+                          oe_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_trace((oe_col_x, oe_turn_y),
+                          (oe_col_x, oe_bus_y),
+                          oe_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+            pcb.add_trace((oe_col_x, oe_bus_y),
+                          (leftmost_buf_oe_x, oe_bus_y),
+                          oe_net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
+        elif oe_pos and oe_net:
+            pcb.add_trace(oe_pos, (oe_pos[0], crtyd_bot_y),
                           oe_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-        # === Pin 2: WRITE_EN Input (F.Cu straight UP) ===
+        # === Pin 2 (WRITE_EN) — F.Cu straight DOWN through LED gap ===
+        # With wider LED spacing, the gap between cathode pads is
+        # ~1.3mm — plenty for a trace at pin 2's X (byte_x+0.25).
         pin2_pos = pcb.get_pad_position(ref, "2")
         pin2_net = pcb.get_pad_net(ref, "2")
+        write_en_bus_y = round(buf_cy + 1.4 + 0.40, 2)
         if pin2_pos and pin2_net:
-            pcb.add_trace(pin2_pos, (pin2_pos[0], write_en_bus_y),
+            pcb.add_trace(pin2_pos,
+                          (pin2_pos[0], write_en_bus_y),
                           pin2_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
-        # === Pin 6: READ_EN Input — stub DOWN to courtyard edge only ===
-        # Full path to READ_EN bus crosses LED area with tight clearances.
-        # Route stub to courtyard edge; autorouter completes to bus.
+        # === Pin 6 (READ_EN) — F.Cu straight UP to bus (above CLK) ===
         pin6_pos = pcb.get_pad_position(ref, "6")
         pin6_net = pcb.get_pad_net(ref, "6")
+        read_en_bus_y = round(clk_bus_y - 0.40, 2)  # above CLK bus
         if pin6_pos and pin6_net:
-            pcb.add_trace(pin6_pos, (pin6_pos[0], crtyd_bot_y),
+            pcb.add_trace(pin6_pos,
+                          (pin6_pos[0], read_en_bus_y),
                           pin6_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
 
@@ -1813,13 +1879,14 @@ def preroute_nand_connections(pcb, netlist_data):
         if pin4_pos and pin4_net:
             # 45° UP-LEFT then vertical UP to via
             gnd_via_x = round(byte_x - 0.45, 2)
-            diag_end_y = round(pin4_pos[1] - 0.20, 2)
-            pcb.add_trace(pin4_pos, (gnd_via_x, diag_end_y),
+            gnd_via_y = round(byte_y - 0.65, 2)
+            # 45° UP-LEFT then short horizontal to via
+            gnd_diag = (round(pin4_pos[0] - 0.15, 2),
+                        round(pin4_pos[1] - 0.15, 2))
+            pcb.add_trace(pin4_pos, gnd_diag,
                           pin4_net, POWER_TRACE_W, "F.Cu")
             traces += 1
-
-            gnd_via_y = round(byte_y - 0.90, 2)
-            pcb.add_trace((gnd_via_x, diag_end_y), (gnd_via_x, gnd_via_y),
+            pcb.add_trace(gnd_diag, (gnd_via_x, gnd_via_y),
                           pin4_net, POWER_TRACE_W, "F.Cu")
             traces += 1
 
@@ -1828,22 +1895,24 @@ def preroute_nand_connections(pcb, netlist_data):
                         remove_unused_layers=True)
             vias += 1
 
-        # === Pin 8: VCC (via to In2.Cu) ===
+        # === Pin 8: VCC — F.Cu RIGHT to via at courtyard edge ===
+        # 45° DOWN-RIGHT then short horizontal to via at (byte_x+1.80).
+        # Y offset +0.30 clears COL_SEL via at (byte_x+1.80, byte_y-0.50)
+        # by 0.80mm center-to-center (hole-to-hole 0.50mm = PCBWay min).
         pin8_pos = pcb.get_pad_position(ref, "8")
         pin8_net = pcb.get_pad_net(ref, "8")
         if pin8_pos and pin8_net:
-            # 45° DOWN-RIGHT then vertical DOWN to via
-            vcc_via_x = round(byte_x + 1.45, 2)
-            diag_end_y = round(pin8_pos[1] + 0.20, 2)
-            pcb.add_trace(pin8_pos, (vcc_via_x, diag_end_y),
-                          pin8_net, POWER_TRACE_W, "F.Cu")
+            vcc_via_x = round(byte_x + 1.80, 2)
+            vcc_via_y = round(byte_y + 0.30, 2)
+            # 45° DOWN-RIGHT from pin 8
+            diag_end = (round(pin8_pos[0] + 0.30, 2), vcc_via_y)
+            pcb.add_trace(pin8_pos, diag_end,
+                          pin8_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
-
-            vcc_via_y = crtyd_bot_y
-            pcb.add_trace((vcc_via_x, diag_end_y), (vcc_via_x, vcc_via_y),
-                          pin8_net, POWER_TRACE_W, "F.Cu")
+            # Horizontal RIGHT to via
+            pcb.add_trace(diag_end, (vcc_via_x, vcc_via_y),
+                          pin8_net, SIGNAL_TRACE_W, "F.Cu")
             traces += 1
-
             pcb.add_via((vcc_via_x, vcc_via_y), pin8_net,
                         VIA_SIZE, VIA_DRILL, ["F.Cu", "In2.Cu"],
                         remove_unused_layers=True)
@@ -1951,21 +2020,17 @@ def preroute_nand_leds(pcb, netlist_data):
                         r_gnd_pads.append(r_gnd_pos)
                     break
 
-        # Place a shared GND via centered between and below the two R GND pads,
-        # then route each R GND pad to it with 45° diagonal traces.
-        if len(r_gnd_pads) == 2 and gnd_net is not None:
-            via_x = round((r_gnd_pads[0][0] + r_gnd_pads[1][0]) / 2, 2)
-            # Y offset = X offset for 45° diagonals
-            dx = abs(r_gnd_pads[1][0] - r_gnd_pads[0][0]) / 2
-            via_y = round(max(r_gnd_pads[0][1], r_gnd_pads[1][1]) + dx, 2)
-            pcb.add_via((via_x, via_y), gnd_net,
-                        VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"],
-                        remove_unused_layers=True)
-            vias += 1
-            for gnd_pos in r_gnd_pads:
-                pcb.add_trace(gnd_pos, (via_x, via_y), gnd_net,
+        # Individual GND via per LED — straight DOWN from R GND pad.
+        for gnd_pos in r_gnd_pads:
+            if gnd_net is not None:
+                via_pos = (gnd_pos[0], round(gnd_pos[1] + 0.40, 2))
+                pcb.add_trace(gnd_pos, via_pos, gnd_net,
                               SIGNAL_TRACE_W, "F.Cu")
                 traces += 1
+                pcb.add_via(via_pos, gnd_net,
+                            VIA_SIZE, VIA_DRILL, ["F.Cu", "B.Cu"],
+                            remove_unused_layers=True)
+                vias += 1
 
     return vias, traces
 
@@ -2060,16 +2125,14 @@ def preroute_col_sel_vias(pcb, netlist_data):
     """Add vias for NAND COL_SEL input pins and connect with In1.Cu traces.
 
     The 74LVC2G00 dual NAND is at 270° (90° CW).  Pin 1 (1A) and pin 5 (2A)
-    carry the COL_SEL signal.  At 270°:
-      Pin 1 at (cx+0.75, cy-0.25) — top row, rightmost
-      Pin 5 at (cx-0.75, cy+0.25) — bottom row, leftmost
+    carry the COL_SEL signal.  With gate-swapped footprint at 270°:
+      Pin 5 at (cx+0.75, cy-0.25) — top row
+      Pin 1 at (cx-0.75, cy+0.25) — bottom row
 
-    Routing strategy per byte:
-      Pin 1: F.Cu stub UP to courtyard top → via to In1.Cu
-      Pin 5: F.Cu stub DOWN to courtyard bottom → via to In1.Cu
-      In1.Cu: from pin1 via, horizontal LEFT to trunk X, then DOWN to pin5 via.
-      Trunk X at byte_x-1.0 (avoids GND via at byte_x-0.45).
-      L-route at crtyd_top_y avoids VCC via at crtyd_bot_y.
+    Routing uses actual pad Y to determine top/bottom pin.
+    Top pin: F.Cu stub UP → via → In1.Cu
+    Bottom pin: F.Cu stub DOWN → via → In1.Cu
+    In1.Cu: diagonal from top via to bottom via, then horizontal to trunk.
 
     Returns (via_count, trace_count).
     """
@@ -2105,52 +2168,62 @@ def preroute_col_sel_vias(pcb, netlist_data):
 
         net = pin1_net
 
+        # Determine top/bottom from actual pad Y (robust to pin swaps)
+        if pin1_pos[1] < pin5_pos[1]:
+            top_pos, bot_pos = pin1_pos, pin5_pos
+        else:
+            top_pos, bot_pos = pin5_pos, pin1_pos
+
         # Courtyard boundaries
         crtyd_top_y = round(byte_y - 1.05, 2)
         crtyd_bot_y = round(byte_y + 0.55, 2)
 
         trunk_x = round(byte_x + TRUNK_X_OFFSET, 2)
 
-        # Pin 1 (top row, byte_x+1.25, byte_y-0.50): escape UP to courtyard
-        # top, then via to In1.Cu.
-        via1_pos = (round(pin1_pos[0], 2), crtyd_top_y)
-        pcb.add_trace(pin1_pos, via1_pos, net, SIGNAL_TRACE_W, "F.Cu")
+        # Top pin (rightmost after swap): escape RIGHT to NAND-DFF gap
+        via_top = (round(byte_x + 1.80, 2), round(top_pos[1], 2))
+        pcb.add_trace(top_pos, via_top, net, SIGNAL_TRACE_W, "F.Cu")
         traces += 1
-        pcb.add_via(via1_pos, net, VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
+        pcb.add_via(via_top, net, VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
         vias += 1
 
-        # Pin 5 (bottom row, byte_x-0.25, byte_y+0.00): escape DOWN to
-        # courtyard bottom, then via to In1.Cu.
-        via5_pos = (round(pin5_pos[0], 2), crtyd_bot_y)
-        pcb.add_trace(pin5_pos, via5_pos, net, SIGNAL_TRACE_W, "F.Cu")
+        # Bottom pin (leftmost after swap): escape LEFT to clear area
+        via_bot = (round(byte_x - 1.00, 2), round(bot_pos[1], 2))
+        pcb.add_trace(bot_pos, via_bot, net, SIGNAL_TRACE_W, "F.Cu")
         traces += 1
-        pcb.add_via(via5_pos, net, VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
+        pcb.add_via(via_bot, net, VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
         vias += 1
 
-        # In1.Cu: connect via1 to via5 with 45° diagonal, then via5 to trunk.
-        # via1 at (byte_x+1.25, byte_y-1.05), via5 at (byte_x-0.25, byte_y+0.55)
-        # dx=-1.50, dy=+1.60.  Chamfer: short vertical + 45° diagonal.
-        v1x, v1y = via1_pos
-        v5x, v5y = via5_pos
-        dx = round(v5x - v1x, 2)   # -1.50
-        dy = round(v5y - v1y, 2)   # +1.60
-        diag = min(abs(dx), abs(dy))  # 1.50
-        stub = round(abs(dy) - diag, 2)  # 0.10 vertical stub
+        # In1.Cu: connect top via to bottom via with chamfered L-route,
+        # then horizontal to trunk X.
+        vtx, vty = via_top
+        vbx, vby = via_bot
+        dx = round(vbx - vtx, 2)
+        dy = round(vby - vty, 2)
+        diag = min(abs(dx), abs(dy))
 
-        # Vertical stub DOWN from via1, then 45° diagonal to via5
-        mid_pt = (v1x, round(v1y + stub, 2))
-        pcb.add_trace(via1_pos, mid_pt, net, SIGNAL_TRACE_W, "In1.Cu")
+        if abs(dy) >= abs(dx):
+            # More vertical: vertical stub then 45° diagonal
+            stub_len = round(abs(dy) - diag, 2)
+            mid_pt = (vtx, round(vty + stub_len, 2))
+        else:
+            # More horizontal: 45° diagonal then horizontal stub
+            # Diagonal covers diag in both X and Y from top via
+            sign_x = 1 if dx > 0 else -1
+            mid_pt = (round(vtx + sign_x * diag, 2), vby)
+
+        pcb.add_trace(via_top, mid_pt, net, SIGNAL_TRACE_W, "In1.Cu")
         traces += 1
-        pcb.add_trace(mid_pt, via5_pos, net, SIGNAL_TRACE_W, "In1.Cu")
+        pcb.add_trace(mid_pt, via_bot, net, SIGNAL_TRACE_W, "In1.Cu")
         traces += 1
 
-        # From via5, horizontal LEFT to trunk X
-        pcb.add_trace(via5_pos, (trunk_x, v5y), net, SIGNAL_TRACE_W, "In1.Cu")
+        # From bottom via, horizontal LEFT to trunk X
+        pcb.add_trace(via_bot, (trunk_x, vby), net, SIGNAL_TRACE_W, "In1.Cu")
         traces += 1
 
         if net not in net_trunk_pts:
             net_trunk_pts[net] = []
-        net_trunk_pts[net].append((trunk_x, v5y))
+        net_trunk_pts[net].append((trunk_x, vby))
 
     # Connect trunk points with vertical In1.Cu traces (deduplicated)
     for net, positions in net_trunk_pts.items():
@@ -3476,11 +3549,12 @@ def main():
 
             group_cell_dims[name] = (cell_h, col_sp)  # swapped after rotation
 
-        # Custom row_ctrl layout: stack write + read AND gates vertically
-        # (on top of each other) so they align with the enable buses
-        # that cross the byte area horizontally.
+        # Custom row_ctrl layout: stack read + write AND gates vertically.
+        # Reversed so read (above bus) is at top, write (below bus) at bottom,
+        # matching the swapped enable bus positions.
         elif name.startswith("row_ctrl_"):
             RC_GATE_SPACING = 2.3  # mm between write and read AND centers
+            ic_cells = list(reversed(ic_cells))
             placements = []
             for idx, (ic, r, led) in enumerate(ic_cells):
                 y = round(idx * RC_GATE_SPACING, 2)
