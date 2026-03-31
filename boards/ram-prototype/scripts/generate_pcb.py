@@ -23,8 +23,9 @@ Layout:
   | 24p  +----------------------------------+---------+-----------+-----------+-----------+
   |      | CTRL LOGIC  |                         | COL SEL (4 INV+24 AND) |
   +------+---+---------+                         +---+--------------------+
-              |J2|J4    |                             |J3 UNUSED COL       |
-              +---------+                             +--------------------+
+         |J2 | J4      |                             |J3 UNUSED COL       |
+         |4p | 2x8     |                             +--------------------+
+         +---+---------+
 
   Each byte has 1 NAND (74LVC2G00) + 8 DFFs + 8 buffers in 9 columns.
   Bytes sorted by address: top-left going down first, then right.
@@ -3580,12 +3581,12 @@ def main():
                 led_x = 7.0   # LED offset right of connector (closer)
                 r_x = led_x + R_OFFSET  # R to the right of LED on F.Cu
 
-                # Find J1 (main connector) and store extras (J2, J3)
+                # Find J1 (main connector) and store extras (J2, J3, J4)
                 j1 = None
                 for comp in others:
                     if comp["ref"] == "J1":
                         j1 = comp
-                    elif comp["part"].startswith("Conn_01x"):
+                    elif comp["part"].startswith("Conn_0"):
                         extra_root_connectors.append(comp)
                 if j1 is None:
                     print("  WARNING: J1 not found in root group")
@@ -3640,7 +3641,7 @@ def main():
 
     # --- Compute absolute positions ---
     # Layout: Connector | addr_decoder(5 cols) | row_ctrl(x4) | RAM
-    #         Above RAM: J2/J3/J4 connectors + layer_test grid
+    #         Left corner: J2/J4 connectors; Right of RAM: J3 + layer_test grid
     #         Below RAM: column_select; Below addr_dec: control_logic
     total_placed = 0
 
@@ -3861,7 +3862,7 @@ def main():
     # Right-align test grid with J3 connector right edge (pad radius ~1.27mm)
     test_x = round(j3_base_x + 1.27 - test_grid_w_est, 2)
     test_y = round(ram_y - test_grid_h_est - 3.0, 2)
-    # Y for extra connectors (J2/J3/J4) — above the test grid
+    # Y for extra connectors (J2/J4) — above the test grid
     conn_above_y = round(test_y - 5.0, 2)
     ram_center_x = ram_x + ram_total_w / 2
     COLSEL_DEC_RIGHT_SHIFT = 10.0  # shift column decoder right toward RAM center
@@ -3879,17 +3880,26 @@ def main():
     extra_root_connectors.sort(key=lambda c: c["ref"])
     for comp in extra_root_connectors:
         ref = comp["ref"]
-        n_pins = int(comp["part"].replace("Conn_01x", ""))
-        pin_span = (n_pins - 1) * CONN_PIN_PITCH
+        part = comp["part"]
+        if part.startswith("Conn_01x"):
+            n_pins = int(part.replace("Conn_01x", ""))
+            pin_span = (n_pins - 1) * CONN_PIN_PITCH
+        elif part.startswith("Conn_02x"):
+            # 2-row connector: e.g. Conn_02x08_Odd_Even → 8 rows
+            n_rows = int(part.split("x")[1].split("_")[0])
+            pin_span = (n_rows - 1) * CONN_PIN_PITCH
+        else:
+            pin_span = 0
         if ref == "J2":
-            # DEC3 unused header above RAM, horizontal (90°), leftmost
-            j2_x = round(ram_x, 2)
-            j2_y = conn_above_y
+            # DEC3 unused header — top-left corner, vertical (0°)
+            # Align with test grid top Y to minimize board height
+            j2_x = round(col0_x, 2)
+            j2_y = round(test_y + 3.0, 2)
             _place_component(pcb, comp, j2_x, j2_y, netlist_data,
-                             angle_override=90, layer_override="F.Cu")
+                             angle_override=0, layer_override="F.Cu")
             total_placed += 1
-            pcb.add_silkscreen_text("DEC3", round(j2_x + pin_span / 2, 2),
-                                    round(j2_y - 3.0, 2), size=1.0)
+            pcb.add_silkscreen_text("DEC3", round(j2_x + 3.5, 2),
+                                    round(j2_y + pin_span / 2, 2), size=1.0)
         elif ref == "J3":
             # COL_SEL unused header right of RAM, vertical (0°), below test grid
             j3_x = j3_base_x
@@ -3916,14 +3926,13 @@ def main():
             )
             pcb.board.graphicItems.append(_cs_text)
         elif ref == "J4":
-            # DEC4 unused header above RAM, horizontal (90°), right of DEC3
-            dec3_span = 3 * CONN_PIN_PITCH  # 4-pin connector span
-            j4_x = round(ram_x + dec3_span + 5.0, 2)
-            j4_y = conn_above_y
+            # DEC4 unused 2x8 header, vertical (0°), left of test grid
+            j4_x = round(test_x - 8.0, 2)
+            j4_y = round(test_y, 2)
             _place_component(pcb, comp, j4_x, j4_y, netlist_data,
-                             angle_override=90, layer_override="F.Cu")
+                             angle_override=0, layer_override="F.Cu")
             total_placed += 1
-            pcb.add_silkscreen_text("DEC4", round(j4_x + pin_span / 2, 2),
+            pcb.add_silkscreen_text("DEC4", round(j4_x + 1.27, 2),
                                     round(j4_y - 3.0, 2), size=1.0)
         else:
             _place_component(pcb, comp, round(colsel_x + 20, 2),

@@ -214,6 +214,7 @@ SYMBOL_LIB_MAP = {
     "Conn_01x16": "Connector_Generic",
     "Conn_01x24": "Connector_Generic",
     "Conn_02x04_Odd_Even": "Connector_Generic",
+    "Conn_02x08_Odd_Even": "Connector_Generic",
     "L_Small": "Device",
     "TPS546D24A": "Power_Discrete",
 }
@@ -250,6 +251,7 @@ FOOTPRINT_MAP = {
     "Conn_01x16": "Connector_PinHeader_2.54mm:PinHeader_1x16_P2.54mm_Vertical",
     "Conn_01x24": "Connector_PinHeader_2.54mm:PinHeader_1x24_P2.54mm_Vertical",
     "Conn_02x04_Odd_Even": "Connector_Molex:Molex_Mini-Fit_Jr_5566-08A_2x04_P4.20mm_Vertical",
+    "Conn_02x08_Odd_Even": "Connector_PinHeader_2.54mm:PinHeader_2x08_P2.54mm_Vertical",
     "L_Small": "Inductor_SMD:L_7.3x7.3_H4.5",
     "TPS546D24A": "Power_Discrete:TPS546D24A_LQFN-CLIP-40",
 }

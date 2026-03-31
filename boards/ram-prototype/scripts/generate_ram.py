@@ -1349,7 +1349,7 @@ def generate_root_sheet():
 
     Pin headers:
       - Unused 3-to-8 header (Conn_01x04): DEC3_4..7
-      - Unused 4-to-16 header (Conn_01x16): DEC4_1..15 + GND
+      - Unused 4-to-16 header (Conn_02x08): DEC4_1..15 + GND
       - Unused column header (Conn_01x14): COL_SEL_2 through COL_SEL_15
     """
     b = SchematicBuilder(title="8-Byte Discrete RAM (2K-depth Decoders)",
@@ -1785,23 +1785,30 @@ def generate_root_sheet():
         b.add_label(sig, src_x + wire_stub, src_y)
 
     # ================================================================
-    # Unused 4-to-16 header (Conn_01x16): DEC4_1..DEC4_15 + GND
+    # Unused 4-to-16 header (Conn_02x08): DEC4_1..DEC4_15 + GND
+    # Two-row connector: odd pins (1,3,...,15) left, even (2,4,...,16) right
     # ================================================================
     dec4_header_x = dec3_header_x
     dec4_header_y = snap(colsel_header_y + 48 * GRID)
-    _, dec4_hdr_pins = b.place_symbol("Conn_01x16", dec4_header_x, dec4_header_y,
+    _, dec4_hdr_pins = b.place_symbol("Conn_02x08_Odd_Even", dec4_header_x, dec4_header_y,
                                       ref_prefix="J", value="DEC4_Unused", angle=180)
 
+    # At angle=180: odd pins (left col in lib) end up on right, even on left
+    # Wire odd pins right, even pins left
     for pin_idx in range(15):
         sig = f"DEC4_{pin_idx + 1}"
         pin_num = str(pin_idx + 1)
         px, py = dec4_hdr_pins[pin_num]
-        b.add_wire(px, py, px + wire_stub, py)
-        b.add_label(sig, px + wire_stub, py)
+        if int(pin_num) % 2 == 1:  # odd pin — right side at 180°
+            b.add_wire(px, py, px + wire_stub, py)
+            b.add_label(sig, px + wire_stub, py)
+        else:  # even pin — left side at 180°
+            b.add_wire(px, py, px - wire_stub, py)
+            b.add_label(sig, px - wire_stub, py, angle=180)
 
-    # Pin 16 = GND
+    # Pin 16 = GND (even pin — left side at 180°)
     gnd_pin_x, gnd_pin_y = dec4_hdr_pins["16"]
-    gnd_wire_x = snap(gnd_pin_x + 3 * GRID)
+    gnd_wire_x = snap(gnd_pin_x - 3 * GRID)
     b.add_wire(gnd_pin_x, gnd_pin_y, gnd_wire_x, gnd_pin_y)
     b.place_power("GND", gnd_wire_x, gnd_pin_y)
 

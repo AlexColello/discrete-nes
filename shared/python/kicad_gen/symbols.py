@@ -119,7 +119,7 @@ def load_lib_symbols():
         "power.kicad_sym": ["VCC", "GND", "PWR_FLAG"],
         "Connector_Generic.kicad_sym": [
             "Conn_01x04", "Conn_01x12", "Conn_01x14", "Conn_01x16", "Conn_01x24",
-            "Conn_02x04_Odd_Even",
+            "Conn_02x04_Odd_Even", "Conn_02x08_Odd_Even",
         ],
     }
     for lib_file, wanted in stock_libs.items():
