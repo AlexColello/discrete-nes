@@ -495,6 +495,62 @@ def _build_net_pad_index(pcb):
     return net_to_pads
 
 
+def preroute_center_escape(pcb, netlist_data):
+    """Escape pin 2 (middle ball B1) through IC center to the B2 gap.
+
+    DSBGA-5 has 5 balls in a 3x2 grid with B2 missing.  Pin 2 (B1) sits
+    in the center of the left column, sandwiched between pins 1 and 3.
+    This adds a short F.Cu trace from pin 2 through the IC center to the
+    B2 gap position, giving the autorouter an accessible stub endpoint.
+
+    The B2 gap is the reflection of pin 2 through the IC center:
+      - At 180°: horizontal LEFT (0.5mm)
+      - At 270°: vertical DOWN (0.5mm)
+      - At 90°: vertical UP (already done by preroute_clk_fanout for DFFs)
+
+    Skips DFFs (CLK routed by clk_fanout), BUFs (A routed by dff_to_buffer),
+    and DSBGA-8 (no center gap).
+
+    Returns trace count.
+    """
+    SKIP_PARTS = {"74LVC1G79", "74LVC1G125", "74LVC2G00"}
+
+    ref_to_part = _build_ref_to_part(netlist_data)
+    traces = 0
+
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if not ref.startswith("U"):
+            continue
+
+        lib_id = fp.libId or ""
+        if "DSBGA-5" not in lib_id:
+            continue
+
+        part = ref_to_part.get(ref, "")
+        if part in SKIP_PARTS:
+            continue
+
+        pin2_net = pcb.get_pad_net(ref, "2")
+        if pin2_net is None or pin2_net == 0:
+            continue
+
+        pin2_pos = pcb.get_pad_position(ref, "2")
+        if pin2_pos is None:
+            continue
+
+        fp_x, fp_y = fp.position.X, fp.position.Y
+        # B2 gap = reflection of pin 2 through IC center
+        b2_x = round(2 * fp_x - pin2_pos[0], 2)
+        b2_y = round(2 * fp_y - pin2_pos[1], 2)
+
+        pcb.add_trace(pin2_pos, (b2_x, b2_y), pin2_net,
+                      SIGNAL_TRACE_W, "F.Cu")
+        traces += 1
+
+    return traces
+
+
 def preroute_power_vias(pcb, netlist_data):
     """Drop vias from every IC GND/VCC pad to inner planes.
 
@@ -4157,6 +4213,9 @@ def main():
     ic_led_traces = preroute_ic_to_led(pcb, netlist_data)
     print(f"  IC->LED: {ic_led_traces} trace segments")
 
+    escape_traces = preroute_center_escape(pcb, netlist_data)
+    print(f"  Center escape (pin 2->B2 gap): {escape_traces} traces")
+
     led_r_traces = preroute_led_to_resistor(pcb, netlist_data)
     print(f"  LED->R: {led_r_traces} traces")
 
@@ -4228,7 +4287,8 @@ def main():
     total_vias = (pwr_vias + cs_vias + nand_vias + nand_led_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
                   + r_gnd_vias + dbus_fan_vias + cs_fan_vias)
-    total_traces = (pwr_traces + ic_led_traces + led_r_traces + clk_traces
+    total_traces = (pwr_traces + ic_led_traces + escape_traces
+                    + led_r_traces + clk_traces
                     + oe_traces + nand_traces + nand_led_traces
                     + dff_buf_gnd_traces
                     + dff_buf_data_traces + dff_buf_q_traces + r_gnd_traces
