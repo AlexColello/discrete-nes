@@ -237,10 +237,10 @@ class SchematicBuilder:
 
     def _label_effects(self, justify=None):
         """Build Effects for a label, optionally with justify."""
-        if justify:
-            return Effects(font=Font(width=1.27, height=1.27),
-                           justify=Justify(horizontally=justify))
-        return Effects(font=Font(width=1.27, height=1.27))
+        if justify is None:
+            justify = "left"  # KiCad default — center causes text outside flag
+        return Effects(font=Font(width=1.27, height=1.27),
+                       justify=Justify(horizontally=justify))
 
     def add_label(self, text, x, y, angle=0, justify=None):
         """Add a local net label."""
