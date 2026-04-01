@@ -530,8 +530,8 @@ def _build_net_pad_index(pcb):
             if pad.net and pad.net.number and pad.net.number > 0:
                 px, py = pad.position.X, pad.position.Y
                 # KiCad uses CCW rotation (Y-down coords) (positive angle = CW in Y-down)
-                abs_x = round(fp_x + px * cos_a + py * sin_a, 2)
-                abs_y = round(fp_y - px * sin_a + py * cos_a, 2)
+                abs_x = round(fp_x + px * cos_a + py * sin_a, 3)
+                abs_y = round(fp_y - px * sin_a + py * cos_a, 3)
                 net_to_pads[pad.net.number].append(
                     (ref, pad.number, abs_x, abs_y, pad.net.name))
 
@@ -2015,9 +2015,10 @@ def preroute_nand_connections(pcb, netlist_data):
             traces += 1
 
             if clk_led:
-                # CLK LED on LEFT: bus extends LEFT, DOWN, RIGHT to anode.
+                # CLK LED on LEFT: T-branch off CLK vertical at bus Y,
+                # LEFT to approach column, DOWN, RIGHT to anode.
                 clk_col_x = round(byte_x - 1.60, 2)
-                pcb.add_trace((clk_via_x, clk_bus_y),
+                pcb.add_trace((clk_pos[0], clk_bus_y),
                               (clk_col_x, clk_bus_y),
                               clk_net, SIGNAL_TRACE_W, "F.Cu")
                 traces += 1
@@ -3346,14 +3347,20 @@ def preroute_colsel_fanout(pcb, netlist_data):
 
         net = pin1_net
         trunk_x = round(byte_x + TRUNK_X_OFFSET, 2)
-        # Trunk point Y from preroute_col_sel_vias: via5 at courtyard bottom
-        crtyd_bot_y = round(byte_y + 0.55, 2)
+
+        # Trunk bottom Y must match preroute_col_sel_vias which uses the
+        # actual bottom pin Y (bot_pos[1]) as trunk point, not crtyd_bot_y.
+        pin1_pos = pcb.get_pad_position(ref, "1")
+        pin5_pos = pcb.get_pad_position(ref, "5")
+        if not pin1_pos or not pin5_pos:
+            continue
+        bot_pin_y = max(pin1_pos[1], pin5_pos[1])
 
         if net not in net_trunk_bottoms:
-            net_trunk_bottoms[net] = (trunk_x, crtyd_bot_y)
+            net_trunk_bottoms[net] = (trunk_x, bot_pin_y)
         else:
             prev_tx, prev_max_y = net_trunk_bottoms[net]
-            net_trunk_bottoms[net] = (prev_tx, max(prev_max_y, crtyd_bot_y))
+            net_trunk_bottoms[net] = (prev_tx, max(prev_max_y, bot_pin_y))
 
     # --- Extend each trunk down to colsel_via_y and place via ---
     for net, (trunk_x, trunk_bottom_y) in net_trunk_bottoms.items():

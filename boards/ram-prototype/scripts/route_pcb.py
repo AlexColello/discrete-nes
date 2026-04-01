@@ -555,6 +555,13 @@ def main():
     print(f"\n--- Step 4: Import SES -> ram_routed.kicad_pcb ---")
     import_ses(PCB_INPUT, SES_PATH, PCB_ROUTED)
 
+    # Save raw post-import copy for inspection (before zone fill / cleanup)
+    raw_dir = os.path.join(BOARD_DIR, "verify_output")
+    os.makedirs(raw_dir, exist_ok=True)
+    raw_path = os.path.join(raw_dir, "ram_routed_raw.kicad_pcb")
+    shutil.copy2(PCB_ROUTED, raw_path)
+    print(f"  Raw post-import saved: {raw_path}")
+
     # Step 5: Fill zones (GND/VCC power planes)
     print(f"\n--- Step 5: Fill All Zones ---")
     fill_zones(PCB_ROUTED)
