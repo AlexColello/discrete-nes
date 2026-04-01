@@ -143,21 +143,22 @@ def fix_dsn_clearances(dsn_path):
     with open(dsn_path, "r") as f:
         content = f.read()
 
-    # Bump global clearance (150 -> 200) to match PCBWay pad-to-track
+    # Bump global clearance for autorouter only (150 -> 200).
+    # Project stays at 0.15mm for pre-routed traces; autorouter needs 0.2mm
+    # to meet PCBWay pad-to-track clearance.
     content = re.sub(
         r'\(clearance 150\)',
         '(clearance 200)',
         content)
 
-    # Replace all smd_smd clearance values (KiCad exports 37.5)
-    # Keep lower for DSBGA SMD pads (tight pitch)
+    # Fix smd_smd: KiCad exports a fraction of clearance that's too low.
     content = re.sub(
         r'\(clearance \d+\.?\d* \(type smd_smd\)\)',
         '(clearance 154 (type smd_smd))',
         content)
 
-    # Add hole-related clearances to EVERY (rule ...) block, not just global.
-    # FreeRouting uses per-class rules and ignores global for class members.
+    # Add hole-related clearances to EVERY (rule ...) block.
+    # These don't flow from KiCad project settings into DSN — must be injected.
     hole_rules = (
         '\n      (clearance 500 (type via_via))'
         '\n      (clearance 254 (type via_smd))'
@@ -167,8 +168,7 @@ def fix_dsn_clearances(dsn_path):
     content = content.replace(
         '(clearance 200)',
         '(clearance 200)' + hole_rules)
-    # Also after smd_smd in global block (deduplicate won't happen since
-    # smd_smd only appears once)
+    # Also after smd_smd in global block
     content = content.replace(
         '(clearance 154 (type smd_smd))',
         '(clearance 154 (type smd_smd))' + hole_rules)

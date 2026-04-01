@@ -83,7 +83,7 @@ CTRL_CELL_W = 5.5    # horizontal spacing for control logic (wider for routing)
 CTRL_CELL_H = 4.0    # vertical spacing for control logic (wider for routing)
 LED_OFFSET_X = 1.5   # LED center offset from IC center (DFF@90° crtyd 1.0 + LED@90° crtyd 0.47 + 0.03 gap)
 R_OFFSET = 1.86      # LED-to-R center offset (mm) — 0402 courtyards touching (0.93+0.93)
-R_HORIZ_OFFSET = 1.3 # horizontal R offset from LED center (side-by-side, clearance for 3-seg trace between)
+R_HORIZ_OFFSET = 1.0 # horizontal R offset from LED center (side-by-side)
 
 # Group layout spacing (mm)
 GROUP_GAP_X = 3.0    # horizontal gap between major groups (connector, decoder, RAM)
