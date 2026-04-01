@@ -51,17 +51,15 @@ PRE_ROUTING_SKIP_TYPES = {
     "unconnected_items",       # No traces yet -- expected
     "via_dangling",            # Vias to inner planes appear dangling before fill
     "track_dangling",          # Fanout stubs intentionally end mid-air
-    "silk_overlap",            # LED polarity dot near adjacent R pad (cosmetic, fab clips silk)
     "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
-    "lib_footprint_mismatch",  # J1 connector + LED dot reposition (intentional)
+    "lib_footprint_mismatch",  # J1 connector + LED/DSBGA-8 silk changes (intentional)
 }
 
 # DRC violation types to skip after routing
 # Fewer skips -- unconnected_items should now be resolved
 POST_ROUTING_SKIP_TYPES = {
-    "silk_overlap",            # LED polarity dot near adjacent R pad (cosmetic, fab clips silk)
     "nonmirrored_text_on_back_layer",  # Layer test grid places text on B.Cu intentionally
-    "lib_footprint_mismatch",  # J1 connector + LED dot reposition (intentional)
+    "lib_footprint_mismatch",  # J1 connector + LED/DSBGA-8 silk changes (intentional)
 }
 
 

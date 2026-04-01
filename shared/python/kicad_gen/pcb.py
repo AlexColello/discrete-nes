@@ -1441,18 +1441,15 @@ class PCBBuilder:
             for fp in self.board.footprints:
                 lib_id = fp.libId or ""
                 if "LED" in lib_id and "0402" in lib_id:
-                    # Keep polarity dot near original X but offset in Y
-                    # to clear the solder mask opening.
+                    # Move polarity dot from F.SilkS to F.Fab to avoid
+                    # silk_overlap with adjacent R/IC pads at any rotation.
+                    # F.Fab is visible in KiCad but not printed on PCB.
                     for gi in fp.graphicItems:
                         if (type(gi).__name__ == "FpCircle"
                                 and getattr(gi, "layer", "") == "F.SilkS"):
-                            gi.center.X = -1.09
-                            gi.center.Y = -0.38
-                            gi.end.X = -1.04
-                            gi.end.Y = -0.38
-                            if hasattr(gi, "stroke") and gi.stroke is not None:
-                                gi.stroke.width = 0.05
-                elif "Resistor" in lib_id or "DSBGA" in lib_id:
+                            gi.layer = "F.Fab"
+                elif "Resistor" in lib_id or "DSBGA-8" in lib_id:
+                    # Strip silk from 0402 resistors only (too close to pads)
                     fp.graphicItems = [
                         gi for gi in fp.graphicItems
                         if "SilkS" not in getattr(gi, "layer", "")
@@ -2096,8 +2093,8 @@ def remove_silkscreen_graphics(filepath: str) -> int:
     outlines and polarity marks that are too close to pads, causing
     silk_overlap DRC violations with PCBWay/Elecrow rules (0.15mm min).
 
-    Removes F.SilkS graphic items from resistor and DSBGA footprints.
-    Keeps LED silk (polarity dot repositioned by save()).
+    Removes F.SilkS graphic items from 0402 resistor and DSBGA-8 footprints.
+    Keeps DSBGA-5/6 and LED silk.
 
     Args:
         filepath: Path to .kicad_pcb file (modified in place)
@@ -2112,9 +2109,7 @@ def remove_silkscreen_graphics(filepath: str) -> int:
 
     for fp in board.footprints:
         lib_id = fp.libId or ""
-        if "LED" in lib_id:
-            continue
-        if "Resistor" not in lib_id and "DSBGA" not in lib_id:
+        if "Resistor" not in lib_id and "DSBGA-8" not in lib_id:
             continue
 
         new_items = []
