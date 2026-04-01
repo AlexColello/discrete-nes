@@ -128,14 +128,13 @@ def fix_dsn_clearances(dsn_path):
     which lets FreeRouting route traces too close to SMD pads. Also missing
     are hole-related clearances that PCBWay/Elecrow rules enforce.
 
-    Fab rules (PCBWay/Elecrow) use 10mil (0.254mm) for hole clearances,
-    not 0.25mm. KiCad's project default of 0.15mm trace clearance is
-    metric, but we match the strictest fab rules here.
+    Fab rules (PCBWay/Elecrow) use 10mil (0.254mm) for hole clearances
+    and 0.2mm for plated-pad-to-track clearance.
 
     This post-processes ALL (rule ...) blocks in the DSN to enforce:
-      - global clearance = 154µm   (match Elecrow 6mil=0.1524mm, rounded up)
-      - smd_smd clearance = 154µm  (match global)
-      - via_via clearance = 254µm  (10mil = 0.254mm, PCBWay/Elecrow)
+      - global clearance = 200µm   (PCBWay pad-to-track = 0.2mm)
+      - smd_smd clearance = 154µm  (Elecrow 6mil=0.1524mm, for DSBGA pads)
+      - via_via clearance = 500µm  (PCBWay hole-to-hole different nets)
       - via_smd clearance = 254µm  (10mil)
       - via_pin clearance = 254µm  (10mil)
     """
@@ -144,24 +143,24 @@ def fix_dsn_clearances(dsn_path):
     with open(dsn_path, "r") as f:
         content = f.read()
 
-    # Bump global clearance (150 -> 154) to match 6mil Elecrow minimum
+    # Bump global clearance (150 -> 200) to match PCBWay pad-to-track
     content = re.sub(
         r'\(clearance 150\)',
-        '(clearance 154)',
+        '(clearance 200)',
         content)
 
     # Replace all smd_smd clearance values (KiCad exports 37.5)
+    # Keep lower for DSBGA SMD pads (tight pitch)
     content = re.sub(
         r'\(clearance \d+\.?\d* \(type smd_smd\)\)',
         '(clearance 154 (type smd_smd))',
         content)
 
     # Add hole-related clearances after each smd_smd line
-    # 254µm = 10mil, matching PCBWay/Elecrow via-to-track and via-to-via rules
     hole_rules = (
-        '\n      (clearance 254 (type via_via))'
-        '\n      (clearance 254 (type via_smd))'
-        '\n      (clearance 254 (type via_pin))'
+        '\n      (clearance 500 (type via_via))'   # PCBWay hole-to-hole (different nets)
+        '\n      (clearance 254 (type via_smd))'   # 10mil via-to-smd
+        '\n      (clearance 254 (type via_pin))'   # 10mil via-to-pin
     )
     content = content.replace(
         '(clearance 154 (type smd_smd))',
@@ -170,8 +169,9 @@ def fix_dsn_clearances(dsn_path):
     with open(dsn_path, "w") as f:
         f.write(content)
 
-    print("  Fixed DSN clearances: global=154µm, smd_smd=154µm, "
-          "via_via/via_smd/via_pin=254µm (10mil, matches PCBWay/Elecrow)")
+    print("  Fixed DSN clearances: global=200µm, smd_smd=154µm, "
+          "via_via=500µm, via_smd/via_pin=254µm")
+
 
 
 # --------------------------------------------------------------
@@ -411,7 +411,7 @@ def _run_one_cleanup_pass(pcb_path):
             if isinstance(track, pcbnew.PCB_VIA):
                 continue
             length_mm = track.GetLength() / 1e6
-            if length_mm > 10.0:
+            if length_mm > 50.0:
                 continue
             candidates.append((length_mm, track))
         candidates.sort(key=lambda x: -x[0])
@@ -472,6 +472,7 @@ def cleanup_dangling_tracks(pcb_path):
             break
 
     print(f"  Removed {total_removed} dangling track stub(s) in {pass_num} pass(es)")
+
 
 
 # --------------------------------------------------------------

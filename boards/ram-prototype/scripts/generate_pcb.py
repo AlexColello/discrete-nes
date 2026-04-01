@@ -607,11 +607,17 @@ def preroute_power_vias(pcb, netlist_data):
 
     LEDs: escape rightward (+X).
 
+    Skips placing a via if it would be too close to an existing via
+    (< MIN_VIA_SPACING center-to-center) to avoid hole-to-hole DRC
+    violations with PCBWay/Elecrow rules (0.5mm edge-to-edge).
+
     Returns (via_count, trace_count).
     """
     # DFF/BUF/NAND already have dedicated power routing functions
     # (preroute_dff_buf_gnd, preroute_dff_buf_vcc, preroute_nand_connections)
     SKIP_PARTS = {"74LVC1G79", "74LVC1G125", "74LVC2G00"}
+    # Min center-to-center for different-net vias: drill (0.3) + 0.5mm clearance
+    MIN_VIA_SPACING = VIA_DRILL + 0.50  # 0.80mm
 
     ref_to_part = _build_ref_to_part(netlist_data)
 
@@ -621,6 +627,16 @@ def preroute_power_vias(pcb, netlist_data):
         print("  WARNING: GND or VCC net not found, skipping power vias")
         return 0, 0
 
+    # Build index of existing via positions for collision check
+    existing_vias = []  # [(x, y, net_num), ...]
+    for item in pcb.board.traceItems:
+        if hasattr(item, 'drill') and hasattr(item, 'size'):
+            vx = item.position.X if hasattr(item.position, 'X') else 0
+            vy = item.position.Y if hasattr(item.position, 'Y') else 0
+            vnet = item.net if isinstance(item.net, int) else 0
+            existing_vias.append((vx, vy, vnet))
+
+    skipped = 0
     vias = 0
 
     for fp in pcb.board.footprints:
@@ -666,33 +682,20 @@ def preroute_power_vias(pcb, netlist_data):
                 dy = abs_y - fp_y
 
                 if fp_angle == 180:
-                    # ICs at 180°: IC→LED route goes UP from output pin
-                    # (horizontal segment at ic_y-0.95), LED anode pad
-                    # (0.64mm wide) at (ic_x+1.5, ic_y-0.485).
-                    # GND pad upper-right → escape 30° DOWN-RIGHT, d=0.55:
-                    #   - clears IC→LED horizontal (0.38mm gap)
-                    #   - clears pin 2 (0.162mm via-pad clearance)
-                    #   - clears LED pad (0.20mm via-pad clearance)
-                    # VCC pad lower-left → escape 135° DOWN-LEFT
                     if net_name == "GND":
-                        escape_angle = 30   # down-right
-                        escape_dist = 0.55  # shorter to clear LED pad
-                    else:
-                        escape_angle = 135  # down-left
-                        escape_dist = VIA_OFFSET
-                elif fp_angle == 270:
-                    # Rotated column_select: same geometry as 180°
-                    # rotated 90° CW.  IC→LED goes LEFT then UP.
-                    # GND pad left-above → escape 300° UP-RIGHT, d=0.55
-                    # VCC pad right-below → default diagonal (45°)
-                    if net_name == "GND":
-                        escape_angle = 300  # up-right
+                        escape_angle = 30
                         escape_dist = 0.55
                     else:
-                        escape_angle = 45   # down-right (default)
+                        escape_angle = 135
+                        escape_dist = VIA_OFFSET
+                elif fp_angle == 270:
+                    if net_name == "GND":
+                        escape_angle = 300
+                        escape_dist = 0.55
+                    else:
+                        escape_angle = 45
                         escape_dist = VIA_OFFSET
                 else:
-                    # Other angles: diagonal away from center, 45° grid
                     escape_dist = VIA_OFFSET
                     dist = math.sqrt(dx * dx + dy * dy)
                     if dist > 0.01:
@@ -700,27 +703,43 @@ def preroute_power_vias(pcb, netlist_data):
                         escape_angle = round(raw / 45) * 45
                     else:
                         escape_angle = 90
-
-                pcb.pin_to_via(
-                    (abs_x, abs_y), net_num,
-                    angle=escape_angle,
-                    distance=escape_dist,
-                    trace_width=POWER_TRACE_W,
-                    via_size=VIA_SIZE, via_drill=VIA_DRILL,
-                    via_layers=via_layers,
-                )
             else:
-                # LEDs and Rs: escape rightward
-                pcb.pin_to_via(
-                    (abs_x, abs_y), net_num,
-                    angle=0,
-                    distance=VIA_OFFSET,
-                    trace_width=POWER_TRACE_W,
-                    via_size=VIA_SIZE, via_drill=VIA_DRILL,
-                    via_layers=via_layers,
-                )
+                # LEDs: escape rightward
+                escape_angle = 0
+                escape_dist = VIA_OFFSET
+
+            # Compute via landing position
+            rad = math.radians(escape_angle)
+            via_x = round(abs_x + escape_dist * math.cos(rad), 3)
+            via_y = round(abs_y + escape_dist * math.sin(rad), 3)
+
+            # Check for collision with existing vias (different nets)
+            too_close = False
+            for ex, ey, enet in existing_vias:
+                if enet == net_num:
+                    continue
+                d = math.sqrt((via_x - ex)**2 + (via_y - ey)**2)
+                if d < MIN_VIA_SPACING:
+                    too_close = True
+                    break
+
+            if too_close:
+                skipped += 1
+                continue
+
+            pcb.pin_to_via(
+                (abs_x, abs_y), net_num,
+                angle=escape_angle,
+                distance=escape_dist,
+                trace_width=POWER_TRACE_W,
+                via_size=VIA_SIZE, via_drill=VIA_DRILL,
+                via_layers=via_layers,
+            )
+            existing_vias.append((via_x, via_y, net_num))
             vias += 1
 
+    if skipped:
+        print(f"  Skipped {skipped} power via(s) due to hole-to-hole clearance")
     return vias, vias
 
 
@@ -3362,7 +3381,22 @@ def preroute_colsel_fanout(pcb, netlist_data):
             prev_tx, prev_max_y = net_trunk_bottoms[net]
             net_trunk_bottoms[net] = (prev_tx, max(prev_max_y, bot_pin_y))
 
-    # --- Extend each trunk down to colsel_via_y and place via ---
+    # --- Find column select output IC positions for F.Cu routing targets ---
+    # Each COL_SEL net has an AND gate output (pin 4) in the column_select block.
+    # We'll route from the terminus via to near that IC's LED on F.Cu.
+    net_target = {}  # net_num -> (led_x, led_y) of column select output LED
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if not ref.startswith("D"):
+            continue
+        for pad in fp.pads:
+            pnet = pad.net.number if hasattr(pad.net, 'number') else 0
+            if pnet in net_trunk_bottoms and pad.number == "2":
+                pos = pcb.get_pad_position(ref, "2")
+                if pos:
+                    net_target[pnet] = pos
+
+    # --- Extend each trunk down to colsel_via_y, place via, route F.Cu ---
     for net, (trunk_x, trunk_bottom_y) in net_trunk_bottoms.items():
         # Vertical In1.Cu extension from trunk bottom to below D* bus
         pcb.add_trace((trunk_x, trunk_bottom_y), (trunk_x, colsel_via_y),
@@ -3373,6 +3407,59 @@ def preroute_colsel_fanout(pcb, netlist_data):
         pcb.add_via((trunk_x, colsel_via_y), net,
                     VIA_SIZE, VIA_DRILL, ["F.Cu", "In1.Cu"])
         vias += 1
+
+        # F.Cu route from terminus via to column select IC-to-LED trace.
+        # Connect to the IC-to-LED vertical segment (0.47mm left of LED).
+        target = net_target.get(net)
+        if target:
+            tgt_x = round(target[0] - 0.47, 3)
+            tgt_y = target[1]
+
+            dx = tgt_x - trunk_x
+            dy = tgt_y - colsel_via_y
+            if dx > 0:
+                # COL_SEL_0: target is to the right — clean 45° diagonal
+                diag = min(abs(dx), abs(dy))
+                mid_x = round(trunk_x + diag, 3)
+                mid_y = round(colsel_via_y + diag, 3)
+                pcb.add_trace((trunk_x, colsel_via_y), (mid_x, mid_y),
+                              net, SIGNAL_TRACE_W, "F.Cu")
+                pcb.add_trace((mid_x, mid_y), (tgt_x, tgt_y),
+                              net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 2
+            else:
+                # COL_SEL_1: target is far left.
+                # Path: horizontal left → 45° diagonal down-left →
+                #        vertical down → 45° diagonal up-right to target.
+                approach_x = round(tgt_x - 1.0, 3)
+                turn_y = round(tgt_y - 1.0, 3)
+                # Corridor Y: below GND vias at Y=95.45
+                corridor_y = round(tgt_y - 3.0, 3)
+                diag_dy = corridor_y - colsel_via_y
+                # Diagonal goes down-left: start_x → start_x - diag_dy
+                # End X = approach_x (so vertical is straight down)
+                diag_start_x = round(approach_x + diag_dy, 3)
+                # 1. Horizontal left from via
+                pcb.add_trace((trunk_x, colsel_via_y),
+                              (diag_start_x, colsel_via_y),
+                              net, SIGNAL_TRACE_W, "F.Cu")
+                # 2. 45° diagonal down-left
+                pcb.add_trace((diag_start_x, colsel_via_y),
+                              (approach_x, corridor_y),
+                              net, SIGNAL_TRACE_W, "F.Cu")
+                # 3. Vertical down
+                pcb.add_trace((approach_x, corridor_y),
+                              (approach_x, turn_y),
+                              net, SIGNAL_TRACE_W, "F.Cu")
+                # 4. 45° diagonal up-right to target
+                pcb.add_trace((approach_x, turn_y), (tgt_x, tgt_y),
+                              net, SIGNAL_TRACE_W, "F.Cu")
+                traces += 4
+        else:
+            stub_end_y = round(colsel_via_y + 2.0, 2)
+            pcb.add_trace((trunk_x, colsel_via_y), (trunk_x, stub_end_y),
+                          net, SIGNAL_TRACE_W, "F.Cu")
+            traces += 1
 
     return vias, traces
 
@@ -3802,7 +3889,7 @@ def main():
                 # Root group: connector on the left, bus LEDs aligned to
                 # their matching connector pin Y positions.
                 conn_x = 0.0
-                led_x = 7.0   # LED offset right of connector (closer)
+                led_x = 5.0   # LED offset right of connector
                 r_x = led_x + R_OFFSET  # R to the right of LED on F.Cu
 
                 # Find J1 (main connector) and store extras (J2, J3, J4)
@@ -4376,9 +4463,6 @@ def main():
     print("\n[6/7] Pre-routing local connections...")
     pcb.build_ref_index()
 
-    pwr_vias, pwr_traces = preroute_power_vias(pcb, netlist_data)
-    print(f"  Power vias: {pwr_vias} vias, {pwr_traces} stub traces")
-
     ic_led_traces = preroute_ic_to_led(pcb, netlist_data)
     print(f"  IC->LED: {ic_led_traces} trace segments")
 
@@ -4457,6 +4541,10 @@ def main():
     coladdr_traces = preroute_coladdr_to_colsel(pcb, netlist_data)
     print(f"  A7-A10->colsel (F.Cu): {coladdr_traces} trace segments")
 
+    # Power vias run LAST so collision check sees all signal vias
+    pwr_vias, pwr_traces = preroute_power_vias(pcb, netlist_data)
+    print(f"  Power vias: {pwr_vias} vias, {pwr_traces} stub traces")
+
     total_vias = (pwr_vias + cs_vias + nand_vias + nand_led_vias
                   + dff_buf_gnd_vias + dff_buf_data_vias + dff_buf_q_vias
                   + r_gnd_vias + dbus_fan_vias + cs_fan_vias
@@ -4510,6 +4598,22 @@ def main():
     else:
         ram_keepout_y2 = round(grid_y2 + KEEPOUT_PAD, 2)
 
+    # Connector + LED keepout: covers J1 and bus indicator LEDs,
+    # stops before the resistors so autorouter can reach R GND pads.
+    # J1 at X=20, LEDs at X=27, Rs at X=28.86.
+    j1_fp = None
+    for fp in pcb.board.footprints:
+        if fp.properties.get("Reference", "") == "J1":
+            j1_fp = fp
+            break
+    if j1_fp:
+        # Y range: full connector pin span + LEDs
+        # At 180°, pin 24 (top) is at j1_y - 23*2.54, pin 1 (bottom) at j1_y
+        conn_y_min = j1_fp.position.Y - 23 * CONN_PIN_PITCH
+        conn_y_max = j1_fp.position.Y + 2.0
+        # X: board edge to just past LEDs (before Rs)
+        conn_keepout_x2 = 26.0  # between LED (25.0) and R (26.86)
+
     keepout_data = {
         "ram_grid": {
             "x1": round(grid_x1 - KEEPOUT_PAD, 2),
@@ -4526,6 +4630,14 @@ def main():
             "layers": ["F.Cu", "In1.Cu"],
         },
     }
+    if j1_fp:
+        keepout_data["connector"] = {
+            "x1": 13.0,
+            "y1": round(conn_y_min - KEEPOUT_PAD, 2),
+            "x2": conn_keepout_x2,
+            "y2": round(conn_y_max + KEEPOUT_PAD, 2),
+            "layers": ["F.Cu", "In1.Cu"],
+        }
     keepout_path = os.path.join(BOARD_DIR, "routing_keepouts.json")
     with open(keepout_path, "w") as f:
         json.dump(keepout_data, f, indent=2)
