@@ -720,7 +720,7 @@ class PCBBuilder:
                 # B.Cu pads use the same coordinate system (no X mirror)
                 abs_x = fp_x + px * cos_a + py * sin_a
                 abs_y = fp_y - px * sin_a + py * cos_a
-                return (round(abs_x, 2), round(abs_y, 2))
+                return (round(abs_x, 3), round(abs_y, 3))
 
         raise ValueError(f"Pad {pad_number} not found on {ref}")
 
@@ -774,8 +774,8 @@ class PCBBuilder:
             The created Segment.
         """
         seg = Segment(
-            start=Position(X=round(start[0], 2), Y=round(start[1], 2)),
-            end=Position(X=round(end[0], 2), Y=round(end[1], 2)),
+            start=Position(X=round(start[0], 3), Y=round(start[1], 3)),
+            end=Position(X=round(end[0], 3), Y=round(end[1], 3)),
             width=width,
             layer=layer,
             net=net,

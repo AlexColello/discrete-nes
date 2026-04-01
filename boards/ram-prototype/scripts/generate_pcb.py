@@ -2199,22 +2199,22 @@ def preroute_nand_leds(pcb, netlist_data):
                         r_pos = (px, py)
 
             if r_pos:
-                dx = abs(r_pos[0] - cathode_pos[0])
-                dy = abs(r_pos[1] - cathode_pos[1])
+                cx, cy = cathode_pos
+                rx, ry = r_pos
+                dx = abs(rx - cx)
+                dy = abs(ry - cy)
                 stub = abs(dy - dx)
                 if stub > 0.01:
                     # Vertical stub from cathode, then 45° diagonal to R
-                    stub_y = round(cathode_pos[1] + stub, 2)
-                    pcb.add_trace(cathode_pos,
-                                  (round(cathode_pos[0], 2), stub_y),
+                    stub_y = round(cy + stub, 2)
+                    pcb.add_trace((cx, cy), (cx, stub_y),
                                   cathode_net, SIGNAL_TRACE_W, "F.Cu")
-                    pcb.add_trace((round(cathode_pos[0], 2), stub_y),
-                                  r_pos,
+                    pcb.add_trace((cx, stub_y), (rx, ry),
                                   cathode_net, SIGNAL_TRACE_W, "F.Cu")
                     traces += 2
                 else:
                     # Already 45° — single trace
-                    pcb.add_trace(cathode_pos, r_pos, cathode_net,
+                    pcb.add_trace((cx, cy), (rx, ry), cathode_net,
                                   SIGNAL_TRACE_W, "F.Cu")
                     traces += 1
 
@@ -4474,12 +4474,41 @@ def main():
     # traces), but coordinates that route_pcb.py injects into the Specctra DSN
     # so only FreeRouting sees them.
     KEEPOUT_PAD = 0.5
+
+    # Compute D* bus bottom Y to extend keepout over horizontal bus traces.
+    # Same parameters as preroute_dbus_fanout / preroute_colsel_fanout.
+    _dbus_bottom_ys = []
+    _ref_to_part = {c['ref']: c['part'] for c in netlist_data['components']}
+    _net_to_pads = _build_net_pad_index(pcb)
+    _dbus_nets = set()
+    for fp in pcb.board.footprints:
+        ref = fp.properties.get("Reference", "")
+        if _ref_to_part.get(ref) != "74LVC1G79":
+            continue
+        d_net = pcb.get_pad_net(ref, "1")
+        if not d_net or d_net == 0:
+            continue
+        pads = _net_to_pads.get(d_net, [])
+        if any(_ref_to_part.get(pr) == "74LVC1G125" and pn == "4"
+               for pr, pn, *_ in pads if pr.startswith("U")):
+            _dbus_nets.add(d_net)
+            for pr, pn, px, py, _ in pads:
+                if pr.startswith("U") and pn == "1" and _ref_to_part.get(pr) == "74LVC1G79":
+                    _dbus_bottom_ys.append(round(py + 0.50, 2))
+
+    if _dbus_bottom_ys:
+        _bus_top_y = max(_dbus_bottom_ys) + 4.0
+        _bus_bottom_y = _bus_top_y + (len(_dbus_nets) - 1) * 0.61
+        ram_keepout_y2 = round(_bus_bottom_y + KEEPOUT_PAD, 2)
+    else:
+        ram_keepout_y2 = round(grid_y2 + KEEPOUT_PAD, 2)
+
     keepout_data = {
         "ram_grid": {
             "x1": round(grid_x1 - KEEPOUT_PAD, 2),
             "y1": round(grid_y1 - KEEPOUT_PAD, 2),
             "x2": round(grid_x2 + KEEPOUT_PAD, 2),
-            "y2": round(grid_y2 + KEEPOUT_PAD, 2),
+            "y2": ram_keepout_y2,
             "layers": ["F.Cu", "In1.Cu"],
         },
         "test_grid": {

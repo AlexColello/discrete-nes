@@ -122,43 +122,56 @@ def export_dsn(pcb_path, dsn_path):
 # --------------------------------------------------------------
 
 def fix_dsn_clearances(dsn_path):
-    """Fix clearance rules in the Specctra DSN to match KiCad DRC settings.
+    """Fix clearance rules in the Specctra DSN to match fab DRC settings.
 
     KiCad's DSN export sets smd_smd clearance to a tiny value (37.5µm)
     which lets FreeRouting route traces too close to SMD pads. Also missing
-    are hole-related clearances (hole_clearance, hole_to_hole).
+    are hole-related clearances that PCBWay/Elecrow rules enforce.
+
+    Fab rules (PCBWay/Elecrow) use 10mil (0.254mm) for hole clearances,
+    not 0.25mm. KiCad's project default of 0.15mm trace clearance is
+    metric, but we match the strictest fab rules here.
 
     This post-processes ALL (rule ...) blocks in the DSN to enforce:
-      - smd_smd clearance = 150µm  (match global 0.15mm)
-      - via_via clearance = 250µm  (hole_to_hole = 0.25mm)
-      - via_smd clearance = 250µm  (hole_clearance = 0.25mm)
-      - via_pin clearance = 250µm  (hole_clearance = 0.25mm)
+      - global clearance = 154µm   (match Elecrow 6mil=0.1524mm, rounded up)
+      - smd_smd clearance = 154µm  (match global)
+      - via_via clearance = 254µm  (10mil = 0.254mm, PCBWay/Elecrow)
+      - via_smd clearance = 254µm  (10mil)
+      - via_pin clearance = 254µm  (10mil)
     """
     import re
 
     with open(dsn_path, "r") as f:
         content = f.read()
 
+    # Bump global clearance (150 -> 154) to match 6mil Elecrow minimum
+    content = re.sub(
+        r'\(clearance 150\)',
+        '(clearance 154)',
+        content)
+
     # Replace all smd_smd clearance values (KiCad exports 37.5)
     content = re.sub(
         r'\(clearance \d+\.?\d* \(type smd_smd\)\)',
-        '(clearance 150 (type smd_smd))',
+        '(clearance 154 (type smd_smd))',
         content)
 
-    # Add hole-related clearances after each (clearance ... (type smd_smd)) line
+    # Add hole-related clearances after each smd_smd line
+    # 254µm = 10mil, matching PCBWay/Elecrow via-to-track and via-to-via rules
     hole_rules = (
-        '\n      (clearance 250 (type via_via))'
-        '\n      (clearance 250 (type via_smd))'
-        '\n      (clearance 250 (type via_pin))'
+        '\n      (clearance 254 (type via_via))'
+        '\n      (clearance 254 (type via_smd))'
+        '\n      (clearance 254 (type via_pin))'
     )
     content = content.replace(
-        '(clearance 150 (type smd_smd))',
-        '(clearance 150 (type smd_smd))' + hole_rules)
+        '(clearance 154 (type smd_smd))',
+        '(clearance 154 (type smd_smd))' + hole_rules)
 
     with open(dsn_path, "w") as f:
         f.write(content)
 
-    print("  Fixed DSN clearances: smd_smd=150µm, via_via/via_smd/via_pin=250µm")
+    print("  Fixed DSN clearances: global=154µm, smd_smd=154µm, "
+          "via_via/via_smd/via_pin=254µm (10mil, matches PCBWay/Elecrow)")
 
 
 # --------------------------------------------------------------
