@@ -31,9 +31,10 @@
 - [x] **Post-routing DRC clean** — 2 solder_mask_bridge (cosmetic) + 2 isolated_copper (warnings) only
 
 ### Silkscreen
-- [x] **Strip R/DSBGA silk** — 0402 resistor and DSBGA IC silkscreen removed (too dense for 0.15mm clearance)
-- [x] **LED polarity dot repositioned** — offset Y=-0.38mm to clear solder mask, stroke reduced to 0.05mm
+- [x] **Strip R + DSBGA-8 silk** — 0402 resistor and DSBGA-8 silkscreen removed (too dense for 0.15mm clearance). DSBGA-5/6 silk kept
+- [x] **LED polarity dot** — moved from F.SilkS to F.Fab (visible in KiCad, no silk_overlap at any rotation)
 - [x] **Footprint text hidden** — all Reference/Value text hidden on F.SilkS and F.Fab
+- [x] **silk_overlap removed from skip list** — now passes clean without suppression
 
 ### Footprint rework
 - [x] **Create custom DSBGA footprints** — done: removed silkscreen pin-1 triangle, reduced courtyard to 0.3mm offset from chip outline

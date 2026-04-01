@@ -330,9 +330,8 @@ Pre-routing only:
 - `track_dangling` — fanout stubs intentionally end mid-air
 
 Both pre- and post-routing:
-- `silk_overlap` — LED polarity dot near adjacent R pad (cosmetic, fab clips silk over copper)
 - `nonmirrored_text_on_back_layer` — layer test grid places text on B.Cu intentionally
-- `lib_footprint_mismatch` — J1 connector on B.Cu + LED polarity dot repositioned (intentional)
+- `lib_footprint_mismatch` — J1 connector on B.Cu + LED/DSBGA-8 silk changes (intentional)
 
 Target: 0 errors, 0 warnings AFTER filtering. If a new DRC violation type appears, fix the root cause rather than adding it to the skip list.
 
@@ -350,12 +349,26 @@ Target: 0 errors, 0 warnings AFTER filtering. If a new DRC violation type appear
 
 **Pre-route functions (all take `pcb, netlist_data`):**
 
-- `preroute_power_vias` — GND/VCC pad escape vias (skips DFF/BUF — too dense, left to autorouter)
-- `preroute_bcu_resistors` — LED cathode to B.Cu resistor pad vias
+- `preroute_center_escape` — pin 2 (middle ball) escape stubs for all DSBGA-5 ICs
+- `preroute_power_vias` — GND/VCC pad escape vias (runs last, collision-checked)
 - `preroute_ic_to_led` — IC output pad to LED anode traces
+- `preroute_led_to_resistor` — LED cathode to R pad traces
 - `preroute_clk_fanout` — horizontal CLK bus traces per byte
 - `preroute_oe_fanout` — horizontal OE bus + vertical stubs per byte
+- `preroute_ctrl_enable_trunks` — WRITE_ACTIVE/READ_EN vertical In1.Cu trunks
+- `preroute_enable_buses` — WRITE_EN/READ_EN horizontal F.Cu buses
+- `preroute_nand_connections` — NAND output to CLK/OE buses + LED routing
+- `preroute_nand_leds` — NAND LED cathode-to-R + GND vias
+- `preroute_col_sel_vias` — COL_SEL input pin vias + In1.Cu trunks
+- `preroute_colsel_fanout` — COL_SEL In1.Cu trunk extension + F.Cu route to column select ICs
+- `preroute_dff_buf_gnd/data/vcc` — DFF-BUF GND/data/VCC connections
+- `preroute_dff_to_buffer` — DFF Q to BUF A via In1.Cu
+- `preroute_r_gnd` — R GND pad vias
 - `preroute_connector_leds` — connector signal to bus LED traces
+- `preroute_column_dbus` — D* data bus column trunks on In1.Cu
+- `preroute_dbus_fanout` — D* bus horizontal fanout below byte grid
+- `preroute_dbus_to_connector` — D* bus from fanout to connector area
+- `preroute_coladdr_to_colsel` — A7-A10 from connector to column select
 
 **4-layer stackup:**
 
@@ -497,7 +510,7 @@ Lessons learned from the RAM prototype root sheet about designing hierarchy shee
 **Known limitations:**
 
 - Embedded lib_symbols are post-processed to match library files exactly (kiutils drops `exclude_from_sim`, property/pin `hide` flags) — see `SchematicBuilder._fix_lib_symbols()` in `shared/python/kicad_gen/schematic.py`
-- Use `round(v, 2)` on all coordinates to eliminate floating-point noise (e.g., `83.82000000000001`)
+- Use `round(v, 2)` on schematic coordinates to eliminate floating-point noise (e.g., `83.82000000000001`). PCB coordinates use `round(v, 3)` for 1µm precision — see "Pad position precision" above
 
 ### Verification Script Architecture
 
@@ -608,11 +621,12 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 
 **Totals (actual from generate_ram.py + generate_pcb.py):**
 
-- 226 ICs (14 INV + 75 AND + 8 dual NAND + 64 DFF + 64 BUF + 1 TPS546D24A)
+- 225 ICs (14 INV + 75 AND + 8 dual NAND + 64 DFF + 64 BUF)
 - 192 LEDs (0402 SMD)
-- 195 resistors (0402 SMD)
+- 192 resistors (0402 SMD)
 - 5 connectors (J1=24-pin main, J2=4-pin DEC3, J3=14-pin COL_SEL, J4=16-pin DEC4, J5=8-pin PCIe)
-- **618 total BOM parts**
+- 1 TPS546D24A + passives (power supply)
+- **611 total placed components** (excluding power supply passives)
 
 **PCB:** 4-layer, 171 x 118 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
 
@@ -701,12 +715,13 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
    - power_supply.kicad_sch — 8-pin PCIe connector + TPS546D24A 40A buck (12V → 3.3V)
 3. Passes KiCad 9 ERC with 0 errors and 0 warnings
 
-**Step 3: PCB Layout (IN PROGRESS)**
+**Step 3: PCB Layout (NEAR COMPLETE)**
 
-1. `generate_pcb.py` places all 611 components in grouped layout with pre-routing
-2. FreeRouting autorouter handles remaining traces (`route_pcb.py`)
+1. `generate_pcb.py` places all 611 components in grouped layout with extensive pre-routing
+2. FreeRouting autorouter completes remaining traces (`route_pcb.py`)
 3. `debug_1byte.py` tests placement/preroute functions on a single byte
-4. DRC: 0 errors / 0 warnings (pre-routing, after expected-type filtering)
+4. Pre-routing DRC: 0 errors / 0 warnings
+5. Post-routing DRC: 2 cosmetic solder_mask_bridge + 2 isolated_copper warnings (0 real errors on Default/PCBWay/Elecrow)
 
 **Step 4: Validation**
 
