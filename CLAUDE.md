@@ -141,9 +141,22 @@ python scripts/route_pcb.py --dry-run        # Export DSN only, don't route
 python scripts/route_pcb.py --skip-verify    # Skip post-routing verification
 ```
 
-**Pipeline steps:** Export Specctra DSN → Run FreeRouting CLI → Import SES → Fill zones → Cleanup dangling stubs → Hide footprint text → Post-routing DRC verification.
+**Pipeline steps:** Export Specctra DSN → Fix DSN clearances → Inject keepouts → Run FreeRouting CLI → Import SES → Save raw copy → Fill zones → Cleanup dangling stubs → Strip silk + hide text → Post-routing DRC verification.
 
 **Requirements:** Java 17+ on PATH, FreeRouting JAR auto-downloaded to `tools/freerouting/`.
+
+**DSN clearance fixup (CRITICAL — hard-won lessons):**
+
+`route_pcb.py` post-processes the DSN before FreeRouting runs:
+- **Global clearance**: 200µm (PCBWay pad-to-track = 0.2mm)
+- **smd_smd**: 154µm (Elecrow 6mil for DSBGA pads)
+- **via_via**: 500µm (PCBWay 0.5mm hole-to-hole different nets)
+- **via_smd/via_pin**: 254µm (10mil = 0.254mm, not 0.25mm!)
+- **CRITICAL: Rules must be in EVERY per-class rule block**, not just global. FreeRouting ignores global rules for nets assigned to a class. If `via_via` is only in the global block, autorouted vias will violate hole-to-hole clearance.
+- KiCad exports `smd_smd` clearance as 37.5µm (way too low) — must be overridden
+- PCBWay/Elecrow use 10mil (0.254mm) for hole clearances, not 0.25mm — the 4µm difference causes DRC failures
+
+**FreeRouting has NO net routing priority.** The autorouter iterates items in natural board list order with no class-based ordering (distance-based sorting was disabled in v2.3). The only way to prioritize is `-inc` to exclude net classes (two-pass routing), but this is currently not used — single-pass works well enough with good pre-routing.
 
 **Post-routing verification:**
 ```bash
@@ -246,6 +259,14 @@ python scripts/parse_pdf.py datasheet.pdf --info         # metadata
 - This causes `lib_footprint_mismatch` on through-hole footprints (e.g., PinHeader connectors)
 - Fix: `_fix_footprints()` post-processes `(remove_unused_layers)` → `(remove_unused_layers no)`
 
+**Pad position precision (CRITICAL — causes dangling cleanup to delete traces):**
+
+- `get_pad_position()`, `add_trace()`, and `_build_net_pad_index()` must all use `round(..., 3)` (1µm precision), NOT `round(..., 2)` (10µm)
+- DSBGA pads at rotated angles produce positions like 95.045mm which `round(..., 2)` truncates to 95.05 — a 5µm mismatch
+- The dangling track cleanup compares trace endpoints against pad positions with exact integer-nanometer matching. A 5µm mismatch means the trace endpoint doesn't match any pad, so the cleanup treats it as dangling and deletes it
+- Symptom: pre-routed traces (LED cathode-to-R, IC-to-LED anode) disappear after routing, causing `unconnected_items` DRC errors
+- The SES import preserves these traces, but the cleanup pass removes them
+
 **Through-vias have copper on ALL layers (CRITICAL for B.Cu routing):**
 
 - Vias with `layers=["F.Cu", "In1.Cu"]` are NOT blind vias in standard fabrication (e.g., Elecrow). The annular ring exists on every layer including B.Cu
@@ -309,9 +330,9 @@ Pre-routing only:
 - `track_dangling` — fanout stubs intentionally end mid-air
 
 Both pre- and post-routing:
-- `silk_overlap` — stock 0402 footprint silk 0.1mm from pads (PCBWay/Elecrow require 0.15mm)
+- `silk_overlap` — LED polarity dot near adjacent R pad (cosmetic, fab clips silk over copper)
 - `nonmirrored_text_on_back_layer` — layer test grid places text on B.Cu intentionally
-- `lib_footprint_mismatch` — J1 connector on B.Cu with F.SilkS (intentional)
+- `lib_footprint_mismatch` — J1 connector on B.Cu + LED polarity dot repositioned (intentional)
 
 Target: 0 errors, 0 warnings AFTER filtering. If a new DRC violation type appears, fix the root cause rather than adding it to the skip list.
 
@@ -593,7 +614,7 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 - 5 connectors (J1=24-pin main, J2=4-pin DEC3, J3=14-pin COL_SEL, J4=16-pin DEC4, J5=8-pin PCIe)
 - **618 total BOM parts**
 
-**PCB:** 4-layer, 233 x 95 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
+**PCB:** 4-layer, 171 x 118 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
 
 **LED Current & Resistors:**
 
@@ -810,7 +831,7 @@ After RAM prototype success:
 
 **Phase 1 COMPLETE** — project setup, migration to TI Little Logic DSBGA
 **Phase 2 Steps 1-2 COMPLETE** — schematic generation, 0 ERC errors/warnings
-**Phase 2 Step 3 IN PROGRESS** — PCB: 611 components placed, pre-routing active, FreeRouting autorouter working, 233x95mm 4-layer board
+**Phase 2 Step 3 NEAR COMPLETE** — PCB: 611 components placed, fully routed via FreeRouting, 171x118mm 4-layer board, post-routing DRC: 2 cosmetic solder_mask_bridge + 2 isolated_copper warnings only (0 real errors across Default/PCBWay/Elecrow rules)
 **Phase 3 COMPLETE** — shared kicad_gen library (SchematicBuilder, PCBBuilder, verify, snapshot)
 
 ## Important Notes

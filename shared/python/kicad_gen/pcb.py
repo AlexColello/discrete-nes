@@ -1427,12 +1427,10 @@ class PCBBuilder:
             hide_text: If True, hide all footprint reference/value text
                        (FpText on F.Fab via kiutils, property text on
                        F.SilkS via _fix_footprints post-processing)
-            fix_led_silk: If True, shrink and reposition the silkscreen
-                          polarity circle on LED footprints so it fits
-                          between the LED cathode pad and the adjacent
-                          resistor pad without overlapping either solder
-                          mask opening (fixes silk_over_copper DRC).
-                          Causes lib_footprint_mismatch (already skipped).
+            fix_led_silk: If True, remove silkscreen graphics from 0402
+                          and DSBGA footprints to avoid silk_overlap DRC
+                          violations (stock 0402 silk is too close to pads
+                          for PCBWay/Elecrow 0.15mm clearance rule).
         """
         if hide_text:
             for fp in self.board.footprints:
@@ -1441,22 +1439,24 @@ class PCBBuilder:
                         gi.effects.hide = True
         if fix_led_silk:
             for fp in self.board.footprints:
-                if "LED_" not in fp.libId:
-                    continue
-                for gi in fp.graphicItems:
-                    if (type(gi).__name__ == "FpCircle"
-                            and getattr(gi, "layer", "") == "F.SilkS"):
-                        # Move circle to courtyard edge and reduce stroke
-                        # to fit in the 0.30mm gap between LED pad and R pad.
-                        # Original: center=(-1.09, 0), end=(-1.04, 0), stroke=0.1
-                        # Fixed:    center=(-0.93, 0), end=(-0.88, 0), stroke=0.05
-                        # Gives 0.075mm clearance on both sides.
-                        gi.center.X = -0.93
-                        gi.center.Y = 0.0
-                        gi.end.X = -0.88
-                        gi.end.Y = 0.0
-                        if hasattr(gi, "stroke") and gi.stroke is not None:
-                            gi.stroke.width = 0.05
+                lib_id = fp.libId or ""
+                if "LED" in lib_id and "0402" in lib_id:
+                    # Keep polarity dot near original X but offset in Y
+                    # to clear the solder mask opening.
+                    for gi in fp.graphicItems:
+                        if (type(gi).__name__ == "FpCircle"
+                                and getattr(gi, "layer", "") == "F.SilkS"):
+                            gi.center.X = -1.09
+                            gi.center.Y = -0.38
+                            gi.end.X = -1.04
+                            gi.end.Y = -0.38
+                            if hasattr(gi, "stroke") and gi.stroke is not None:
+                                gi.stroke.width = 0.05
+                elif "Resistor" in lib_id or "DSBGA" in lib_id:
+                    fp.graphicItems = [
+                        gi for gi in fp.graphicItems
+                        if "SilkS" not in getattr(gi, "layer", "")
+                    ]
         self.board.to_file(filepath)
         self._fix_footprints(filepath, hide_text=hide_text)
 
@@ -2087,6 +2087,49 @@ def hide_footprint_text(filepath: str) -> int:
 
     open(filepath, "w", encoding="utf-8").write(text)
     return count
+
+
+def remove_silkscreen_graphics(filepath: str) -> int:
+    """Remove silkscreen graphic items from 0402 and DSBGA footprints.
+
+    Stock KiCad 0402 (LED_Small, R_Small) footprints have silkscreen
+    outlines and polarity marks that are too close to pads, causing
+    silk_overlap DRC violations with PCBWay/Elecrow rules (0.15mm min).
+
+    Removes F.SilkS graphic items from resistor and DSBGA footprints.
+    Keeps LED silk (polarity dot repositioned by save()).
+
+    Args:
+        filepath: Path to .kicad_pcb file (modified in place)
+
+    Returns:
+        Number of graphic items removed.
+    """
+    from kiutils.board import Board
+
+    board = Board.from_file(filepath)
+    removed = 0
+
+    for fp in board.footprints:
+        lib_id = fp.libId or ""
+        if "LED" in lib_id:
+            continue
+        if "Resistor" not in lib_id and "DSBGA" not in lib_id:
+            continue
+
+        new_items = []
+        for item in fp.graphicItems:
+            layer = getattr(item, 'layer', '')
+            if 'SilkS' in layer:
+                removed += 1
+            else:
+                new_items.append(item)
+        fp.graphicItems = new_items
+
+    if removed:
+        board.to_file(filepath)
+
+    return removed
 
 
 def _patch_project_severity(pro_path: str, rule: str, severity: str) -> bool:

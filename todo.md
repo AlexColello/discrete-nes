@@ -10,29 +10,39 @@
 - [x] **Extra spacing on byte silkscreen outlines** — fixed: reduced SILK_MARGIN from 3.0mm to 1.5mm
 - [ ] **Layer test table: add hashed fill row** — add a row demonstrating hashed/crosshatch copper fill pattern
 
-### Pre-routing rework needed
-- [ ] **NAND routing rework for IC_CELL_H=3.0** — NAND local connections (preroute_nand_connections) are skipped and left to the autorouter because escape path offsets were tuned for IC_CELL_H=3.5. Needs full rework for current 3.0 geometry (generate_pcb.py:2325-2329)
-- [ ] **DFF->Buffer routing** — currently skipped (autorouter via In1.Cu). Data bus via at ic_cx-0.50 leaves 0mm clearance to BUF A pin on F.Cu, so this must go through In1.Cu (generate_pcb.py:2339-2341)
-- [ ] **D* data bus fanout prerouting** — preroute the fanout of D0-D7 data bus traces to byte groups
-- [ ] **Column select fanout prerouting** — preroute the COL_SEL signal distribution traces
-- [ ] **Row select trace prerouting** — locally preroute all ROW_SEL traces from row control to byte groups. Must happen after bytes are fully locally routed (depends on NAND, DFF->Buffer, and data bus prerouting being done first)
+### Pre-routing
+- [x] **Pin 2 escape stubs** — all DSBGA-5 ICs (including row_ctrl and control_logic) now get center-escape stubs
+- [x] **WRITE_ACTIVE trunk** — continuous vertical In1.Cu line; READ_EN vias offset right to avoid crossing
+- [x] **COL_SEL fully local routed** — F.Cu from terminus vias to column select ICs with chamfered 45° paths
+- [x] **D* data bus fanout** — In1.Cu trunks + F.Cu horizontal bus below byte grid, covered by routing keepout
+- [x] **Column select fanout** — In1.Cu trunks extended below D* bus with F.Cu connection to column select ICs
+- [x] **NAND LED traces** — cathode-to-R and anode connections with exact pad coordinate precision (3 decimal)
+- [x] **Connector LED pre-routing** — J1 to LED + fanout stubs
+- [ ] **NAND routing rework for IC_CELL_H=3.0** — NAND local connections (preroute_nand_connections) partially reworked but some escape offsets still tuned for 3.5. Autorouter handles remaining
+- [ ] **Row select trace prerouting** — locally preroute all ROW_SEL traces from row control to byte groups
+
+### Autorouter / routing
+- [x] **FreeRouting autorouter pipeline** — single-pass routing with DSN clearance fixup
+- [x] **DSN clearance rules** — global 200µm (PCBWay pad-to-track), smd_smd 154µm, via_via 500µm (all rule blocks), via_smd/via_pin 254µm
+- [x] **Connector net class** — J2/J3/J4 nets in "Connectors" class for potential two-pass routing
+- [x] **Routing keepouts** — ram_grid (byte area + D* bus), test_grid, connector+LED area
+- [x] **Dangling track cleanup** — up to 50mm length, multi-pass
+- [x] **Raw post-import PCB saved** — verify_output/ram_routed_raw.kicad_pcb for inspection
+- [x] **Post-routing DRC clean** — 2 solder_mask_bridge (cosmetic) + 2 isolated_copper (warnings) only
+
+### Silkscreen
+- [x] **Strip R/DSBGA silk** — 0402 resistor and DSBGA IC silkscreen removed (too dense for 0.15mm clearance)
+- [x] **LED polarity dot repositioned** — offset Y=-0.38mm to clear solder mask, stroke reduced to 0.05mm
+- [x] **Footprint text hidden** — all Reference/Value text hidden on F.SilkS and F.Fab
 
 ### Footprint rework
-- [x] **Create custom DSBGA footprints** — done: removed silkscreen pin-1 triangle, reduced courtyard to 0.3mm offset from chip outline (DSBGA-5: ±0.75×±1.0, DSBGA-6: ±0.8×±1.0, DSBGA-8: ±0.8×±1.3)
-
-- [x] **Pin connector 3D models rotated 180°** — fixed: added 180° Z rotation to 3D model for B.Cu connectors in `_place_component()` to compensate for B.Cu mirror
+- [x] **Create custom DSBGA footprints** — done: removed silkscreen pin-1 triangle, reduced courtyard to 0.3mm offset from chip outline
+- [x] **Pin connector 3D models rotated 180°** — fixed: added 180° Z rotation to 3D model for B.Cu connectors
 - [ ] **Add 3D models for DSBGA-5 and DSBGA-6 footprints** — custom footprints currently lack 3D models for KiCad 3D viewer
-- [ ] **Investigate moving resistors to front of board** — currently on B.Cu for space reasons, but this makes assembly and rework harder. Explore using a smaller resistor footprint (e.g., 0201) to fit R on F.Cu alongside the LED
-
-### Post-footprint-rework
-- [ ] **Compress PCB layout** — once custom footprints with tighter courtyards are in place, reduce component spacing / cell dimensions to take advantage of the smaller footprints
-
-### Autorouter / manual routing
-- [ ] **Run FreeRouting autorouter** on current PCB to complete remaining unrouted nets
-- [ ] **Verify post-routing DRC** — run `verify_pcb.py --post-routing` after routing completes
-- [ ] **Review routed result** — check trace quality, 45-degree angles, no unnecessary vias
+- [ ] **Investigate moving resistors to front of board** — currently on B.Cu for space reasons, explore 0201 footprint
 
 ### PCB validation
+- [x] **Post-routing DRC** — 0 real errors across Default/PCBWay/Elecrow rules
 - [ ] **Fabrication review** — verify board meets Elecrow specs (min via 0.8mm/0.4mm, trace/space, etc.)
 - [ ] **Power distribution review** — check VCC/GND plane integrity, via current capacity
 - [ ] **Generate gerbers** and do final visual inspection
@@ -41,29 +51,30 @@
 ## RAM Prototype - Schematic
 
 ### Signal ordering / spacing
-- [x] **Row select pin order vs inverter order swapped** — fixed: reversed A0-A6 order on addr_decoder sheet block and internally (A6 at top, A0 at bottom) to match connector visual order at 180°
-- [x] **More space between connector and logic** — fixed: increased PCB gap from GROUP_GAP_X to GROUP_GAP_X*3 (6mm extra between connector group and addr_decoder)
+- [x] **Row select pin order vs inverter order swapped** — fixed
+- [x] **More space between connector and logic** — fixed
+- [x] **Connector control pin order** — nCE/nOE/nWE top-to-bottom (pin 8/7/6)
 
 ### Wire routing / overlaps
-- [ ] **Wire overlaps throughout** — verify_schematics.py check passes but visual issues may remain. Needs user review in KiCad to identify specific problem areas
-- [ ] **Root sheet routing nonsensical** — wire routing on the root sheet doesn't make sense, looks like connector pins are not being positioned/moved correctly
-- [ ] **Pin names missing on connector** — connector pins should have visible names next to them
-- [ ] **Hierarchical labels outside sheet margins** — verify_schematics.py check passes but visual issues may remain. Needs user review in KiCad to identify specific problem areas
+- [ ] **Wire overlaps throughout** — verify_schematics.py check passes but visual issues may remain
+- [ ] **Root sheet routing nonsensical** — needs user review in KiCad
+- [ ] **Pin names missing on connector** — connector pins should have visible names
+- [ ] **Hierarchical labels outside sheet margins** — needs user review
 
 ### PCB generate script
-- [ ] **Fix layout ASCII art in generate_pcb.py** — the ASCII art diagram at the top of the file doesn't accurately reflect the current board layout
+- [ ] **Fix layout ASCII art in generate_pcb.py** — doesn't accurately reflect current board layout
 
 ### Visual / layout issues
-- [ ] **Text drawn on top of components** — component text (references, values) overlapping other components where it shouldn't be
-- [ ] **VCC/GND symbols touching tip-to-tip** — verify_schematics.py doesn't catch this. Needs user review in KiCad to identify specific problem areas
+- [ ] **Text drawn on top of components** — overlapping references/values
+- [ ] **VCC/GND symbols touching tip-to-tip** — needs user review
 
 ### Component selection
-- [ ] **Choose LED part numbers and colors** — select specific 0402 LED parts. Consider using different colors to visually distinguish gate types or functional purposes (e.g., address decoder vs data path vs control signals)
-- [ ] **Update LED resistor values from 750R to 1K** in generate scripts (generate_ram.py and shared kicad_gen code) to match 1.5mA target for full 2KB RAM power budget
-- [ ] **Choose resistor values per LED color** — different Vf per color means different R values to maintain consistent 1.5mA across colors
+- [ ] **Choose LED part numbers and colors** — select specific 0402 LED parts
+- [ ] **Update LED resistor values from 750R to 1K** in generate scripts
+- [ ] **Choose resistor values per LED color** — different Vf per color
 
 ### Architecture improvement
-- [ ] **Simplify LED indicators** — investigate using a symbol, sub-sheet, or other encapsulation method to hold the LED+resistor chain so that LEDs don't have to be drawn inline in every gate logic sheet. Would significantly reduce schematic clutter and simplify the generate scripts
+- [ ] **Simplify LED indicators** — investigate sub-sheet encapsulation for LED+R chains
 
 ## Assembly Method
 
@@ -71,17 +82,15 @@ Need a custom assembly approach — a pick-and-place machine in budget range can
 
 **Proposed approach: tray + suction sheet**
 
-1. **Part tray** — a fixture/tray where all components (DSBGA ICs, 0402 LEDs, 0402 resistors) can be slowly placed by hand into their correct positions at leisure, without time pressure
-2. **Suction sheet** — picks up all placed components from the tray at once and deposits them onto the solder-pasted PCB in a single transfer
-
-This decouples the slow placement step from the solder paste window. Parts can be arranged in the tray over hours/days, then transferred all at once when the paste is fresh.
+1. **Part tray** — fixture where components are placed at leisure
+2. **Suction sheet** — picks up all components and transfers to solder-pasted PCB
 
 ### Open questions
-- Tray material and fabrication method (3D printed? CNC milled?)
-- Suction sheet mechanism — vacuum manifold? adhesive film?
+- Tray material and fabrication method
+- Suction sheet mechanism
 - Alignment method between tray and PCB
-- Whether DSBGA (1.75x1.25mm) and 0402 parts need different pocket depths in the tray
-- Tolerance requirements for the transfer to land parts on pads accurately
+- Pocket depth for DSBGA vs 0402 parts
+- Transfer tolerance requirements
 
 ## RAM Prototype - Fabrication (Phase 2 Step 5)
 
@@ -92,7 +101,9 @@ This decouples the slow placement step from the solder paste window. Parts can b
 
 ## Shared Library (kicad_gen)
 
-- [x] **DSBGA footprint files modified** — these are auto-generated by generate_pcb.py on each run (create_dsbga_footprints), no manual commit needed
+- [x] **DSBGA footprint files modified** — auto-generated by generate_pcb.py
+- [x] **3-decimal precision** — get_pad_position, add_trace, _build_net_pad_index all use round(...,3)
+- [x] **remove_silkscreen_graphics** — strips R/DSBGA silk from routed boards
 - [ ] Consider adding automated tests for kicad_gen modules
 
 ## Future Boards

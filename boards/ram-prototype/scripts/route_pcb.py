@@ -487,12 +487,13 @@ def cleanup_dangling_tracks(pcb_path):
 # --------------------------------------------------------------
 
 def hide_text(pcb_path):
-    """Hide all footprint reference/value text to eliminate silk warnings."""
+    """Hide all footprint reference/value text and strip 0402/DSBGA silk."""
     sys.path.insert(0, os.path.normpath(os.path.join(
         os.path.dirname(__file__), "..", "..", "..", "shared", "python")))
-    from kicad_gen.pcb import hide_footprint_text
+    from kicad_gen.pcb import hide_footprint_text, remove_silkscreen_graphics
     count = hide_footprint_text(pcb_path)
-    print(f"  Hidden {count} footprint text items")
+    silk_count = remove_silkscreen_graphics(pcb_path)
+    print(f"  Hidden {count} footprint text items, removed {silk_count} silk graphics")
 
 
 # --------------------------------------------------------------
