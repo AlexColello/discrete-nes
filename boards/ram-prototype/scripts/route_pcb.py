@@ -156,12 +156,19 @@ def fix_dsn_clearances(dsn_path):
         '(clearance 154 (type smd_smd))',
         content)
 
-    # Add hole-related clearances after each smd_smd line
+    # Add hole-related clearances to EVERY (rule ...) block, not just global.
+    # FreeRouting uses per-class rules and ignores global for class members.
     hole_rules = (
-        '\n      (clearance 500 (type via_via))'   # PCBWay hole-to-hole (different nets)
-        '\n      (clearance 254 (type via_smd))'   # 10mil via-to-smd
-        '\n      (clearance 254 (type via_pin))'   # 10mil via-to-pin
+        '\n      (clearance 500 (type via_via))'
+        '\n      (clearance 254 (type via_smd))'
+        '\n      (clearance 254 (type via_pin))'
     )
+    # Insert after every (clearance 200) line — covers both global and per-class
+    content = content.replace(
+        '(clearance 200)',
+        '(clearance 200)' + hole_rules)
+    # Also after smd_smd in global block (deduplicate won't happen since
+    # smd_smd only appears once)
     content = content.replace(
         '(clearance 154 (type smd_smd))',
         '(clearance 154 (type smd_smd))' + hole_rules)
@@ -170,7 +177,7 @@ def fix_dsn_clearances(dsn_path):
         f.write(content)
 
     print("  Fixed DSN clearances: global=200µm, smd_smd=154µm, "
-          "via_via=500µm, via_smd/via_pin=254µm")
+          "via_via=500µm, via_smd/via_pin=254µm (all rule blocks)")
 
 
 
