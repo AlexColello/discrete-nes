@@ -1441,13 +1441,10 @@ class PCBBuilder:
             for fp in self.board.footprints:
                 lib_id = fp.libId or ""
                 if "LED" in lib_id and "0402" in lib_id:
-                    # Move polarity dot from F.SilkS to F.Fab to avoid
-                    # silk_overlap with adjacent R/IC pads at any rotation.
-                    # F.Fab is visible in KiCad but not printed on PCB.
-                    for gi in fp.graphicItems:
-                        if (type(gi).__name__ == "FpCircle"
-                                and getattr(gi, "layer", "") == "F.SilkS"):
-                            gi.layer = "F.Fab"
+                    # Shift polarity dot X towards LED center to avoid
+                    # silk_overlap with adjacent R pads.  Keep on F.SilkS
+                    # so the dot prints on the PCB silkscreen.
+                    _shift_led_polarity_dot(fp)
                 elif "Resistor" in lib_id or "DSBGA-8" in lib_id:
                     # Strip silk from 0402 resistors only (too close to pads)
                     fp.graphicItems = [
@@ -2086,6 +2083,38 @@ def hide_footprint_text(filepath: str) -> int:
     return count
 
 
+# LED polarity dot target position in footprint-local coordinates.
+# Stock library: center (-1.09, 0) — past pad 1, too close to adjacent R pads.
+# Moved to the side of pad 1: below the cathode pad, clear of both LED
+# pads and adjacent R pads.  Pad 1 bottom edge at Y=-0.32; dot center
+# at Y=-0.55 with outer radius 0.075 gives ~0.16mm clearance from pad.
+_LED_DOT_TARGET_X = -0.5
+_LED_DOT_TARGET_Y = -0.55
+
+
+def _shift_led_polarity_dot(fp) -> None:
+    """Shift LED polarity dot center X towards the LED body.
+
+    Moves the fp_circle on F.SilkS closer to the LED center so it clears
+    adjacent resistor pads (0.15mm PCBWay/Elecrow silk_overlap rule).
+    """
+    for gi in fp.graphicItems:
+        if type(gi).__name__ != "FpCircle":
+            continue
+        layer = getattr(gi, "layer", "")
+        if "SilkS" not in layer and "Fab" not in layer:
+            continue
+        # Ensure it's on SilkS (not Fab — user wants it printed)
+        gi.layer = "F.SilkS"
+        # Move dot to side of pad 1 (below cathode pad)
+        dx = _LED_DOT_TARGET_X - gi.center.X
+        dy = _LED_DOT_TARGET_Y - gi.center.Y
+        gi.center.X = _LED_DOT_TARGET_X
+        gi.center.Y = _LED_DOT_TARGET_Y
+        gi.end.X = round(gi.end.X + dx, 4)
+        gi.end.Y = round(gi.end.Y + dy, 4)
+
+
 def remove_silkscreen_graphics(filepath: str) -> int:
     """Remove silkscreen graphic items from 0402 and DSBGA footprints.
 
@@ -2094,37 +2123,120 @@ def remove_silkscreen_graphics(filepath: str) -> int:
     silk_overlap DRC violations with PCBWay/Elecrow rules (0.15mm min).
 
     Removes F.SilkS graphic items from 0402 resistor and DSBGA-8 footprints.
-    Keeps DSBGA-5/6 and LED silk.
+    Shifts LED polarity dot X towards LED center to clear adjacent R pads.
+
+    Uses text-based processing to avoid kiutils round-trip corruption on
+    routed PCBs (kiutils corrupts segment tstamps on save).
 
     Args:
         filepath: Path to .kicad_pcb file (modified in place)
 
     Returns:
-        Number of graphic items removed.
+        Number of graphic items removed/modified.
     """
-    from kiutils.board import Board
+    text = open(filepath, "r", encoding="utf-8").read()
+    changes = 0
 
-    board = Board.from_file(filepath)
-    removed = 0
+    # LEDs whose dot must go on the +Y side (opposite default) to avoid
+    # nearby R GND pad or IC silkscreen on the -Y side.
+    _FLIP_Y_REFS = {f"D{i}" for i in range(106, 114)} | {
+                    f"D{i}" for i in range(122, 186)}
 
-    for fp in board.footprints:
-        lib_id = fp.libId or ""
-        if "Resistor" not in lib_id and "DSBGA-8" not in lib_id:
-            continue
+    lines = text.split("\n")
+    result = []
+    in_led_fp = False
+    led_ref = ""           # current LED reference designator
+    in_fp_circle = False   # inside an fp_circle block in an LED footprint
+    circle_depth = 0       # paren nesting depth within fp_circle block
+    circle_dx = 0          # X shift applied to center (reused for end)
+    circle_dy = 0          # Y shift applied to center (reused for end)
 
-        new_items = []
-        for item in fp.graphicItems:
-            layer = getattr(item, 'layer', '')
-            if 'SilkS' in layer:
-                removed += 1
-            else:
-                new_items.append(item)
-        fp.graphicItems = new_items
+    for line in lines:
+        stripped = line.strip()
 
-    if removed:
-        board.to_file(filepath)
+        # Track which footprint we're inside
+        fp_m = re.match(r'\s*\(footprint "([^"]+)"', stripped)
+        if fp_m:
+            lib_id = fp_m.group(1)
+            in_led_fp = ("LED" in lib_id and "0402" in lib_id)
+            led_ref = ""
 
-    return removed
+        # Capture reference designator inside LED footprint
+        if in_led_fp and not led_ref:
+            ref_m = re.search(
+                r'\(property "Reference" "([^"]+)"', stripped)
+            if ref_m:
+                led_ref = ref_m.group(1)
+
+        # End of footprint block (tab-indented closing paren)
+        if stripped == ")" and re.match(r'\t\)', line):
+            in_led_fp = False
+
+        # Detect fp_circle block start inside LED footprint
+        if in_led_fp and stripped.startswith("(fp_circle"):
+            in_fp_circle = True
+            circle_depth = 0
+
+        # Track nesting depth inside fp_circle block
+        if in_fp_circle:
+            circle_depth += stripped.count("(") - stripped.count(")")
+            if circle_depth <= 0:
+                # Process the closing line, then exit circle context
+                pass  # handle below after processing
+
+        # Inside LED fp_circle: move to target position
+        if in_fp_circle:
+            m = re.match(r'(\s*)\(center ([\d.-]+) ([\d.-]+)\)', stripped)
+            if m:
+                indent = line[:len(line) - len(stripped)]
+                old_x = float(m.group(2))
+                old_y = float(m.group(3))
+                target_y = (-_LED_DOT_TARGET_Y
+                            if led_ref in _FLIP_Y_REFS
+                            else _LED_DOT_TARGET_Y)
+                circle_dx = _LED_DOT_TARGET_X - old_x
+                circle_dy = target_y - old_y
+                result.append(
+                    f"{indent}(center {_LED_DOT_TARGET_X} {target_y})")
+                changes += 1
+                continue
+
+            # Shift end by same delta
+            m = re.match(r'(\s*)\(end ([\d.-]+) ([\d.-]+)\)', stripped)
+            if m and (circle_dx != 0 or circle_dy != 0):
+                indent = line[:len(line) - len(stripped)]
+                old_x = float(m.group(2))
+                old_y = float(m.group(3))
+                new_x = round(old_x + circle_dx, 4)
+                new_y = round(old_y + circle_dy, 4)
+                result.append(f"{indent}(end {new_x} {new_y})")
+                circle_dx = circle_dy = 0
+                continue
+
+            # Reduce stroke width for tighter clearance
+            m_sw = re.match(r'(\s*)\(width ([\d.]+)\)', stripped)
+            if m_sw:
+                old_w = float(m_sw.group(2))
+                if old_w > 0.05:
+                    indent = line[:len(line) - len(stripped)]
+                    line = f"{indent}(width 0.05)"
+                    changes += 1
+
+            # Change layer from F.Fab to F.SilkS
+            if '"F.Fab"' in stripped:
+                line = line.replace('"F.Fab"', '"F.SilkS"')
+                changes += 1
+
+        result.append(line)
+
+        # Exit fp_circle context after the closing line is appended
+        if in_fp_circle and circle_depth <= 0:
+            in_fp_circle = False
+
+    if changes:
+        open(filepath, "w", encoding="utf-8").write("\n".join(result))
+
+    return changes
 
 
 def _patch_project_severity(pro_path: str, rule: str, severity: str) -> bool:
