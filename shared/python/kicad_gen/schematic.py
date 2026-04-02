@@ -70,7 +70,7 @@ class SchematicBuilder:
 
     def place_symbol(self, lib_name, x, y, ref_prefix="U", value=None,
                      angle=0, mirror=None, extra_props=None,
-                     unit=1, ref_override=None):
+                     unit=1, ref_override=None, in_bom=True):
         """Place a symbol instance in the schematic.
 
         Returns (reference_designator, pins_dict) where pins_dict maps
@@ -97,7 +97,7 @@ class SchematicBuilder:
         sym.libId = f"{lib_prefix}:{lib_name}" if lib_prefix else lib_name
         sym.position = Position(X=x, Y=y, angle=angle)
         sym.unit = unit
-        sym.inBom = True
+        sym.inBom = in_bom
         sym.onBoard = True
         sym.uuid = uid()
 

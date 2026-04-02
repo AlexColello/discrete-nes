@@ -1061,7 +1061,8 @@ def generate_power_supply():
     conn_x = bx
     conn_y = snap(by + 5 * G)
     _, conn_pins = b.place_symbol("Conn_02x04_Odd_Even", conn_x, conn_y,
-                                  ref_prefix="J", value="PCIe_8pin")
+                                  ref_prefix="J", value="PCIe_8pin",
+                                  in_bom=False)
 
     # Wire all odd pins (12V) together with a label
     twelve_v_ys = sorted([conn_pins[str(p)][1] for p in [1, 3, 5, 7]])
@@ -1546,7 +1547,8 @@ def generate_root_sheet():
     conn_x = base_x
     conn_y = snap(ensemble_center_y + 1.27)
     _, conn_pins = b.place_symbol("Conn_01x24", conn_x, conn_y,
-                                  ref_prefix="J", value="SRAM_Bus", angle=180)
+                                  ref_prefix="J", value="SRAM_Bus", angle=180,
+                                  in_bom=False)
 
     # ================================================================
     # Connector pin mapping (24-pin)
@@ -1745,7 +1747,8 @@ def generate_root_sheet():
     dec3_header_x = snap(col1_x + col1_w + 3 * GRID)
     dec3_header_y = snap(colsel_sy + colsel_h + sheet_gap + ctrl_h + 2 * sheet_gap)
     _, dec3_hdr_pins = b.place_symbol("Conn_01x04", dec3_header_x, dec3_header_y,
-                                      ref_prefix="J", value="DEC3_Unused", angle=180)
+                                      ref_prefix="J", value="DEC3_Unused", angle=180,
+                                      in_bom=False)
 
     for pin_idx in range(4):
         sig = f"DEC3_{pin_idx + 4}"
@@ -1768,7 +1771,8 @@ def generate_root_sheet():
     colsel_header_x = dec3_header_x
     colsel_header_y = snap(dec3_header_y + 16 * GRID)
     _, colsel_hdr_pins = b.place_symbol("Conn_01x14", colsel_header_x, colsel_header_y,
-                                        ref_prefix="J", value="Unused_COL_SEL", angle=180)
+                                        ref_prefix="J", value="Unused_COL_SEL", angle=180,
+                                        in_bom=False)
 
     for pin_idx in range(14):
         col_idx = pin_idx + 2  # COL_SEL_2 through COL_SEL_15
@@ -1792,7 +1796,8 @@ def generate_root_sheet():
     dec4_header_x = dec3_header_x
     dec4_header_y = snap(colsel_header_y + 48 * GRID)
     _, dec4_hdr_pins = b.place_symbol("Conn_02x08_Odd_Even", dec4_header_x, dec4_header_y,
-                                      ref_prefix="J", value="DEC4_Unused", angle=180)
+                                      ref_prefix="J", value="DEC4_Unused", angle=180,
+                                      in_bom=False)
 
     # At angle=180: odd pins (left col in lib) end up on right, even on left
     # Wire odd pins right, even pins left
