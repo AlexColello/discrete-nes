@@ -3795,7 +3795,7 @@ def main():
             final_cells = and_cells[36:40]
 
             cell_h = CTRL_CELL_H   # 4.0mm vertical spacing within columns
-            col_sp = 7.5           # horizontal spacing between decode-stage columns
+            col_sp = 8.5           # horizontal spacing between decode-stage columns
 
             # DEC4 column (tallest, 16 cells) determines total height
             dec4_span = (len(dec4_cells) - 1) * cell_h  # 60mm
@@ -3828,7 +3828,7 @@ def main():
             level2_ands = and_cells[8:]   # COL_SEL_0-15
 
             cell_h = CTRL_CELL_H   # 4.0mm vertical spacing within columns
-            col_sp = 7.5           # horizontal spacing between columns
+            col_sp = 8.5           # horizontal spacing between columns
 
             # Level-2 column (tallest, 16 cells) determines total height
             l2_span = (len(level2_ands) - 1) * cell_h

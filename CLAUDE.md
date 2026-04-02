@@ -628,7 +628,7 @@ Verification has two layers: **shared general-purpose checks** in `shared/python
 - 1 TPS546D24A + passives (power supply)
 - **611 total placed components** (excluding power supply passives)
 
-**PCB:** 4-layer, 171 x 118 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
+**PCB:** 4-layer, 175 x 120 mm (F.Cu signal, In1.Cu jumper, In2.Cu VCC plane, B.Cu GND plane)
 
 **LED Current & Resistors:**
 
@@ -846,7 +846,7 @@ After RAM prototype success:
 
 **Phase 1 COMPLETE** — project setup, migration to TI Little Logic DSBGA
 **Phase 2 Steps 1-2 COMPLETE** — schematic generation, 0 ERC errors/warnings
-**Phase 2 Step 3 NEAR COMPLETE** — PCB: 611 components placed, fully routed via FreeRouting, 171x118mm 4-layer board, post-routing DRC: 2 cosmetic solder_mask_bridge + 2 isolated_copper warnings only (0 real errors across Default/PCBWay/Elecrow rules)
+**Phase 2 Step 3 NEAR COMPLETE** — PCB: 611 components placed, fully routed via FreeRouting, 175x120mm 4-layer board, post-routing DRC: 2 cosmetic solder_mask_bridge + 2 isolated_copper warnings only (0 real errors across Default/PCBWay/Elecrow rules)
 **Phase 3 COMPLETE** — shared kicad_gen library (SchematicBuilder, PCBBuilder, verify, snapshot)
 
 ## Important Notes
