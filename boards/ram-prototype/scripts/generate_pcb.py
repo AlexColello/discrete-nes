@@ -3570,8 +3570,12 @@ def add_layer_test_grid(pcb, origin_x, origin_y):
         # Add copper pour zones for layers without full-board zones
         # (B.Cu fill comes from the full-board B.Cu GND zone,
         #  In2.Cu fill comes from the full-board VCC zone)
+        # Use no-net ("") to avoid solder_mask_bridge DRC errors (mask
+        # openings would bridge no-net text copper and GND zone copper)
+        # and isolated_copper warnings (test grid zones are surrounded
+        # by keepouts, disconnected from the main GND net).
         if fill_layer in ("F.Cu", "In1.Cu"):
-            pcb.add_zone("GND", fill_layer, row_outline, clearance=0.3)
+            pcb.add_zone("", fill_layer, row_outline, clearance=0.3)
 
     # --- Cell text (columns 0-3: per-layer text) ---
     # When text_rank <= fill_rank, multiple columns place identical copper
