@@ -1685,10 +1685,17 @@ def generate_root_sheet():
 
     # ================================================================
     # Route: Control Logic RIGHT → Row Control LEFT (WRITE_ACTIVE, READ_EN via labels)
+    #
+    # KiCad 10 ERC flags a label as dangling unless its net contains a
+    # symbol pin in the **same** sheet (sub-sheet pins inside hierarchy
+    # blocks don't count).  place_pin_anchor() drops a hidden TestPoint
+    # whose pin 1 lands exactly on the label position, keeping the net
+    # visually clean while satisfying the ERC rule.
     # ================================================================
     wa_src = ctrl_pp["WRITE_ACTIVE"]
     b.add_wire(wa_src[0], wa_src[1], wa_src[0] + wire_stub, wa_src[1])
     b.add_label("WRITE_ACTIVE", wa_src[0] + wire_stub, wa_src[1])
+    b.place_pin_anchor(wa_src[0] + wire_stub, wa_src[1])
     for i in range(4):
         d = rc_pp[i]["WRITE_ACTIVE"]
         b.add_wire(d[0], d[1], d[0] - wire_stub, d[1])
@@ -1697,6 +1704,7 @@ def generate_root_sheet():
     re_src = ctrl_pp["READ_EN"]
     b.add_wire(re_src[0], re_src[1], re_src[0] + wire_stub, re_src[1])
     b.add_label("READ_EN", re_src[0] + wire_stub, re_src[1])
+    b.place_pin_anchor(re_src[0] + wire_stub, re_src[1])
     for i in range(4):
         d = rc_pp[i]["READ_EN"]
         b.add_wire(d[0], d[1], d[0] - wire_stub, d[1])
@@ -1710,6 +1718,7 @@ def generate_root_sheet():
         src_x, src_y = rc_pp[row_i]["WRITE_EN_ROW"]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
         b.add_label(wen_sig, src_x + wire_stub, src_y)
+        b.place_pin_anchor(src_x + wire_stub, src_y)
         for col_j in range(2):
             byte_idx = col_j * 4 + row_i
             dst_x, dst_y = byte_pp[byte_idx]["WRITE_EN_ROW"]
@@ -1720,6 +1729,7 @@ def generate_root_sheet():
         src_x, src_y = rc_pp[row_i]["READ_EN_ROW"]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
         b.add_label(ren_sig, src_x + wire_stub, src_y)
+        b.place_pin_anchor(src_x + wire_stub, src_y)
         for col_j in range(2):
             byte_idx = col_j * 4 + row_i
             dst_x, dst_y = byte_pp[byte_idx]["READ_EN_ROW"]
@@ -1734,6 +1744,7 @@ def generate_root_sheet():
         src_x, src_y = colsel_pp[col_sig]
         b.add_wire(src_x, src_y, src_x + wire_stub, src_y)
         b.add_label(col_sig, src_x + wire_stub, src_y)
+        b.place_pin_anchor(src_x + wire_stub, src_y)
 
         for row_i in range(4):
             byte_idx = col_j * 4 + row_i

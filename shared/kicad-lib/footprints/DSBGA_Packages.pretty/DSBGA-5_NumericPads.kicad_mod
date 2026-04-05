@@ -1,6 +1,6 @@
-(footprint "DSBGA-5_NumericPads" (version 20241229) (generator "kicad-footprint-generator")
+(footprint "DSBGA-5_NumericPads" (version 20260206) (generator "kicad-footprint-generator")
   (layer "F.Cu")
-  (tedit 69d061cb) (tstamp 3c182553-c76c-48c7-81b9-9383d065ffee)
+  (tedit 69d1c1a8) (tstamp 97aad6bb-13b8-4650-bc0d-513a29aa1e72)
   (descr "TI DSBGA-5 (YZP) with numeric pad names matching 74xGxx symbols. Based on Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.")
   (tags "BGA 5 0.5 YZP DSBGA numeric")
   (property "Reference" "REF\*\*"
@@ -23,6 +23,7 @@
      )
     )
    )
+  (property "KiLib_Generator" "package/grid_array")
   (solder_mask_margin 0.05)
   (attr smd)
   (fp_line (start -0.625 0.875) (end -0.625 -0.6175) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
@@ -44,7 +45,7 @@
   (pad "3" smd circle (at -0.25 0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
   (pad "4" smd circle (at 0.25 0.5) (size 0.23 0.23) (property pad_prop_bga) (layers "F.Cu" "F.Mask" "F.Paste"))
   (embedded_fonts no)
-  (model "${KIPRJMOD}/../../shared/kicad-lib/3d-models/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.step"
+  (model "${KICAD10_3DMODEL_DIR}/Package_BGA.3dshapes/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.step"
     (offset (xyz 0 0 0))
     (scale (xyz 1 1 1))
     (rotate (xyz 0 0 0))

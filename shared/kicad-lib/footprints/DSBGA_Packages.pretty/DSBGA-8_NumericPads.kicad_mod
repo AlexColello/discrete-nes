@@ -1,6 +1,6 @@
-(footprint "DSBGA-8_NumericPads" (version 20241229) (generator "pcbnew")
+(footprint "DSBGA-8_NumericPads" (version 20260206) (generator "pcbnew")
   (layer "F.Cu")
-  (tedit 69d061cb) (tstamp 59de6726-36c0-4c31-b7ea-872b2f4f0876)
+  (tedit 69d1c1a8) (tstamp 74847abc-6f16-48af-bfc6-97d83af948df)
   (descr "TI DSBGA-8 (YZP) with numeric pad names matching 74xGxx symbols. Based on Texas_DSBGA-8_0.9x1.9mm_Layout2x4_P0.5mm.")
   (tags "BGA 8 0.5 YZP DSBGA numeric")
   (property "Reference" "REF\*\*"
@@ -62,7 +62,7 @@
   (pad "4" smd circle (at -0.25 0.75) (size 0.265 0.265) (property pad_prop_bga) (layers "F.Cu" "F.Mask"))
   (pad "1" smd circle (at 0.25 0.75) (size 0.265 0.265) (property pad_prop_bga) (layers "F.Cu" "F.Mask"))
   (embedded_fonts no)
-  (model "${KICAD9_3DMODEL_DIR}/Package_BGA.3dshapes/Texas_DSBGA-8_0.9x1.9mm_Layout2x4_P0.5mm.step"
+  (model "${KICAD10_3DMODEL_DIR}/Package_BGA.3dshapes/Texas_DSBGA-8_0.9x1.9mm_Layout2x4_P0.5mm.step"
     (offset (xyz 0 0 0))
     (scale (xyz 1 1 1))
     (rotate (xyz 0 0 0))

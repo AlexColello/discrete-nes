@@ -233,6 +233,45 @@ class SchematicBuilder:
         # Signal enters at LED Pin 2 / Anode (left side)
         return led_pins["2"]
 
+    def place_pin_anchor(self, x, y, angle=0):
+        """Place a hidden ``TestPoint`` symbol whose pin 1 lands at ``(x, y)``.
+
+        KiCad 10's ERC flags a net label as ``label_dangling`` unless the net
+        contains at least one symbol pin **in the same sheet as the label**.
+        Symbol pins inside sub-sheets don't count even when connected through
+        a hierarchical sheet pin.  That breaks the root-sheet pattern
+        ``sheet_pin -> wire -> label`` used to name internal signals that
+        cross between sub-sheets.
+
+        Calling this once per labeled internal net (at the source label
+        position) satisfies KiCad 10 ERC without disturbing the visual
+        layout: the TestPoint's pin coincides with the label, so the
+        component is invisible on top of the label.  It's excluded from BOM
+        and the board.
+
+        The TestPoint pin points upward (angle 90 in the library), so its
+        tip -- the connection point -- is ``2.54 mm`` below the symbol
+        origin.  We offset the placement so the tip lands exactly at
+        ``(x, y)``.
+
+        Returns the reference designator of the placed anchor.
+        """
+        # Find the pin 1 offset for TestPoint so we can compute the symbol
+        # origin that puts the pin tip at (x, y).
+        key = ("TestPoint", angle)
+        if key in self._pin_offsets:
+            pin_off = self._pin_offsets[key].get("1", (0.0, 0.0))
+        else:
+            pin_off = _fallback_pin_offsets_unit("TestPoint", angle, 1).get(
+                "1", (0.0, 0.0))
+        origin_x = snap(x - pin_off[0])
+        origin_y = snap(y - pin_off[1])
+        ref, _ = self.place_symbol(
+            "TestPoint", origin_x, origin_y,
+            ref_prefix="#TP", value="", angle=angle, in_bom=False,
+        )
+        return ref
+
     # -- net labels --
 
     def _label_effects(self, justify=None):

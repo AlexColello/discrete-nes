@@ -6,7 +6,10 @@ Configured for TI Little Logic (SN74LVC1G) in DSBGA (NanoFree) packages.
 """
 
 import os
+import shutil
+import sys
 import uuid as _uuid
+from pathlib import Path
 from typing import Dict, Tuple
 
 # Power supply voltages
@@ -182,16 +185,97 @@ def grid_position(row: int, col: int, spacing: Tuple[float, float] = (4.0, 4.0))
 GRID = 2.54
 SYM_SPACING_Y = 10 * GRID    # vertical spacing between symbol rows (gates)
 
-# kicad-cli path (auto-detect from Program Files)
-KICAD_CLI = r"C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
+# kicad-cli path — auto-detected per platform.
+# Override by setting the KICAD_CLI environment variable.
+def _detect_kicad_cli() -> str:
+    override = os.environ.get("KICAD_CLI")
+    if override and Path(override).exists():
+        return override
+    # Try PATH first (standard on Linux/macOS)
+    on_path = shutil.which("kicad-cli")
+    if on_path:
+        return on_path
+    # Windows: try common Program Files locations
+    if sys.platform == "win32":
+        for candidate in (
+            Path(r"C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"),
+            Path(r"C:\Program Files\KiCad\8.0\bin\kicad-cli.exe"),
+            Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe"),
+        ):
+            if candidate.exists():
+                return str(candidate)
+    # macOS: typical app bundle location
+    if sys.platform == "darwin":
+        candidate = Path("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")
+        if candidate.exists():
+            return str(candidate)
+    # Last resort: return the bare name and hope it's on PATH at runtime
+    return "kicad-cli"
+
+
+def _detect_kicad_python() -> str:
+    """Locate a Python interpreter that can import pcbnew.
+
+    Used by route_pcb.py for Specctra DSN/SES export/import.  On Linux,
+    pcbnew is usually available in the system python3 (from the kicad
+    package); on Windows it's bundled with KiCad in ``Program Files``.
+
+    When this module is imported from inside a virtualenv, ``shutil.which``
+    returns the venv's python which generally does NOT have pcbnew, so we
+    probe candidates for ``import pcbnew`` and return the first that works.
+    """
+    import subprocess as _sp
+
+    def _has_pcbnew(py: str) -> bool:
+        try:
+            r = _sp.run([py, "-c", "import pcbnew"],
+                        capture_output=True, text=True, timeout=15)
+            return r.returncode == 0
+        except (OSError, _sp.SubprocessError):
+            return False
+
+    override = os.environ.get("KICAD_PYTHON")
+    if override and Path(override).exists():
+        return override
+
+    candidates: list[str] = []
+    if sys.platform == "win32":
+        candidates += [
+            r"C:\Program Files\KiCad\9.0\bin\python.exe",
+            r"C:\Program Files\KiCad\8.0\bin\python.exe",
+            r"C:\Program Files\KiCad\10.0\bin\python.exe",
+        ]
+    else:
+        # Prefer explicit system paths over venv's python (which usually
+        # lacks the pcbnew bindings installed by the kicad apt/brew package).
+        candidates += [
+            "/usr/bin/python3",
+            "/usr/local/bin/python3",
+        ]
+        on_path = shutil.which("python3")
+        if on_path and on_path not in candidates:
+            candidates.append(on_path)
+
+    for c in candidates:
+        if Path(c).exists() and _has_pcbnew(c):
+            return c
+    # Last-resort fallback: return the first existing candidate so downstream
+    # error messages point somewhere sensible.
+    for c in candidates:
+        if Path(c).exists():
+            return c
+    return "python3"
+
+
+KICAD_CLI = _detect_kicad_cli()
 
 # KiCad's bundled Python (has pcbnew module for Specctra DSN/SES export/import)
-KICAD_PYTHON = r"C:\Program Files\KiCad\9.0\bin\python.exe"
+KICAD_PYTHON = _detect_kicad_python()
 
 # FreeRouting JAR default path (downloaded on first use by route_pcb.py)
-FREEROUTING_JAR = os.path.normpath(os.path.join(
-    os.path.dirname(__file__), "..", "..", "..",
-    "tools", "freerouting", "freerouting-2.0.1.jar"))
+FREEROUTING_JAR = str((Path(__file__).resolve().parent
+                       / ".." / ".." / ".."
+                       / "tools" / "freerouting" / "freerouting-2.0.1.jar").resolve())
 
 # Map symbol base names to their KiCad library name prefix
 SYMBOL_LIB_MAP = {
@@ -215,6 +299,7 @@ SYMBOL_LIB_MAP = {
     "Conn_01x24": "Connector_Generic",
     "Conn_02x04_Odd_Even": "Connector_Generic",
     "Conn_02x08_Odd_Even": "Connector_Generic",
+    "TestPoint": "Connector",
     "L_Small": "Device",
     "TPS546D24A": "Power_Discrete",
 }
@@ -283,8 +368,70 @@ DSBGA5_BALL_TO_PIN = {v: k for k, v in DSBGA5_PIN_TO_BALL.items()}
 DSBGA6_BALL_TO_PIN = {v: k for k, v in DSBGA6_PIN_TO_BALL.items()}
 DSBGA8_BALL_TO_PIN = {v: k for k, v in DSBGA8_PIN_TO_BALL.items()}
 
-# KiCad footprint library paths
-KICAD_FP_DIR = r"C:\Program Files\KiCad\9.0\share\kicad\footprints"
+# KiCad footprint library paths — auto-detected per platform.
+# Override by setting the KICAD_FP_DIR environment variable.
+def _detect_kicad_fp_dir() -> str:
+    override = os.environ.get("KICAD_FP_DIR")
+    if override and Path(override).is_dir():
+        return override
+    candidates: list[Path] = []
+    if sys.platform == "win32":
+        candidates += [
+            Path(r"C:\Program Files\KiCad\9.0\share\kicad\footprints"),
+            Path(r"C:\Program Files\KiCad\8.0\share\kicad\footprints"),
+            Path(r"C:\Program Files\KiCad\10.0\share\kicad\footprints"),
+        ]
+    elif sys.platform == "darwin":
+        candidates += [
+            Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"),
+        ]
+    else:  # Linux / other Unix
+        candidates += [
+            Path("/usr/share/kicad/footprints"),
+            Path("/usr/local/share/kicad/footprints"),
+            Path("/usr/share/kicad-footprints"),
+        ]
+    for c in candidates:
+        if c.is_dir():
+            return str(c)
+    # Fall back to the first candidate even if it doesn't exist,
+    # so downstream error messages point somewhere sensible.
+    return str(candidates[0]) if candidates else ""
+
+
+KICAD_FP_DIR = _detect_kicad_fp_dir()
+
+
+# KiCad symbol library paths — auto-detected per platform.
+# Override by setting the KICAD_SYM_DIR environment variable.
+def _detect_kicad_sym_dir() -> str:
+    override = os.environ.get("KICAD_SYM_DIR")
+    if override and Path(override).is_dir():
+        return override
+    candidates: list[Path] = []
+    if sys.platform == "win32":
+        candidates += [
+            Path(r"C:\Program Files\KiCad\9.0\share\kicad\symbols"),
+            Path(r"C:\Program Files\KiCad\8.0\share\kicad\symbols"),
+            Path(r"C:\Program Files\KiCad\10.0\share\kicad\symbols"),
+        ]
+    elif sys.platform == "darwin":
+        candidates += [
+            Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols"),
+        ]
+    else:  # Linux / other Unix
+        candidates += [
+            Path("/usr/share/kicad/symbols"),
+            Path("/usr/local/share/kicad/symbols"),
+            Path("/usr/share/kicad-symbols"),
+        ]
+    for c in candidates:
+        if c.is_dir():
+            return str(c)
+    return str(candidates[0]) if candidates else ""
+
+
+KICAD_SYM_DIR = _detect_kicad_sym_dir()
 STOCK_DSBGA5_FP = "Package_BGA.pretty/Texas_DSBGA-5_0.8875x1.3875mm_Layout2x3_P0.5mm.kicad_mod"
 STOCK_DSBGA6_FP = "Package_BGA.pretty/Texas_DSBGA-6_0.9x1.4mm_Layout2x3_P0.5mm.kicad_mod"
 STOCK_DSBGA8_FP = "Package_BGA.pretty/Texas_DSBGA-8_0.9x1.9mm_Layout2x4_P0.5mm.kicad_mod"

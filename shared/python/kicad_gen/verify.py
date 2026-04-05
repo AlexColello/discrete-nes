@@ -1287,6 +1287,15 @@ def _is_standalone_artifact(violation):
                for it in items):
             return True
 
+    # Standalone hierarchical labels naturally look "isolated" when the
+    # sub-sheet is analyzed on its own -- in the full hierarchy they
+    # connect via the parent sheet pin.  Added for KiCad 10 compatibility.
+    if vtype == "isolated_pin_label":
+        items = violation.get("items", [])
+        if any("Hierarchical Label" in it.get("description", "")
+               for it in items):
+            return True
+
     if vtype == "wire_dangling":
         return True
 

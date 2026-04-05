@@ -14,6 +14,7 @@ import math
 import os
 import re
 import subprocess
+from pathlib import Path
 
 from kiutils.schematic import Schematic
 from kiutils.symbol import SymbolLib
@@ -24,7 +25,7 @@ from kiutils.items.common import (
     Position, Property, Effects, Font, PageSettings,
 )
 
-from .common import KICAD_CLI, SYMBOL_LIB_MAP, CUSTOM_SYMBOL_LIBS, uid, snap
+from .common import KICAD_CLI, KICAD_SYM_DIR, SYMBOL_LIB_MAP, CUSTOM_SYMBOL_LIBS, uid, snap
 
 
 # ==============================================================
@@ -59,7 +60,7 @@ def _parse_pin_hide_flags(lib_path, wanted):
 
     Returns {sym_name: (hide_pin_numbers: bool, hide_pin_names: bool)}.
     """
-    text = open(lib_path, "r", encoding="utf-8").read()
+    text = Path(lib_path).read_text(encoding="utf-8")
     result = {}
     for sym_name in wanted:
         # Match the top-level symbol block header (one-tab indent)
@@ -108,7 +109,7 @@ def load_lib_symbols():
     symbols = {}
     raw_texts = {}  # sym_name -> raw s-expression text from library file
 
-    kicad_sym_dir = r"C:\Program Files\KiCad\9.0\share\kicad\symbols"
+    kicad_sym_dir = Path(KICAD_SYM_DIR)
     stock_libs = {
         "74xGxx.kicad_sym": [
             "74LVC1G00", "74LVC1G04", "74LVC1G08",
@@ -121,15 +122,22 @@ def load_lib_symbols():
             "Conn_01x04", "Conn_01x12", "Conn_01x14", "Conn_01x16", "Conn_01x24",
             "Conn_02x04_Odd_Even", "Conn_02x08_Odd_Even",
         ],
+        # TestPoint is used as a hidden pin anchor for labeled nets in the
+        # root sheet.  KiCad 10 ERC flags labels as 'dangling' unless their
+        # net contains at least one symbol pin in the same sheet -- sub-sheet
+        # pins inside hierarchy blocks don't count.  Placing one TestPoint
+        # per labeled internal signal satisfies the check.
+        "Connector.kicad_sym": ["TestPoint"],
     }
     for lib_file, wanted in stock_libs.items():
-        lib_path = os.path.join(kicad_sym_dir, lib_file)
-        if not os.path.exists(lib_path):
+        lib_path = kicad_sym_dir / lib_file
+        if not lib_path.exists():
             raise FileNotFoundError(
                 f"KiCad stock library not found: {lib_path}\n"
-                "Install KiCad 9.0 or adjust kicad_sym_dir path."
+                "Install KiCad (via apt/brew/installer) or set the "
+                "KICAD_SYM_DIR environment variable."
             )
-        lib_text = open(lib_path, "r", encoding="utf-8").read()
+        lib_text = lib_path.read_text(encoding="utf-8")
         lib_prefix = ""
         # Determine the library prefix from SYMBOL_LIB_MAP
         for sn in wanted:
@@ -153,7 +161,7 @@ def load_lib_symbols():
                 )
                 raw_texts[sn] = fixed
 
-        lib = SymbolLib.from_file(lib_path)
+        lib = SymbolLib.from_file(str(lib_path))
         for sym in lib.symbols:
             if sym.libId in wanted:
                 hn, hname = hide_flags.get(sym.libId, (False, False))
@@ -164,15 +172,15 @@ def load_lib_symbols():
                 symbols[sym.libId] = sym
 
     # Load custom symbol libraries (project-local)
-    custom_sym_dir = os.path.normpath(os.path.join(
-        os.path.dirname(__file__), "..", "..", "..",
-        "shared", "kicad-lib", "symbols"))
+    custom_sym_dir = (Path(__file__).resolve().parent
+                      / ".." / ".." / ".."
+                      / "shared" / "kicad-lib" / "symbols").resolve()
     for lib_file, wanted in CUSTOM_SYMBOL_LIBS.items():
-        lib_path = os.path.join(custom_sym_dir, lib_file)
-        if not os.path.exists(lib_path):
+        lib_path = custom_sym_dir / lib_file
+        if not lib_path.exists():
             raise FileNotFoundError(
                 f"Custom symbol library not found: {lib_path}")
-        lib_text = open(lib_path, "r", encoding="utf-8").read()
+        lib_text = lib_path.read_text(encoding="utf-8")
         lib_prefix = ""
         for sn in wanted:
             if sn in SYMBOL_LIB_MAP:
@@ -189,7 +197,7 @@ def load_lib_symbols():
                     1,
                 )
                 raw_texts[sn] = fixed
-        lib = SymbolLib.from_file(lib_path)
+        lib = SymbolLib.from_file(str(lib_path))
         for sym in lib.symbols:
             if sym.libId in wanted:
                 hn, hname = hide_flags.get(sym.libId, (False, False))
@@ -346,6 +354,9 @@ def discover_pin_offsets(board_dir=None):
         ("LED_Small", "D", 180),
         ("Conn_01x16", "J", 0),
         ("Conn_01x16", "J", 180),
+        # TestPoint used as a hidden pin anchor on labeled internal signal
+        # nets (see notes in load_lib_symbols for rationale).
+        ("TestPoint", "TP", 0),
     ]
     origin = (100.0, 100.0)
     offsets = {}

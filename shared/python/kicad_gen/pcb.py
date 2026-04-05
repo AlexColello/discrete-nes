@@ -1454,6 +1454,16 @@ class PCBBuilder:
         self.board.to_file(filepath)
         self._fix_footprints(filepath, hide_text=hide_text)
 
+        # Apply the full text-based silk fixup that route_pcb.py normally
+        # applies post-routing.  Without this, KiCad 10's stricter
+        # ``silk_overlap`` DRC check reports Circle-of-D vs Segment-of-U
+        # warnings on the pre-routed board (the LED polarity dot and the
+        # adjacent DSBGA IC silk outline are ~1 mm apart in our tight
+        # layout).  Running the pass here keeps the pre-routing DRC clean
+        # and matches what the final routed board looks like.
+        if fix_led_silk:
+            remove_silkscreen_graphics(filepath)
+
     def _fix_footprints(self, filepath: str, hide_text: bool = False):
         """Post-process saved PCB to fix kiutils footprint serialization.
 

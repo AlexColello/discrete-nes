@@ -95,10 +95,18 @@ discrete-nes/
 python -m venv venv
 
 # Install dependencies
+# Linux / macOS:
+source venv/bin/activate && pip install -r requirements.txt
+# Windows:
 source venv/Scripts/activate && pip install -r requirements.txt
 ```
 
-**CRITICAL: Always activate the venv before running ANY Python script.** Prefix every Python command with `source venv/Scripts/activate &&` (the venv is at the repo root). Shell state doesn't persist between Bash tool calls, so you must source it every time.
+**CRITICAL: Always activate the venv before running ANY Python script.** The activate path differs by OS:
+
+- Linux / macOS: `source venv/bin/activate`
+- Windows (Git Bash): `source venv/Scripts/activate`
+
+Shell state doesn't persist between Bash tool calls, so you must source it every time. Prefix every Python command with the activate line.
 
 ### Generate & Verify (mandatory workflow)
 
@@ -106,6 +114,10 @@ Every board has a generate script and a verify script. **Always run both.** This
 
 ```bash
 cd boards/ram-prototype
+# Linux/macOS:
+source ../../venv/bin/activate && python scripts/generate_ram.py
+source ../../venv/bin/activate && python scripts/verify_schematics.py
+# Windows:
 source ../../venv/Scripts/activate && python scripts/generate_ram.py
 source ../../venv/Scripts/activate && python scripts/verify_schematics.py
 ```
@@ -213,6 +225,24 @@ python scripts/parse_pdf.py datasheet.pdf --info         # metadata
 - Connector pad numbers generalized (pin index isn't structural)
 - Track lengths rounded to 0.1mm
 - Power nets (`GND`, `VCC`) kept as-is
+
+## Cross-Platform & KiCad Version Notes
+
+**The project supports both Windows (KiCad 9) and Linux (KiCad 10).** Key paths in `shared/python/kicad_gen/common.py` are auto-detected per platform; override via environment variables `KICAD_CLI`, `KICAD_FP_DIR`, `KICAD_SYM_DIR`, `KICAD_PYTHON`.
+
+**kiutils** — the project uses the published PyPI version (currently 1.4.8). `requirements.txt` pins `>=1.4.8`. Do not install older versions; wire connectivity and pin hide-flag handling depend on features added in the 1.4.x series.
+
+**KiCad 10 ERC behavior changes** (affect Linux only — Windows still runs KiCad 9):
+
+- **Labels require a symbol pin in the same sheet.** KiCad 9 was fine with `sheet_pin → wire → label` in the root sheet, but KiCad 10 flags the label as `label_dangling` unless the label's net contains at least one symbol pin *in the same schematic file*. Sub-sheet pins inside hierarchy blocks don't count, even when the sub-sheet has symbol pins connected to its hierarchical label.
+- **Fix: `SchematicBuilder.place_pin_anchor(x, y)`** places a hidden `Connector:TestPoint` (reference prefix `#TP`, `in_bom=False`) whose pin 1 lands exactly on `(x, y)`. Call it once per labeled internal net at the source label position. `#TP` references are excluded from the netlist export by KiCad (same treatment as `#PWR`/`#FLG`), so the TestPoints never reach the PCB.
+- **In `boards/ram-prototype/scripts/generate_ram.py`** this is applied to: `WRITE_ACTIVE`, `READ_EN`, `WRITE_EN_ROW_0..3`, `READ_EN_ROW_0..3`, `COL_SEL_0`, `COL_SEL_1`. Connector-driven signals (`nCE`/`nOE`/`nWE`, `D0..7`, `A0..10`, `DEC3_*`, `DEC4_*`, `COL_SEL_2..15`) don't need anchors because their nets already contain connector pins.
+- **Standalone sub-sheet ERC** also flags hierarchical labels as `isolated_pin_label` in KiCad 10 (their remote pin is in the parent sheet). `_is_standalone_artifact()` in `verify.py` filters these out.
+
+**KiCad 10 DRC behavior changes:**
+
+- `silk_overlap` is enforced more strictly. Existing pre-routing silkscreen overlaps (0402 LED circle vs DSBGA IC silk) show up as warnings. The routing pipeline (`route_pcb.py`) strips silk anyway, so these are suppressed post-route. Do not add `silk_overlap` to the pre-routing skip list without user confirmation.
+- `solder_mask_bridge` severity was bumped from warning → error. The 2 intentional mask bridges in `ram_routed.kicad_pcb` (cosmetic, flagged in KiCad 9 as warnings) now register as errors in KiCad 10 but are still accepted by the fabs.
 
 ## Technology Stack & Research Findings
 
